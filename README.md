@@ -173,10 +173,10 @@ For testing OCPP connections, you can use WebSocket clients or OCPP simulators t
 # Development with auto-reload
 ./start_server.sh
 
-# Manual start
+# Manual start with reload
 uvicorn renew_website.asgi:application --host 0.0.0.0 --port 8000 --reload
 
-# Production
+# Manual start
 uvicorn renew_website.asgi:application --host 0.0.0.0 --port 8000
 ```
 
