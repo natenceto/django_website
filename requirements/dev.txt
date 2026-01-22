@@ -1,0 +1,14 @@
+# Everything the developer needs in addition to the production requirements
+-r prod.txt
+-r test.txt
+
+# Code quality
+mypy==1.17.0
+black==24.10.0
+isort==5.13.2
+flake8==7.1.1
+
+# Development tools
+django-debug-toolbar==4.4.6
+ipython==8.29.0
+python-dotenv

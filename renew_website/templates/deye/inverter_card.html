@@ -1,0 +1,28 @@
+{% load energy_tags %}
+
+<div class="bg-white rounded-lg shadow-md p-4 hover:shadow-lg transition-shadow">
+    <div class="flex items-center justify-between mb-3">
+        <div class="flex items-center">
+            <span class="w-3 h-3 rounded-full mr-2 {% if inverter.connect_status == 1 %}bg-green-500{% else %}bg-red-500{% endif %}"></span>
+            <h3 class="font-semibold text-gray-900">{{ inverter.device_sn }}</h3>
+        </div>
+        <span class="text-xs text-gray-500">{{ inverter.device_type }}</span>
+    </div>
+    
+    <div class="grid grid-cols-2 gap-3 text-sm">
+        <div class="bg-gray-50 rounded p-2">
+            <div class="text-gray-600 text-xs">Generation</div>
+            <div class="font-semibold text-green-600">{{ reading.generation_power|format_power }}</div>
+        </div>
+        <div class="bg-gray-50 rounded p-2">
+            <div class="text-gray-600 text-xs">Battery</div>
+            <div class="font-semibold" style="color: {{ reading.battery_soc|get_battery_color }};">{{ reading.battery_soc|format_percentage }}</div>
+        </div>
+    </div>
+    
+    <div class="mt-3 text-xs text-gray-500">
+        <div>Device ID: {{ inverter.device_id }}</div>
+        <div>Product: {{ inverter.product_id }}</div>
+        <div>Last update: {{ reading.timestamp|time:"H:i" }}</div>
+    </div>
+</div>

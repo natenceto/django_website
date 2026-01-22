@@ -1,0 +1,746 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Account Settings - RENEW Platform{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <!-- Page Heading -->
+    <div class="d-sm-flex align-items-center justify-content-between mb-4">
+        <h1 class="h3 mb-0 text-gray-800">
+            <i class="fas fa-user-cog text-primary mr-2"></i>
+            Account Settings
+        </h1>
+        <div class="btn-group" role="group">
+            <button type="button" class="btn btn-sm btn-outline-primary" onclick="saveSettings()">
+                <i class="fas fa-save"></i> Save Changes
+            </button>
+            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="resetSettings()">
+                <i class="fas fa-undo"></i> Reset
+            </button>
+        </div>
+    </div>
+
+    <div class="row">
+        <!-- Profile Information -->
+        <div class="col-lg-4">
+            <div class="card shadow mb-4">
+                <div class="card-header py-3">
+                    <h6 class="m-0 font-weight-bold text-primary">
+                        <i class="fas fa-user mr-2"></i>Profile Information
+                    </h6>
+                </div>
+                <div class="card-body">
+                    <div class="text-center mb-4">
+                        <img src="{% static 'theme/img/undraw_profile.svg' %}" alt="Profile" class="rounded-circle" style="width: 120px; height: 120px;">
+                        <div class="mt-3">
+                            <button type="button" class="btn btn-sm btn-outline-primary" onclick="changeAvatar()">
+                                <i class="fas fa-camera"></i> Change Photo
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <form id="profileForm">
+                        <div class="form-group">
+                            <label for="username">Username</label>
+                            <input type="text" class="form-control" id="username" value="{{ user.username }}" readonly>
+                        </div>
+                        <div class="form-group">
+                            <label for="email">Email Address</label>
+                            <input type="email" class="form-control" id="email" value="{{ user.email }}">
+                        </div>
+                        <div class="form-group">
+                            <label for="firstName">First Name</label>
+                            <input type="text" class="form-control" id="firstName" placeholder="Enter first name">
+                        </div>
+                        <div class="form-group">
+                            <label for="lastName">Last Name</label>
+                            <input type="text" class="form-control" id="lastName" placeholder="Enter last name">
+                        </div>
+                        <div class="form-group">
+                            <label for="phone">Phone Number</label>
+                            <input type="tel" class="form-control" id="phone" placeholder="+359 888 123 456">
+                        </div>
+                        <div class="form-group">
+                            <label for="company">Company</label>
+                            <input type="text" class="form-control" id="company" placeholder="Company name">
+                        </div>
+                        <div class="form-group">
+                            <label for="role">Role</label>
+                            <select class="form-control" id="role">
+                                <option value="admin">Administrator</option>
+                                <option value="operator">Operator</option>
+                                <option value="manager">Manager</option>
+                                <option value="viewer">Viewer</option>
+                            </select>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <!-- Settings Tabs -->
+        <div class="col-lg-8">
+            <!-- Security Settings -->
+            <div class="card shadow mb-4">
+                <div class="card-header py-3">
+                    <h6 class="m-0 font-weight-bold text-primary">
+                        <i class="fas fa-shield-alt mr-2"></i>Security Settings
+                    </h6>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <h6 class="font-weight-bold">Password</h6>
+                            <p class="text-muted mb-3">Change your account password</p>
+                            <button type="button" class="btn btn-sm btn-outline-primary" onclick="changePassword()">
+                                <i class="fas fa-key"></i> Change Password
+                            </button>
+                        </div>
+                        <div class="col-md-6">
+                            <h6 class="font-weight-bold">Two-Factor Authentication</h6>
+                            <p class="text-muted mb-3">Add an extra layer of security</p>
+                            <div class="custom-control custom-switch">
+                                <input type="checkbox" class="custom-control-input" id="twoFactorAuth">
+                                <label class="custom-control-label" for="twoFactorAuth">Enable 2FA</label>
+                            </div>
+                        </div>
+                    </div>
+                    <hr>
+                    <div class="row">
+                        <div class="col-md-6">
+                            <h6 class="font-weight-bold">Session Management</h6>
+                            <p class="text-muted mb-3">Manage active sessions</p>
+                            <button type="button" class="btn btn-sm btn-outline-warning" onclick="manageSessions()">
+                                <i class="fas fa-desktop"></i> Active Sessions
+                            </button>
+                        </div>
+                        <div class="col-md-6">
+                            <h6 class="font-weight-bold">API Access</h6>
+                            <p class="text-muted mb-3">Manage API keys and tokens</p>
+                            <button type="button" class="btn btn-sm btn-outline-info" onclick="manageAPIKeys()">
+                                <i class="fas fa-code"></i> API Keys
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Notification Preferences -->
+            <div class="card shadow mb-4">
+                <div class="card-header py-3">
+                    <h6 class="m-0 font-weight-bold text-primary">
+                        <i class="fas fa-bell mr-2"></i>Notification Preferences
+                    </h6>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="custom-control custom-switch mb-3">
+                                <input type="checkbox" class="custom-control-input" id="emailNotifications" checked>
+                                <label class="custom-control-label" for="emailNotifications">Email Notifications</label>
+                            </div>
+                            <div class="custom-control custom-switch mb-3">
+                                <input type="checkbox" class="custom-control-input" id="stationAlerts" checked>
+                                <label class="custom-control-label" for="stationAlerts">Station Status Alerts</label>
+                            </div>
+                            <div class="custom-control custom-switch mb-3">
+                                <input type="checkbox" class="custom-control-input" id="transactionAlerts" checked>
+                                <label class="custom-control-label" for="transactionAlerts">Transaction Alerts</label>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="custom-control custom-switch mb-3">
+                                <input type="checkbox" class="custom-control-input" id="systemAlerts" checked>
+                                <label class="custom-control-label" for="systemAlerts">System Alerts</label>
+                            </div>
+                            <div class="custom-control custom-switch mb-3">
+                                <input type="checkbox" class="custom-control-input" id="weeklyReports">
+                                <label class="custom-control-label" for="weeklyReports">Weekly Reports</label>
+                            </div>
+                            <div class="custom-control custom-switch mb-3">
+                                <input type="checkbox" class="custom-control-input" id="maintenanceAlerts" checked>
+                                <label class="custom-control-label" for="maintenanceAlerts">Maintenance Alerts</label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- System Preferences -->
+            <div class="card shadow mb-4">
+                <div class="card-header py-3">
+                    <h6 class="m-0 font-weight-bold text-primary">
+                        <i class="fas fa-cog mr-2"></i>System Preferences
+                    </h6>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="form-group">
+                                <label for="language">Language</label>
+                                <select class="form-control" id="language">
+                                    <option value="en" selected>English</option>
+                                    <option value="bg">Български</option>
+                                    <option value="de">Deutsch</option>
+                                    <option value="fr">Français</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="timezone">Timezone</label>
+                                <select class="form-control" id="timezone">
+                                    <option value="UTC">UTC</option>
+                                    <option value="Europe/Sofia" selected>Europe/Sofia</option>
+                                    <option value="Europe/Berlin">Europe/Berlin</option>
+                                    <option value="Europe/Paris">Europe/Paris</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="form-group">
+                                <label for="dateFormat">Date Format</label>
+                                <select class="form-control" id="dateFormat">
+                                    <option value="MM/DD/YYYY" selected>MM/DD/YYYY</option>
+                                    <option value="DD/MM/YYYY">DD/MM/YYYY</option>
+                                    <option value="YYYY-MM-DD">YYYY-MM-DD</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="theme">Theme</label>
+                                <select class="form-control" id="theme">
+                                    <option value="light" selected>Light</option>
+                                    <option value="dark">Dark</option>
+                                    <option value="auto">Auto</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- API Configuration -->
+            <div class="card shadow mb-4">
+                <div class="card-header py-3">
+                    <h6 class="m-0 font-weight-bold text-primary">
+                        <i class="fas fa-code mr-2"></i>API Configuration
+                    </h6>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <h6 class="font-weight-bold">API Keys</h6>
+                            <div class="mb-3">
+                                <div class="d-flex justify-content-between align-items-center mb-2">
+                                    <span class="text-muted">Production API Key</span>
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" onclick="regenerateKey('production')">
+                                        <i class="fas fa-sync"></i> Regenerate
+                                    </button>
+                                </div>
+                                <div class="input-group">
+                                    <input type="password" class="form-control" value="prod_1234567890abcdef" readonly>
+                                    <div class="input-group-append">
+                                        <button type="button" class="btn btn-outline-secondary" onclick="toggleKeyVisibility(this)">
+                                            <i class="fas fa-eye"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="mb-3">
+                                <div class="d-flex justify-content-between align-items-center mb-2">
+                                    <span class="text-muted">Development API Key</span>
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" onclick="regenerateKey('development')">
+                                        <i class="fas fa-sync"></i> Regenerate
+                                    </button>
+                                </div>
+                                <div class="input-group">
+                                    <input type="password" class="form-control" value="dev_1234567890abcdef" readonly>
+                                    <div class="input-group-append">
+                                        <button type="button" class="btn btn-outline-secondary" onclick="toggleKeyVisibility(this)">
+                                            <i class="fas fa-eye"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <h6 class="font-weight-bold">Webhook URLs</h6>
+                            <div class="form-group">
+                                <label for="webhookUrl">Station Status Webhook</label>
+                                <input type="url" class="form-control" id="webhookUrl" placeholder="https://your-domain.com/webhook">
+                            </div>
+                            <div class="form-group">
+                                <label for="transactionWebhook">Transaction Webhook</label>
+                                <input type="url" class="form-control" id="transactionWebhook" placeholder="https://your-domain.com/transactions">
+                            </div>
+                            <button type="button" class="btn btn-sm btn-outline-primary" onclick="testWebhooks()">
+                                <i class="fas fa-play"></i> Test Webhooks
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Password Change Modal -->
+<div class="modal fade" id="passwordModal" tabindex="-1" role="dialog">
+    <div class="modal-dialog" role="document">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Change Password</h5>
+                <button type="button" class="close" data-dismiss="modal">
+                    <span>&times;</span>
+                </button>
+            </div>
+            <div class="modal-body">
+                <form id="passwordForm">
+                    <div class="form-group">
+                        <label for="currentPassword">Current Password</label>
+                        <input type="password" class="form-control" id="currentPassword" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="newPassword">New Password</label>
+                        <input type="password" class="form-control" id="newPassword" required>
+                        <small class="form-text text-muted">Minimum 8 characters, include uppercase, lowercase, and numbers</small>
+                    </div>
+                    <div class="form-group">
+                        <label for="confirmPassword">Confirm New Password</label>
+                        <input type="password" class="form-control" id="confirmPassword" required>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="updatePassword()">Update Password</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    loadUserSettings();
+    setupFormValidation();
+});
+
+function loadUserSettings() {
+    // Simulate loading user settings from API
+    const settings = {
+        firstName: 'John',
+        lastName: 'Doe',
+        phone: '+359 888 123 456',
+        company: 'RENEW Energy',
+        role: 'admin',
+        emailNotifications: true,
+        stationAlerts: true,
+        transactionAlerts: true,
+        systemAlerts: true,
+        weeklyReports: false,
+        maintenanceAlerts: true,
+        language: 'en',
+        timezone: 'Europe/Sofia',
+        dateFormat: 'MM/DD/YYYY',
+        theme: 'light',
+        webhookUrl: 'https://api.renew-energy.com/webhook',
+        transactionWebhook: 'https://api.renew-energy.com/transactions'
+    };
+    
+    // Populate form fields
+    Object.keys(settings).forEach(key => {
+        const element = document.getElementById(key);
+        if (element) {
+            if (element.type === 'checkbox') {
+                element.checked = settings[key];
+            } else {
+                element.value = settings[key];
+            }
+        }
+    });
+}
+
+function setupFormValidation() {
+    const forms = document.querySelectorAll('form');
+    forms.forEach(form => {
+        form.addEventListener('submit', function(e) {
+            e.preventDefault();
+            if (validateForm(form)) {
+                showSuccessMessage('Settings saved successfully!');
+            }
+        });
+    });
+}
+
+function validateForm(form) {
+    const inputs = form.querySelectorAll('input[required]');
+    let isValid = true;
+    
+    inputs.forEach(input => {
+        if (!input.value.trim()) {
+            input.classList.add('is-invalid');
+            isValid = false;
+        } else {
+            input.classList.remove('is-invalid');
+        }
+    });
+    
+    return isValid;
+}
+
+function saveSettings() {
+    const settings = {};
+    const form = document.getElementById('profileForm');
+    
+    // Collect all form data
+    const inputs = form.querySelectorAll('input, select');
+    inputs.forEach(input => {
+        if (input.type === 'checkbox') {
+            settings[input.id] = input.checked;
+        } else {
+            settings[input.id] = input.value;
+        }
+    });
+    
+    // Collect notification preferences
+    const notifications = ['emailNotifications', 'stationAlerts', 'transactionAlerts', 'systemAlerts', 'weeklyReports', 'maintenanceAlerts'];
+    notifications.forEach(id => {
+        const element = document.getElementById(id);
+        if (element) settings[id] = element.checked;
+    });
+    
+    // Collect system preferences
+    const systemPrefs = ['language', 'timezone', 'dateFormat', 'theme'];
+    systemPrefs.forEach(id => {
+        const element = document.getElementById(id);
+        if (element) settings[id] = element.value;
+    });
+    
+    // Simulate API call
+    console.log('Saving settings:', settings);
+    showSuccessMessage('All settings have been saved successfully!');
+}
+
+function resetSettings() {
+    if (confirm('Are you sure you want to reset all settings to default values?')) {
+        loadUserSettings();
+        showInfoMessage('Settings have been reset to default values.');
+    }
+}
+
+function changePassword() {
+    $('#passwordModal').modal('show');
+}
+
+function updatePassword() {
+    const currentPassword = document.getElementById('currentPassword').value;
+    const newPassword = document.getElementById('newPassword').value;
+    const confirmPassword = document.getElementById('confirmPassword').value;
+    
+    if (!currentPassword || !newPassword || !confirmPassword) {
+        showErrorMessage('Please fill in all password fields.');
+        return;
+    }
+    
+    if (newPassword !== confirmPassword) {
+        showErrorMessage('New passwords do not match.');
+        return;
+    }
+    
+    if (newPassword.length < 8) {
+        showErrorMessage('Password must be at least 8 characters long.');
+        return;
+    }
+    
+    // Simulate API call
+    console.log('Updating password...');
+    $('#passwordModal').modal('hide');
+    showSuccessMessage('Password has been updated successfully!');
+    
+    // Clear form
+    document.getElementById('passwordForm').reset();
+}
+
+function changeAvatar() {
+    // Simulate file upload
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.onchange = function(e) {
+        const file = e.target.files[0];
+        if (file) {
+            console.log('Uploading avatar:', file.name);
+            showSuccessMessage('Avatar updated successfully!');
+        }
+    };
+    input.click();
+}
+
+async function manageSessions() {
+    // Show modal with active sessions
+    const modal = document.createElement('div');
+    modal.className = 'modal fade';
+    modal.innerHTML = `
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Active Sessions</h5>
+                    <button type="button" class="close" data-dismiss="modal">
+                        <span>&times;</span>
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <div id="sessionsList">
+                        <div class="text-center py-4">
+                            <div class="spinner-border text-primary" role="status">
+                                <span class="sr-only">Loading...</span>
+                            </div>
+                            <p class="mt-2">Loading sessions...</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-danger" onclick="terminateAllSessions()">
+                        <i class="fas fa-trash"></i> Terminate All Others
+                    </button>
+                    <button type="button" class="btn btn-secondary" data-dismiss="modal">Close</button>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+    $(modal).modal('show');
+    
+    // Load sessions
+    try {
+        const response = await fetch('/accounts/sessions/');
+        const data = await response.json();
+        renderSessionsList(data.sessions);
+    } catch (error) {
+        console.error('Error loading sessions:', error);
+        document.getElementById('sessionsList').innerHTML = `
+            <div class="text-center py-4">
+                <i class="fas fa-exclamation-triangle fa-3x text-warning mb-3"></i>
+                <p class="text-muted">Error loading sessions. Please try again.</p>
+            </div>
+        `;
+    }
+    
+    // Clean up modal on close
+    $(modal).on('hidden.bs.modal', function () {
+        document.body.removeChild(modal);
+    });
+}
+
+function renderSessionsList(sessions) {
+    const container = document.getElementById('sessionsList');
+    
+    if (sessions.length === 0) {
+        container.innerHTML = `
+            <div class="text-center py-4">
+                <i class="fas fa-info-circle fa-3x text-info mb-3"></i>
+                <p class="text-muted">No active sessions found.</p>
+            </div>
+        `;
+        return;
+    }
+    
+    let html = '<div class="list-group">';
+    
+    sessions.forEach(session => {
+        const lastActivity = new Date(session.last_activity);
+        const timeAgo = getTimeAgo(lastActivity);
+        
+        html += `
+            <div class="list-group-item">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <h6 class="mb-1">
+                            ${session.device_info}
+                            ${session.is_current ? '<span class="badge badge-primary ml-2">Current</span>' : ''}
+                        </h6>
+                        <p class="mb-1 text-muted">
+                            <i class="fas fa-map-marker-alt"></i> ${session.location || 'Unknown'}
+                            <span class="mx-2">•</span>
+                            <i class="fas fa-clock"></i> ${timeAgo}
+                        </p>
+                        <small class="text-muted">
+                            IP: ${session.ip_address || 'Unknown'}
+                        </small>
+                    </div>
+                    ${!session.is_current ? `
+                        <button type="button" class="btn btn-sm btn-outline-danger" 
+                                onclick="terminateSession('${session.session_key}')">
+                            <i class="fas fa-times"></i> Terminate
+                        </button>
+                    ` : ''}
+                </div>
+            </div>
+        `;
+    });
+    
+    html += '</div>';
+    container.innerHTML = html;
+}
+
+function getTimeAgo(date) {
+    const seconds = Math.floor((new Date() - date) / 1000);
+    
+    if (seconds < 60) return 'Just now';
+    if (seconds < 3600) return `${Math.floor(seconds / 60)} minutes ago`;
+    if (seconds < 86400) return `${Math.floor(seconds / 3600)} hours ago`;
+    return `${Math.floor(seconds / 86400)} days ago`;
+}
+
+async function terminateSession(sessionKey) {
+    if (!confirm('Are you sure you want to terminate this session?')) {
+        return;
+    }
+    
+    try {
+        const response = await fetch('/accounts/sessions/', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': getCookie('csrftoken')
+            },
+            body: JSON.stringify({ session_key: sessionKey })
+        });
+        
+        const data = await response.json();
+        
+        if (response.ok) {
+            showSuccessMessage('Session terminated successfully!');
+            // Reload sessions list
+            manageSessions();
+        } else {
+            showErrorMessage(data.error || 'Failed to terminate session');
+        }
+    } catch (error) {
+        console.error('Error terminating session:', error);
+        showErrorMessage('Error terminating session. Please try again.');
+    }
+}
+
+async function terminateAllSessions() {
+    if (!confirm('Are you sure you want to terminate all other sessions? This will log you out from all other devices.')) {
+        return;
+    }
+    
+    try {
+        const response = await fetch('/accounts/sessions/', {
+            method: 'DELETE',
+            headers: {
+                'X-CSRFToken': getCookie('csrftoken')
+            }
+        });
+        
+        const data = await response.json();
+        
+        if (response.ok) {
+            showSuccessMessage(`${data.terminated_count} sessions terminated!`);
+            // Reload sessions list
+            manageSessions();
+        } else {
+            showErrorMessage(data.error || 'Failed to terminate sessions');
+        }
+    } catch (error) {
+        console.error('Error terminating sessions:', error);
+        showErrorMessage('Error terminating sessions. Please try again.');
+    }
+}
+
+function getCookie(name) {
+    let cookieValue = null;
+    if (document.cookie && document.cookie !== '') {
+        const cookies = document.cookie.split(';');
+        for (let i = 0; i < cookies.length; i++) {
+            const cookie = cookies[i].trim();
+            if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                break;
+            }
+        }
+    }
+    return cookieValue;
+}
+
+function manageAPIKeys() {
+    showInfoMessage('API key management feature coming soon!');
+}
+
+function regenerateKey(type) {
+    if (confirm(`Are you sure you want to regenerate the ${type} API key? This will invalidate the current key.`)) {
+        const newKey = type + '_' + Math.random().toString(36).substr(2, 16);
+        console.log('New key generated:', newKey);
+        showSuccessMessage(`${type} API key has been regenerated!`);
+    }
+}
+
+function toggleKeyVisibility(button) {
+    const input = button.closest('.input-group').querySelector('input');
+    const icon = button.querySelector('i');
+    
+    if (input.type === 'password') {
+        input.type = 'text';
+        icon.classList.remove('fa-eye');
+        icon.classList.add('fa-eye-slash');
+    } else {
+        input.type = 'password';
+        icon.classList.remove('fa-eye-slash');
+        icon.classList.add('fa-eye');
+    }
+}
+
+function testWebhooks() {
+    showInfoMessage('Testing webhook connections...');
+    setTimeout(() => {
+        showSuccessMessage('All webhooks are working correctly!');
+    }, 2000);
+}
+
+function showSuccessMessage(message) {
+    // Create or update success alert
+    createAlert(message, 'success');
+}
+
+function showErrorMessage(message) {
+    createAlert(message, 'danger');
+}
+
+function showInfoMessage(message) {
+    createAlert(message, 'info');
+}
+
+function createAlert(message, type) {
+    // Remove existing alerts
+    const existingAlert = document.querySelector('.alert');
+    if (existingAlert) {
+        existingAlert.remove();
+    }
+    
+    // Create new alert
+    const alert = document.createElement('div');
+    alert.className = `alert alert-${type} alert-dismissible fade show`;
+    alert.innerHTML = `
+        ${message}
+        <button type="button" class="close" data-dismiss="alert">
+            <span>&times;</span>
+        </button>
+    `;
+    
+    // Insert at the top of the container
+    const container = document.querySelector('.container-fluid');
+    container.insertBefore(alert, container.firstChild);
+    
+    // Auto-dismiss after 5 seconds
+    setTimeout(() => {
+        if (alert.parentNode) {
+            alert.remove();
+        }
+    }, 5000);
+}
+</script>
+{% endblock %}

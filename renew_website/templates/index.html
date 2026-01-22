@@ -1,0 +1,368 @@
+<!-- Dashboard -->
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %} RENEW | Dashboard {% endblock%}
+
+{% block content %}
+<!-- Page Heading -->
+<div class="d-sm-flex align-items-center justify-content-between mb-4">
+    <h1 class="h3 mb-0 text-gray-800">Charging Station Dashboard</h1>
+    <div>
+        <a href="{% url 'charging_stations:stations' %}?tab=list" class="btn btn-sm btn-info shadow-sm mr-2">
+            <i class="fas fa-tachometer-alt fa-sm text-white-50"></i> View All Stations
+        </a>
+        <a href="#" class="btn btn-sm btn-primary shadow-sm">
+            <i class="fas fa-download fa-sm text-white-50"></i> Generate Report
+        </a>
+    </div>
+</div>
+
+<!-- Status Cards Row -->
+<div class="row">
+    <!-- Active Charging Sessions -->
+    <div class="col-xl-3 col-md-6 mb-4">
+        <div class="card border-left-primary shadow h-100 py-2">
+            <div class="card-body">
+                <div class="row no-gutters align-items-center">
+                    <div class="col mr-2">
+                        <div class="text-xs font-weight-bold text-primary text-uppercase mb-1">
+                            Active Charging Sessions</div>
+                        <div class="h5 mb-0 font-weight-bold text-gray-800" id="activeSessions">0</div>
+                        <div class="text-xs text-muted mt-1"><span id="totalSessions">0</span> total today</div>
+                    </div>
+                    <div class="col-auto">
+                        <i class="fas fa-bolt fa-2x text-gray-300"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Total Energy Delivered -->
+    <div class="col-xl-3 col-md-6 mb-4">
+        <div class="card border-left-success shadow h-100 py-2">
+            <div class="card-body">
+                <div class="row no-gutters align-items-center">
+                    <div class="col mr-2">
+                        <div class="text-xs font-weight-bold text-success text-uppercase mb-1">
+                            Energy Delivered (Today)</div>
+                        <div class="h5 mb-0 font-weight-bold text-gray-800" id="energyDelivered">0.0</div>
+                        <div class="text-xs text-muted mt-1"><span id="energyUnit">kWh</span> total</div>
+                    </div>
+                    <div class="col-auto">
+                        <i class="fas fa-battery-three-quarters fa-2x text-gray-300"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Station Status -->
+    <div class="col-xl-3 col-md-6 mb-4">
+        <div class="card border-left-info shadow h-100 py-2">
+            <div class="card-body">
+                <div class="row no-gutters align-items-center">
+                    <div class="col mr-2">
+                        <div class="text-xs font-weight-bold text-info text-uppercase mb-1">
+                            Station Status</div>
+                        <div class="row no-gutters align-items-center">
+                            <div class="col-auto">
+                                <div class="h5 mb-0 mr-3 font-weight-bold text-gray-800">
+                                    <span id="onlineStations">0</span>/<span id="totalStations">0</span>
+                                </div>
+                            </div>
+                            <div class="col">
+                                <div class="progress progress-sm mr-2">
+                                    <div id="stationStatusBar" class="progress-bar bg-info" role="progressbar" 
+                                         style="width: 0%" aria-valuenow="0" aria-valuemin="0" 
+                                         aria-valuemax="100"></div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="text-xs text-muted mt-1"><span id="availableStations">0</span> available</div>
+                    </div>
+                    <div class="col-auto">
+                        <i class="fas fa-charging-station fa-2x text-gray-300"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Revenue -->
+    <div class="col-xl-3 col-md-6 mb-4">
+        <div class="card border-left-warning shadow h-100 py-2">
+            <div class="card-body">
+                <div class="row no-gutters align-items-center">
+                    <div class="col mr-2">
+                        <div class="text-xs font-weight-bold text-warning text-uppercase mb-1">
+                            Today's Revenue</div>
+                        <div class="h5 mb-0 font-weight-bold text-gray-800" id="todayRevenue">$0.00</div>
+                        <div class="text-xs text-muted mt-1"><span id="monthlyRevenue">$0.00</span> this month</div>
+                    </div>
+                    <div class="col-auto">
+                        <i class="fas fa-euro-sign fa-2x text-gray-300"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Active Charging Sessions -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card shadow">
+            <div class="card-header py-3 d-flex flex-row align-items-center justify-content-between">
+                <h6 class="m-0 font-weight-bold text-primary">Active Charging Sessions</h6>
+                <div class="dropdown no-arrow">
+                    <a class="dropdown-toggle" href="#" role="button" id="dropdownMenuLink" data-toggle="dropdown"
+                        aria-haspopup="true" aria-expanded="false">
+                        <i class="fas fa-ellipsis-v fa-sm fa-fw text-gray-400"></i>
+                    </a>
+                    <div class="dropdown-menu dropdown-menu-right shadow animated--fade-in"
+                        aria-labelledby="dropdownMenuLink">
+                        <a class="dropdown-item" href="#" id="refreshSessions">Refresh</a>
+                        <a class="dropdown-item" href="#" data-toggle="modal" data-target="#startChargingModal">
+                            <i class="fas fa-bolt mr-2"></i>Start New Session
+                        </a>
+                    </div>
+                </div>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-hover" id="activeSessionsTable">
+                        <thead class="thead-light">
+                            <tr>
+                                <th>Station</th>
+                                <th>Connector</th>
+                                <th>Vehicle</th>
+                                <th>Progress</th>
+                                <th>Energy (kWh)</th>
+                                <th>Duration</th>
+                                <th>Status</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="activeSessionsBody">
+                            <tr>
+                                <td colspan="8" class="text-center py-4">
+                                    <div class="spinner-border text-primary" role="status">
+                                        <span class="sr-only">Loading...</span>
+                                    </div>
+                                    <p class="mt-2 mb-0">Loading active sessions...</p>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Energy Usage and Station Status -->
+<div class="row">
+    <!-- Energy Consumption -->
+    <div class="col-xl-8 col-lg-7 mb-4">
+        <div class="card shadow">
+            <div class="card-header py-3 d-flex flex-row align-items-center justify-content-between">
+                <h6 class="m-0 font-weight-bold text-primary">Energy Consumption (Last 24 Hours)</h6>
+                <div class="dropdown no-arrow">
+                    <select class="form-control form-control-sm" id="timeRangeSelect">
+                        <option value="24h">Last 24 Hours</option>
+                        <option value="7d">Last 7 Days</option>
+                        <option value="30d">Last 30 Days</option>
+                    </select>
+                </div>
+            </div>
+            <div class="card-body">
+                <div class="chart-area">
+                    <canvas id="energyConsumptionChart"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Station Status -->
+    <div class="col-xl-4 col-lg-5 mb-4">
+        <div class="card shadow">
+            <div class="card-header py-3">
+                <h6 class="m-0 font-weight-bold text-primary">Station Status</h6>
+            </div>
+            <div class="card-body">
+                <div id="stationStatusChart" style="height: 300px;">
+                    <div class="text-center py-4">
+                        <div class="spinner-border text-primary" role="status">
+                            <span class="sr-only">Loading...</span>
+                        </div>
+                        <p class="mt-2 mb-0">Loading station status...</p>
+                    </div>
+                </div>
+                <div class="mt-3 small">
+                    <span class="mr-2">
+                        <i class="fas fa-circle text-success"></i> Available
+                    </span>
+                    <span class="mr-2">
+                        <i class="fas fa-circle text-warning"></i> Charging
+                    </span>
+                    <span class="mr-2">
+                        <i class="fas fa-circle text-danger"></i> Faulted
+                    </span>
+                    <span class="mr-2">
+                        <i class="fas fa-circle text-secondary"></i> Offline
+                    </span>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Recent Transactions and Alerts -->
+<div class="row">
+    <!-- Recent Transactions -->
+    <div class="col-lg-8 mb-4">
+        <div class="card shadow mb-4">
+            <div class="card-header py-3">
+                <h6 class="m-0 font-weight-bold text-primary">Recent Transactions</h6>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-bordered" id="recentTransactions" width="100%" cellspacing="0">
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Station</th>
+                                <th>Start Time</th>
+                                <th>Duration</th>
+                                <th>Energy (kWh)</th>
+                                <th>Cost</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="recentTransactionsBody">
+                            <tr>
+                                <td colspan="7" class="text-center py-4">
+                                    <div class="spinner-border text-primary" role="status">
+                                        <span class="sr-only">Loading...</span>
+                                    </div>
+                                    <p class="mt-2 mb-0">Loading recent transactions...</p>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="text-right mt-3">
+                    <a href="#" class="btn btn-sm btn-primary">View All Transactions</a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- System Alerts -->
+    <div class="col-lg-4 mb-4">
+        <div class="card shadow mb-4">
+            <div class="card-header py-3 d-flex flex-row align-items-center justify-content-between">
+                <h6 class="m-0 font-weight-bold text-primary">System Alerts</h6>
+                <div class="dropdown no-arrow">
+                    <a class="dropdown-toggle" href="#" role="button" id="alertsDropdown" data-toggle="dropdown"
+                        aria-haspopup="true" aria-expanded="false">
+                        <i class="fas fa-ellipsis-v fa-sm fa-fw text-gray-400"></i>
+                    </a>
+                    <div class="dropdown-menu dropdown-menu-right shadow animated--fade-in"
+                        aria-labelledby="alertsDropdown">
+                        <a class="dropdown-item" href="#" id="markAllRead">Mark all as read</a>
+                        <a class="dropdown-item" href="#" data-toggle="modal" data-target="#alertSettingsModal">
+                            <i class="fas fa-cog mr-2"></i>Alert Settings
+                        </a>
+                    </div>
+                </div>
+            </div>
+            <div class="card-body">
+                <div id="systemAlerts">
+                    <div class="alert alert-warning alert-dismissible fade show" role="alert">
+                        <strong>Station #3</strong> - Charging interrupted. Check connection.
+                        <button type="button" class="close" data-dismiss="alert" aria-label="Close">
+                            <span aria-hidden="true">&times;</span>
+                        </button>
+                        <div class="small text-muted mt-1">2 minutes ago</div>
+                    </div>
+                    <div class="alert alert-info alert-dismissible fade show" role="alert">
+                        <strong>Station #1</strong> - Charging session completed.
+                        <button type="button" class="close" data-dismiss="alert" aria-label="Close">
+                            <span aria-hidden="true">&times;</span>
+                        </button>
+                        <div class="small text-muted mt-1">15 minutes ago</div>
+                    </div>
+                    <div class="alert alert-success alert-dismissible fade show" role="alert">
+                        <strong>System</strong> - All systems operational.
+                        <button type="button" class="close" data-dismiss="alert" aria-label="Close">
+                            <span aria-hidden="true">&times;</span>
+                        </button>
+                        <div class="small text-muted mt-1">1 hour ago</div>
+                    </div>
+                </div>
+                <div class="text-center mt-2">
+                    <a href="#" class="btn btn-sm btn-link">View All Alerts</a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Start Charging Modal -->
+<div class="modal fade" id="startChargingModal" tabindex="-1" role="dialog" aria-labelledby="startChargingModalLabel" aria-hidden="true">
+    <div class="modal-dialog" role="document">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="startChargingModalLabel">Start New Charging Session</h5>
+                <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                    <span aria-hidden="true">&times;</span>
+                </button>
+            </div>
+            <div class="modal-body">
+                <form id="startChargingForm">
+                    <div class="form-group">
+                        <label for="stationSelect">Select Station</label>
+                        <select class="form-control" id="stationSelect" required>
+                            <option value="" selected disabled>Choose a station...</option>
+                            <!-- Will be populated by JavaScript -->
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="connectorSelect">Connector</label>
+                        <select class="form-control" id="connectorSelect" required>
+                            <option value="" selected disabled>Select connector...</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="rfidTag">RFID Tag</label>
+                        <input type="text" class="form-control" id="rfidTag" placeholder="Scan RFID tag" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="chargingProfile">Charging Profile</label>
+                        <select class="form-control" id="chargingProfile">
+                            <option value="fast">Fast Charge (Max Power)</option>
+                            <option value="balanced" selected>Balanced</option>
+                            <option value="overnight">Overnight (Slow)</option>
+                            <option value="custom">Custom...</option>
+                        </select>
+                    </div>
+                    <div class="form-group" id="customPowerGroup" style="display: none;">
+                        <label for="customPower">Power (kW)</label>
+                        <input type="number" class="form-control" id="customPower" min="3.7" max="350" step="0.1" value="22">
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" id="startChargingBtn">
+                    <i class="fas fa-bolt mr-1"></i> Start Charging
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock%}

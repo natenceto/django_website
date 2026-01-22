@@ -1,0 +1,41 @@
+.custom-separator {
+    color: rgba(255, 255, 255, 0.15);
+    margin-right: 16px;   /* създава разстояние вдясно */
+}
+/* контейнерът, който вече имаш */
+.nav-about-contacts {
+  display: flex;
+  align-items: center;
+  /* gap: .5rem; */
+  position: relative;
+}
+
+/* когато sidebar е свит */
+body.sidebar-toggled .nav-about-contacts {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;               /* много малък gap */
+  padding: 0;             /* премахваме външни падинги */
+}
+
+/* правим самите линкове/спанове по-компактни */
+body.sidebar-toggled .nav-about-contacts .nav-link {
+  display: block;
+  padding-top: 2px !important;
+  padding-bottom: 2px !important;
+  margin: 0 !important;
+  line-height: 1 !important;
+  font-size: 0.95rem;
+}
+
+/* скриваме разделителя само за този елемент */
+body.sidebar-toggled .nav-about-contacts .custom-separator {
+  display: none !important;
+}
+body.sidebar-toggled .nav-about-contacts {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  padding: 0;
+  margin-bottom: 0.5rem; /* ➜ разстояние преди бутона за свиване */
+}

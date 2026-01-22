@@ -1,0 +1,316 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %} RENEW | Charging stations {% endblock %}
+
+{% block content %}
+<style>
+    /* Pulse animation for live status indicator */
+    @keyframes pulse {
+        0% { opacity: 1; box-shadow: 0 0 0 0 rgba(40, 167, 69, 0.7); }
+        50% { opacity: 0.8; box-shadow: 0 0 0 6px rgba(40, 167, 69, 0); }
+        100% { opacity: 1; box-shadow: 0 0 0 0 rgba(40, 167, 69, 0); }
+    }
+    .status-dot { transition: all 0.3s ease; }
+    
+    /* Card hover effect */
+    #dashboard-cards .card {
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+    #dashboard-cards .card:hover {
+        transform: translateY(-3px);
+        box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.15) !important;
+    }
+    
+    /* Status badge animations */
+    .badge { transition: all 0.3s ease; }
+    
+    /* Charging animation */
+    @keyframes charging-pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.6; }
+    }
+    .badge-primary { animation: charging-pulse 1.5s infinite; }
+</style>
+
+<div class="container-fluid">
+
+    <h1 class="h3 mb-4 text-gray-800">Charging Stations Management</h1>
+
+    <!-- Dashboard Summary Cards -->
+    <div class="row mb-4" id="dashboard-cards">
+        <!-- Total Stations Card -->
+        <div class="col-xl-3 col-md-6 mb-4">
+            <div class="card border-left-primary shadow h-100 py-2">
+                <div class="card-body">
+                    <div class="row no-gutters align-items-center">
+                        <div class="col mr-2">
+                            <div class="text-xs font-weight-bold text-primary text-uppercase mb-1">
+                                Total Stations</div>
+                            <div class="h5 mb-0 font-weight-bold text-gray-800" id="metric-total">
+                                {{ stats.total_stations|default:0 }}
+                            </div>
+                        </div>
+                        <div class="col-auto">
+                            <i class="fas fa-charging-station fa-2x text-gray-300"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Online Stations Card -->
+        <div class="col-xl-3 col-md-6 mb-4">
+            <div class="card border-left-success shadow h-100 py-2">
+                <div class="card-body">
+                    <div class="row no-gutters align-items-center">
+                        <div class="col mr-2">
+                            <div class="text-xs font-weight-bold text-success text-uppercase mb-1">
+                                Online Stations</div>
+                            <div class="h5 mb-0 font-weight-bold text-gray-800">
+                                <span id="metric-online">{{ stats.online_stations|default:0 }}</span>
+                                <small class="text-muted">/ {{ stats.total_stations|default:0 }}</small>
+                            </div>
+                        </div>
+                        <div class="col-auto">
+                            <i class="fas fa-plug fa-2x text-gray-300" id="online-indicator"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Active Charging Sessions Card -->
+        <div class="col-xl-3 col-md-6 mb-4">
+            <div class="card border-left-info shadow h-100 py-2">
+                <div class="card-body">
+                    <div class="row no-gutters align-items-center">
+                        <div class="col mr-2">
+                            <div class="text-xs font-weight-bold text-info text-uppercase mb-1">
+                                Active Sessions</div>
+                            <div class="h5 mb-0 font-weight-bold text-gray-800" id="metric-sessions">
+                                {{ stats.active_sessions|default:0 }}
+                            </div>
+                        </div>
+                        <div class="col-auto">
+                            <i class="fas fa-bolt fa-2x text-gray-300"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Energy Delivered Today Card -->
+        <div class="col-xl-3 col-md-6 mb-4">
+            <div class="card border-left-warning shadow h-100 py-2">
+                <div class="card-body">
+                    <div class="row no-gutters align-items-center">
+                        <div class="col mr-2">
+                            <div class="text-xs font-weight-bold text-warning text-uppercase mb-1">
+                                Energy Today</div>
+                            <div class="h5 mb-0 font-weight-bold text-gray-800">
+                                <span id="metric-energy">{{ stats.energy_today_kwh|default:"0.0" }}</span> kWh
+                            </div>
+                        </div>
+                        <div class="col-auto">
+                            <i class="fas fa-battery-three-quarters fa-2x text-gray-300"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Real-time Connection Status -->
+    <div class="alert alert-light border mb-4 d-flex align-items-center" id="connection-status">
+        <span class="status-dot bg-secondary mr-2" id="ws-status-dot" style="width: 10px; height: 10px; border-radius: 50%; display: inline-block;"></span>
+        <span id="ws-status-text">Connecting to live updates...</span>
+        <small class="ml-auto text-muted" id="last-update">--</small>
+    </div>
+
+    <!-- Nav Tabs -->
+    <ul class="nav nav-tabs mb-3" id="stationTabs" role="tablist">
+        <li class="nav-item">
+            <a class="nav-link {% if active_tab == 'add' %}active{% endif %}" id="add-tab" data-toggle="tab" href="#add"
+                role="tab">
+                Add Station
+            </a>
+        </li>
+        <li class="nav-item">
+            <a class="nav-link {% if active_tab == 'list' %}active{% endif %}" id="list-tab" data-toggle="tab"
+                href="#list" role="tab">
+                View Stations
+            </a>
+        </li>
+    </ul>
+
+    <!-- Tab Content -->
+    <div class="tab-content">
+
+        <!-- Add Station Tab -->
+        <div class="tab-pane fade {% if active_tab == 'add' %}show active{% endif %}" id="add" role="tabpanel">
+            <div class="card shadow mb-4">
+                <div class="card-header py-3">
+                    <h6 class="m-0 font-weight-bold text-primary">Add New Charging Station</h6>
+                </div>
+                <div class="card-body">
+                    <form method="post" enctype="multipart/form-data" class="needs-validation" novalidate>
+                        {% csrf_token %}
+                        <input type="hidden" name="current_tab" value="add">
+                        
+                        <!-- Essential Information -->
+                        <div class="row mb-4">
+                            <div class="col-lg-12">
+                                <h5 class="text-primary mb-3">Essential Information</h5>
+                            </div>
+                            
+                            <!-- Model and Address -->
+                            <div class="col-md-6">
+                                <div class="form-group">
+                                    <label for="{{ form.model.id_for_label }}">{{ form.model.label }}</label>
+                                    {{ form.model }}
+                                    <small class="form-text text-muted">{{ form.fields.model.help_text }}</small>
+                                    {% if form.model.errors %}
+                                        <div class="invalid-feedback d-block">
+                                            {{ form.model.errors|join:", " }}
+                                        </div>
+                                    {% endif %}
+                                </div>
+                            </div>
+                            
+                            <div class="col-md-6">
+                                <div class="form-group">
+                                    <label for="{{ form.address.id_for_label }}">{{ form.address.label }}</label>
+                                    {{ form.address }}
+                                    {% if form.address.errors %}
+                                        <div class="invalid-feedback d-block">
+                                            {{ form.address.errors|join:", " }}
+                                        </div>
+                                    {% endif %}
+                                </div>
+                            </div>
+                            
+                            <!-- Coordinates -->
+                            <div class="col-md-6">
+                                <div class="form-group">
+                                    <label for="{{ form.latitude.id_for_label }}">{{ form.latitude.label }}</label>
+                                    <div class="input-group">
+                                        {{ form.latitude }}
+                                        <div class="input-group-append">
+                                            <span class="input-group-text">°N</span>
+                                        </div>
+                                    </div>
+                                    {% if form.latitude.errors %}
+                                        <div class="invalid-feedback d-block">
+                                            {{ form.latitude.errors|join:", " }}
+                                        </div>
+                                    {% endif %}
+                                </div>
+                            </div>
+                            
+                            <div class="col-md-6">
+                                <div class="form-group">
+                                    <label for="{{ form.longitude.id_for_label }}">{{ form.longitude.label }}</label>
+                                    <div class="input-group">
+                                        {{ form.longitude }}
+                                        <div class="input-group-append">
+                                            <span class="input-group-text">°E</span>
+                                        </div>
+                                    </div>
+                                    {% if form.longitude.errors %}
+                                        <div class="invalid-feedback d-block">
+                                            {{ form.longitude.errors|join:", " }}
+                                        </div>
+                                    {% endif %}
+                                </div>
+                            </div>
+                            
+                            <!-- Technical Specs -->
+                            <div class="col-md-6">
+                                <div class="form-group">
+                                    <label for="{{ form.connector_type.id_for_label }}">{{ form.connector_type.label }}</label>
+                                    {{ form.connector_type }}
+                                    {% if form.connector_type.errors %}
+                                        <div class="invalid-feedback d-block">
+                                            {{ form.connector_type.errors|join:", " }}
+                                        </div>
+                                    {% endif %}
+                                </div>
+                            </div>
+                            
+                            <div class="col-md-6">
+                                <div class="form-group">
+                                    <label for="{{ form.power_output.id_for_label }}">{{ form.power_output.label }}</label>
+                                    <div class="input-group">
+                                        {{ form.power_output }}
+                                        <div class="input-group-append">
+                                            <span class="input-group-text">kW</span>
+                                        </div>
+                                    </div>
+                                    <small class="form-text text-muted">{{ form.fields.power_output.help_text }}</small>
+                                    {% if form.power_output.errors %}
+                                        <div class="invalid-feedback d-block">
+                                            {{ form.power_output.errors|join:", " }}
+                                        </div>
+                                    {% endif %}
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Additional Information -->
+                        <div class="row mb-4">
+                            <div class="col-lg-12">
+                                <h5 class="text-primary mb-3">Additional Information</h5>
+                            </div>
+                            
+                            <div class="col-md-6">
+                                <div class="form-group">
+                                    <label for="{{ form.status.id_for_label }}">{{ form.status.label }}</label>
+                                    {{ form.status }}
+                                    {% if form.status.errors %}
+                                        <div class="invalid-feedback d-block">
+                                            {{ form.status.errors|join:", " }}
+                                        </div>
+                                    {% endif %}
+                                </div>
+                            </div>
+                            
+                            <div class="col-md-6">
+                                <div class="form-group">
+                                    <label for="{{ form.email.id_for_label }}">{{ form.email.label }}</label>
+                                    {{ form.email }}
+                                    <small class="form-text text-muted">{{ form.fields.email.help_text }}</small>
+                                    {% if form.email.errors %}
+                                        <div class="invalid-feedback d-block">
+                                            {{ form.email.errors|join:", " }}
+                                        </div>
+                                    {% endif %}
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="form-group text-center mt-4">
+                            <button type="submit" class="btn btn-primary btn-lg">
+                                <i class="fas fa-save mr-2"></i> Save Station
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <!-- View Stations Tab -->
+        <div class="tab-pane fade {% if active_tab == 'list' %}show active{% endif %}" id="list" role="tabpanel">
+            <div class="table-responsive">
+                {% include "charging_stations/_stations_tab.html" with stations_list=stations_list %}
+            </div>
+        </div>
+
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<!-- Custom logic -->
+<script src="{% static 'js/stations_tab.js' %}"></script>
+{% endblock %}

@@ -1,0 +1,293 @@
+{% extends 'base.html' %}
+{% load static %}
+{% load custom_tags %}
+
+{% block title %} RENEW | Statistics {% endblock%}
+
+{% block content %}
+<!-- Page Heading -->
+<h1 class="h3 mb-2 text-gray-800">Charging Station Statistics</h1>
+<p class="mb-4">Real-time meter measurements and charging session data from all stations.</p>
+
+<!-- Error Message -->
+{% if error_message %}
+<div class="alert alert-danger" role="alert">
+    <i class="fas fa-exclamation-triangle"></i> {{ error_message }}
+</div>
+{% endif %}
+
+<!-- Summary Cards -->
+<div class="row">
+    <!-- Total Meter Readings -->
+    <div class="col-xl-3 col-md-6 mb-4">
+        <div class="card border-left-primary shadow h-100 py-2">
+            <div class="card-body">
+                <div class="row no-gutters align-items-center">
+                    <div class="col mr-2">
+                        <div class="text-xs font-weight-bold text-primary text-uppercase mb-1">
+                            Total Readings</div>
+                        <div class="h5 mb-0 font-weight-bold text-gray-800">{{ total_readings|default:0 }}</div>
+                    </div>
+                    <div class="col-auto">
+                        <i class="fas fa-tachometer-alt fa-2x text-gray-300"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Active Transactions -->
+    <div class="col-xl-3 col-md-6 mb-4">
+        <div class="card border-left-success shadow h-100 py-2">
+            <div class="card-body">
+                <div class="row no-gutters align-items-center">
+                    <div class="col mr-2">
+                        <div class="text-xs font-weight-bold text-success text-uppercase mb-1">
+                            Active Sessions</div>
+                        <div class="h5 mb-0 font-weight-bold text-gray-800">{{ active_sessions|default:0 }}</div>
+                    </div>
+                    <div class="col-auto">
+                        <i class="fas fa-charging-station fa-2x text-gray-300"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Latest Reading -->
+    <div class="col-xl-3 col-md-6 mb-4">
+        <div class="card border-left-info shadow h-100 py-2">
+            <div class="card-body">
+                <div class="row no-gutters align-items-center">
+                    <div class="col mr-2">
+                        <div class="text-xs font-weight-bold text-info text-uppercase mb-1">
+                            Latest Reading</div>
+                        <div class="h5 mb-0 font-weight-bold text-gray-800">
+                            {% if latest_reading %}
+                                {{ latest_reading.value }} Wh
+                            {% else %}
+                                N/A
+                            {% endif %}
+                        </div>
+                    </div>
+                    <div class="col-auto">
+                        <i class="fas fa-bolt fa-2x text-gray-300"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Stations Online -->
+    <div class="col-xl-3 col-md-6 mb-4">
+        <div class="card border-left-warning shadow h-100 py-2">
+            <div class="card-body">
+                <div class="row no-gutters align-items-center">
+                    <div class="col mr-2">
+                        <div class="text-xs font-weight-bold text-warning text-uppercase mb-1">
+                            Stations</div>
+                        <div class="h5 mb-0 font-weight-bold text-gray-800">
+                            {{ transactions|unique_stations }}
+                        </div>
+                    </div>
+                    <div class="col-auto">
+                        <i class="fas fa-map-marker-alt fa-2x text-gray-300"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Content Row -->
+<div class="row">
+
+    <!-- Recent Meter Values -->
+    <div class="col-xl-8 col-lg-7">
+        <div class="card shadow mb-4">
+            <div class="card-header py-3">
+                <h6 class="m-0 font-weight-bold text-primary">Recent Meter Values</h6>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-bordered" id="dataTable" width="100%" cellspacing="0">
+                        <thead>
+                            <tr>
+                                <th>Time</th>
+                                <th>Station</th>
+                                <th>Energy (Wh)</th>
+                                <th>Context</th>
+                                <th>Type</th>
+                                <th>Phase</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for meter_value in meter_values %}
+                            <tr>
+                                <td><small>{{ meter_value.timestamp|date:"M d H:i:s" }}</small></td>
+                                <td><strong>{{ meter_value.transaction.connector.station.address|truncatechars:25 }}</strong></td>
+                                <td><span class="badge badge-primary">{{ meter_value.value }}</span></td>
+                                <td>
+                                    {% if meter_value.data.context %}
+                                        <small class="text-muted">{{ meter_value.data.context|slice:":15" }}</small>
+                                    {% else %}
+                                        -
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if meter_value.data.measurand %}
+                                        <small class="text-success">{{ meter_value.data.measurand|slice:":20" }}</small>
+                                    {% else %}
+                                        -
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if meter_value.data.phase %}
+                                        <span class="badge badge-secondary">{{ meter_value.data.phase }}</span>
+                                    {% else %}
+                                        -
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% empty %}
+                            <tr>
+                                <td colspan="6" class="text-center text-muted">
+                                    <i class="fas fa-info-circle"></i> No meter values recorded yet.<br>
+                                    <small>Start a charging session to see measurements.</small>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Transaction Summary -->
+    <div class="col-xl-4 col-lg-5">
+        <div class="card shadow mb-4">
+            <div class="card-header py-3">
+                <h6 class="m-0 font-weight-bold text-success">Recent Transactions</h6>
+            </div>
+            <div class="card-body">
+                {% for transaction in transactions %}
+                <div class="mb-3 p-3 border rounded {% if transaction.status == 'active' %}border-success{% else %}border-secondary{% endif %}">
+                    <div class="d-flex justify-content-between align-items-start">
+                        <div class="font-weight-bold text-truncate" style="max-width: 200px;" title="{{ transaction.connector.station.address }}">
+                            {{ transaction.connector.station.address }}
+                        </div>
+                        <span class="badge badge-{% if transaction.status == 'active' %}success{% elif transaction.status == 'completed' %}primary{% else %}warning{% endif %}">
+                            {{ transaction.status|title }}
+                        </span>
+                    </div>
+                    <div class="small text-muted mt-1">
+                        <i class="fas fa-clock"></i> {{ transaction.started_at|date:"M d, H:i" }}<br>
+                        {% if transaction.meter_count %}
+                        <i class="fas fa-tachometer-alt"></i> {{ transaction.meter_count }} readings<br>
+                        <i class="fas fa-bolt"></i> Latest: <strong>{{ transaction.latest_reading }} Wh</strong>
+                        {% else %}
+                        <i class="fas fa-spinner"></i> Waiting for meter data...
+                        {% endif %}
+                    </div>
+                </div>
+                {% empty %}
+                <div class="text-center text-muted py-4">
+                    <i class="fas fa-charging-station fa-3x text-gray-300 mb-3"></i>
+                    <p>No transactions yet</p>
+                    <small>Start charging to see session data</small>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Detailed Meter Data -->
+<div class="row">
+    <div class="col-xl-12">
+        <div class="card shadow mb-4">
+            <div class="card-header py-3 d-flex justify-content-between align-items-center">
+                <h6 class="m-0 font-weight-bold text-info">Complete Meter Data (JSON)</h6>
+                <small class="text-muted">Raw OCPP sampled_value data</small>
+            </div>
+            <div class="card-body">
+                {% for meter_value in meter_values %}
+                <div class="mb-3 p-3 border-left-info bg-light">
+                    <div class="d-flex justify-content-between align-items-start mb-2">
+                        <div>
+                            <strong class="text-primary">{{ meter_value.transaction.connector.station.address }}</strong>
+                            <span class="text-muted ml-2">{{ meter_value.timestamp|date:"M d H:i:s" }}</span>
+                        </div>
+                        <span class="badge badge-info font-weight-bold">{{ meter_value.value }} Wh</span>
+                    </div>
+                    {% if meter_value.data %}
+                    <div class="bg-white p-2 rounded border">
+                        <code class="text-dark small">{{ meter_value.data|safe }}</code>
+                    </div>
+                    {% endif %}
+                </div>
+                {% empty %}
+                <div class="text-center py-5">
+                    <i class="fas fa-database fa-4x text-gray-300 mb-3"></i>
+                    <h5 class="text-muted">No Meter Data Available</h5>
+                    <p class="text-muted">Start a charging session to collect measurements from station hardware.</p>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<!-- Bootstrap core JavaScript-->
+<script src="{% static 'theme/vendor/jquery/jquery.min.js' %}"></script>
+<script src="{% static 'theme/vendor/bootstrap/js/bootstrap.bundle.min.js' %}"></script>
+
+<!-- Core plugin JavaScript-->
+<script src="{% static 'theme/vendor/jquery-easing/jquery.easing.min.js' %}"></script>
+
+<!-- Custom scripts for all pages-->
+<script src="{% static 'theme/js/sb-admin-2.min.js' %}"></script>
+
+<!-- Page level plugins -->
+<script src="{% static 'theme/vendor/datatables/jquery.dataTables.min.js' %}"></script>
+<script src="{% static 'theme/vendor/datatables/dataTables.bootstrap4.min.js' %}"></script>
+
+<!-- Page level custom scripts -->
+<script src="{% static 'theme/js/demo/datatables-demo.js' %}"></script>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// Statistics page receives real-time updates via WebSocket from base.html
+// Update statistics-specific elements when data arrives
+document.addEventListener('DOMContentLoaded', function() {
+    // Listen for custom events dispatched by the WebSocket handler
+    window.addEventListener('ws-status-update', function(e) {
+        const data = e.detail;
+        if (data && data.data) {
+            const status = data.data;
+            // Update active sessions count
+            const activeSessionsEl = document.querySelector('.border-left-success .h5');
+            if (activeSessionsEl && status.active_sessions !== undefined) {
+                activeSessionsEl.textContent = status.active_sessions;
+            }
+        }
+    });
+    
+    // Add a connection status indicator
+    const statusIndicator = document.createElement('div');
+    statusIndicator.id = 'ws-status';
+    statusIndicator.className = 'small text-muted mb-2';
+    statusIndicator.innerHTML = '<i class="fas fa-circle text-success"></i> Real-time updates active';
+    const heading = document.querySelector('h1.h3');
+    if (heading) {
+        heading.parentNode.insertBefore(statusIndicator, heading.nextSibling);
+    }
+});
+</script>
+{% endblock %}

@@ -1,0 +1,39 @@
+{% load energy_tags %}
+
+<div class="bg-white rounded-xl shadow-lg p-6 border-l-4 {{ border_color|default:'border-green-500' }} hover:shadow-xl transition-shadow">
+    <div class="flex items-center justify-between mb-2">
+        <span class="text-sm font-medium text-gray-600 uppercase tracking-wider">{{ title }}</span>
+        {% if icon %}
+            <span class="text-2xl">{{ icon }}</span>
+        {% endif %}
+    </div>
+    
+    <div class="text-3xl font-bold text-gray-900 mb-1">
+        {% if value is not None %}
+            {% if format_type == 'power' %}
+                {{ value|format_power }}
+            {% elif format_type == 'percentage' %}
+                {{ value|format_percentage }}
+            {% else %}
+                {{ value }}
+            {% endif %}
+        {% else %}
+            --
+        {% endif %}
+    </div>
+    
+    <div class="text-sm text-gray-500">{{ subtitle }}</div>
+    
+    {% if trend %}
+        <div class="mt-3 flex items-center text-sm">
+            {% if trend > 0 %}
+                <span class="text-green-600">↑ {{ trend }}%</span>
+            {% elif trend < 0 %}
+                <span class="text-red-600">↓ {{ trend }}%</span>
+            {% else %}
+                <span class="text-gray-600">→ 0%</span>
+            {% endif %}
+            <span class="text-gray-500 ml-2">vs last period</span>
+        </div>
+    {% endif %}
+</div>

@@ -1,0 +1,385 @@
+{% extends 'base.html' %}
+{% load static %}
+{% load energy_tags %}
+
+{% block title %} RENEW | Energy Management {% endblock %}
+
+{% block content %}
+<style>
+    /* Pulse animation for live status indicator */
+    @keyframes pulse {
+        0% { opacity: 1; box-shadow: 0 0 0 0 rgba(40, 167, 69, 0.7); }
+        50% { opacity: 0.8; box-shadow: 0 0 0 6px rgba(40, 167, 69, 0); }
+        100% { opacity: 1; box-shadow: 0 0 0 0 rgba(40, 167, 69, 0); }
+    }
+    .status-dot { transition: all 0.3s ease; }
+    
+    /* Card hover effect */
+    #energy-cards .card {
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+    #energy-cards .card:hover {
+        transform: translateY(-3px);
+        box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.15) !important;
+    }
+    
+    /* Status badge animations */
+    .badge { transition: all 0.3s ease; }
+    
+    /* Energy generation animation */
+    @keyframes energy-pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.6; }
+    }
+    .border-left-warning { animation: energy-pulse 2s infinite; }
+</style>
+
+<!-- Page Heading -->
+<div class="d-sm-flex align-items-center justify-content-between mb-4">
+    <h1 class="h3 mb-0 text-gray-800">Energy Management</h1>
+    <div>
+        <button onclick="collectData()" class="btn btn-sm btn-success shadow-sm mr-2">
+            <i class="fas fa-sync fa-sm text-white-50"></i> Refresh
+        </button>
+        <a href="/admin/energy/" class="btn btn-sm btn-info shadow-sm mr-2">
+            <i class="fas fa-cog fa-sm text-white-50"></i> Manage
+        </a>
+        <a href="/admin/energy/inverterreading/" class="btn btn-sm btn-primary shadow-sm">
+            <i class="fas fa-history fa-sm text-white-50"></i> View History
+        </a>
+    </div>
+</div>
+
+<!-- Energy Status Cards Row -->
+<div class="row" id="energy-cards">
+    <!-- Solar Generation Card -->
+    <div class="col-xl-3 col-md-6 mb-4">
+        <div class="card border-left-warning shadow h-100 py-2">
+            <div class="card-body">
+                <div class="row no-gutters align-items-center">
+                    <div class="col mr-2">
+                        <div class="text-xs font-weight-bold text-warning text-uppercase mb-1">
+                            Solar Generation</div>
+                        <div class="h5 mb-0 font-weight-bold text-gray-800" id="generation-power">0 W</div>
+                        <div class="text-xs text-muted mt-1">Real-time output</div>
+                    </div>
+                    <div class="col-auto">
+                        <i class="fas fa-solar-panel fa-2x text-gray-300"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Battery Level Card -->
+    <div class="col-xl-3 col-md-6 mb-4">
+        <div class="card border-left-info shadow h-100 py-2">
+            <div class="card-body">
+                <div class="row no-gutters align-items-center">
+                    <div class="col mr-2">
+                        <div class="text-xs font-weight-bold text-info text-uppercase mb-1">
+                            Battery Level</div>
+                        <div class="h5 mb-0 font-weight-bold text-gray-800" id="battery-soc">0%</div>
+                        <div class="text-xs text-muted mt-1">Average SOC</div>
+                    </div>
+                    <div class="col-auto">
+                        <i class="fas fa-battery-three-quarters fa-2x text-gray-300"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Active Inverters Card -->
+    <div class="col-xl-3 col-md-6 mb-4">
+        <div class="card border-left-success shadow h-100 py-2">
+            <div class="card-body">
+                <div class="row no-gutters align-items-center">
+                    <div class="col mr-2">
+                        <div class="text-xs font-weight-bold text-success text-uppercase mb-1">
+                            Active Inverters</div>
+                        <div class="h5 mb-0 font-weight-bold text-gray-800" id="active-inverters">0/2</div>
+                        <div class="text-xs text-muted mt-1">Devices online</div>
+                    </div>
+                    <div class="col-auto">
+                        <i class="fas fa-plug fa-2x text-gray-300"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Today's Energy Card -->
+    <div class="col-xl-3 col-md-6 mb-4">
+        <div class="card border-left-primary shadow h-100 py-2">
+            <div class="card-body">
+                <div class="row no-gutters align-items-center">
+                    <div class="col mr-2">
+                        <div class="text-xs font-weight-bold text-primary text-uppercase mb-1">
+                            Today's Energy</div>
+                        <div class="h5 mb-0 font-weight-bold text-gray-800" id="daily-energy">0 kWh</div>
+                        <div class="text-xs text-muted mt-1">Total generated</div>
+                    </div>
+                    <div class="col-auto">
+                        <i class="fas fa-chart-line fa-2x text-gray-300"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- EV Charging Recommendation -->
+<div class="row">
+    <div class="col-12 mb-4">
+        <div class="card shadow">
+            <div class="card-header py-3 d-flex flex-row align-items-center justify-content-between">
+                <h6 class="m-0 font-weight-bold text-primary">EV Charging Recommendation</h6>
+                <button onclick="getChargingRecommendation()" class="btn btn-sm btn-primary">
+                    <i class="fas fa-magic"></i> Get Recommendation
+                </button>
+            </div>
+            <div class="card-body" id="charging-content">
+                <div class="text-center py-4">
+                    <i class="fas fa-car fa-3x text-gray-300 mb-3"></i>
+                    <p class="text-gray-600">Get personalized charging recommendations based on current solar generation.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Inverter Status -->
+<div class="row">
+    <div class="col-12">
+        <div class="card shadow mb-4">
+            <div class="card-header py-3 d-flex flex-row align-items-center justify-content-between">
+                <h6 class="m-0 font-weight-bold text-primary">Inverter Status</h6>
+                <div class="dropdown no-arrow">
+                    <button onclick="collectData()" class="btn btn-sm btn-outline-primary">
+                        <i class="fas fa-sync"></i> Refresh
+                    </button>
+                </div>
+            </div>
+            <div class="card-body">
+                <div class="row" id="inverter-list">
+                    <!-- Inverters will be loaded here -->
+                    <div class="col-12 text-center text-gray-500 py-4">
+                        <i class="fas fa-plug fa-2x mb-2"></i>
+                        <p>No inverter data available. Click refresh to collect data.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Historical Data -->
+<div class="row">
+    <div class="col-12">
+        <div class="card shadow mb-4">
+            <div class="card-header py-3">
+                <h6 class="m-0 font-weight-bold text-primary">24-Hour Generation Chart</h6>
+            </div>
+            <div class="card-body">
+                <canvas id="generation-chart" width="400" height="100"></canvas>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{% static 'js/api-client.js' %}"></script>
+<script>
+let chart = null;
+
+async function loadDashboardData() {
+    try {
+        const data = await window.EVPlatformAPI.getDashboardData();
+        
+        // Update metrics
+        document.getElementById('generation-power').textContent = 
+            `${data.current.total_generation_watts} W`;
+        document.getElementById('battery-soc').textContent = 
+            `${data.current.average_battery_soc.toFixed(1)}%`;
+        document.getElementById('active-inverters').textContent = 
+            `${data.current.active_inverters}/2`;
+        document.getElementById('daily-energy').textContent = 
+            `${data.daily_stats.total_energy_kwh} kWh`;
+        
+        // Update inverter list
+        updateInverterList(data.current.readings);
+        
+        // Update chart
+        updateChart(data.current.readings);
+        
+    } catch (error) {
+        console.error('Failed to load dashboard data:', error);
+    }
+}
+
+function updateInverterList(readings) {
+    const container = document.getElementById('inverter-list');
+    container.innerHTML = '';
+    
+    if (readings.length === 0) {
+        container.innerHTML = `
+            <div class="col-12 text-center text-gray-500 py-4">
+                <i class="fas fa-plug fa-2x mb-2"></i>
+                <p>No inverter data available. Click refresh to collect data.</p>
+            </div>
+        `;
+        return;
+    }
+    
+    readings.forEach(reading => {
+        const status = reading.connect_status === 1 ? 'success' : 'danger';
+        const statusText = reading.connect_status === 1 ? 'Online' : 'Offline';
+        const col = document.createElement('div');
+        col.className = 'col-xl-4 col-md-6 mb-4';
+        col.innerHTML = `
+            <div class="card border-left-${status} shadow h-100 py-2">
+                <div class="card-body">
+                    <div class="row no-gutters align-items-center">
+                        <div class="col mr-2">
+                            <div class="text-xs font-weight-bold text-${status} text-uppercase mb-1">
+                                ${reading.device_sn}</div>
+                            <div class="h6 mb-0 font-weight-bold text-gray-800">
+                                <i class="fas fa-circle text-${status} fa-xs"></i> ${statusText}
+                            </div>
+                            <div class="text-xs text-muted mt-1">
+                                Generation: ${reading.generation_power || 0} W<br>
+                                Battery: ${reading.battery_soc || 0}%
+                            </div>
+                        </div>
+                        <div class="col-auto">
+                            <i class="fas fa-plug fa-2x text-gray-300"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+        container.appendChild(col);
+    });
+}
+
+function updateChart(readings) {
+    const canvas = document.getElementById('generation-chart');
+    const ctx = canvas.getContext('2d');
+    
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    
+    if (readings.length === 0) return;
+    
+    ctx.strokeStyle = '#4e73df';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    
+    readings.forEach((reading, index) => {
+        const x = (index / (readings.length - 1)) * canvas.width;
+        const y = canvas.height - (reading.generation_power || 0) / 10;
+        
+        if (index === 0) {
+            ctx.moveTo(x, y);
+        } else {
+            ctx.lineTo(x, y);
+        }
+    });
+    
+    ctx.stroke();
+}
+
+async function getChargingRecommendation() {
+    const content = document.getElementById('charging-content');
+    
+    // Show loading
+    content.innerHTML = '<p>Analyzing current conditions...</p>';
+    
+    try {
+        const data = await window.EVPlatformAPI.getChargingRecommendation(
+            'demo_vehicle', 80, 30, 7200
+        );
+        
+        if (data.should_charge) {
+            content.innerHTML = `
+                <div class="alert alert-success">
+                    <h6 class="alert-heading"><i class="fas fa-check-circle"></i> Optimal charging conditions!</h6>
+                    <hr>
+                    <p class="mb-2"><strong>Available solar power:</strong> ${data.available_solar_watts} W</p>
+                    <p class="mb-2"><strong>Recommended charging power:</strong> ${data.charging_power_watts} W</p>
+                    <p class="mb-2"><strong>Estimated charging time:</strong> ${data.estimated_time_hours.toFixed(1)} hours</p>
+                    <p class="mb-0"><strong>Current battery SOC:</strong> ${data.battery_soc.toFixed(1)}%</p>
+                    <hr>
+                    <button class="btn btn-success" onclick="startCharging()">
+                        <i class="fas fa-play"></i> Start Smart Charging
+                    </button>
+                </div>
+            `;
+        } else {
+            content.innerHTML = `
+                <div class="alert alert-warning">
+                    <h6 class="alert-heading"><i class="fas fa-exclamation-triangle"></i> Insufficient solar generation</h6>
+                    <hr>
+                    <p class="mb-2"><strong>Available solar power:</strong> ${data.available_solar_watts} W</p>
+                    <p class="mb-2"><strong>Current battery SOC:</strong> ${data.battery_soc.toFixed(1)}%</p>
+                    <p class="mb-0"><strong>Recommendation:</strong> Wait for better conditions or use grid power</p>
+                    <hr>
+                    <button class="btn btn-warning" onclick="scheduleCharging()">
+                        <i class="fas fa-clock"></i> Schedule for Later
+                    </button>
+                </div>
+            `;
+        }
+        
+    } catch (error) {
+        content.innerHTML = `
+            <div class="alert alert-danger">
+                <i class="fas fa-exclamation-circle"></i> Failed to get recommendation. Please try again.
+            </div>
+        `;
+        console.error('Charging recommendation error:', error);
+    }
+}
+
+function startCharging() {
+    alert('Charging started! (This would integrate with your EV charging system)');
+}
+
+function scheduleCharging() {
+    alert('Charging scheduled for optimal conditions!');
+}
+
+async function collectData() {
+    try {
+        await window.EVPlatformAPI.collectEnergyData();
+        loadDashboardData(); // Refresh the dashboard
+        showNotification('Data collection completed successfully!', 'success');
+    } catch (error) {
+        console.error('Failed to collect data:', error);
+        showNotification('Failed to collect data: ' + error.message, 'error');
+    }
+}
+
+function getCookie(name) {
+    let cookieValue = null;
+    if (document.cookie && document.cookie !== '') {
+        const cookies = document.cookie.split(';');
+        for (let i = 0; i < cookies.length; i++) {
+            const cookie = cookies[i].trim();
+            if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                break;
+            }
+        }
+    }
+    return cookieValue;
+}
+
+// Load data on page load
+document.addEventListener('DOMContentLoaded', loadDashboardData);
+
+// Auto-refresh every 5 minutes
+setInterval(loadDashboardData, 5 * 60 * 1000);
+</script>
+{% endblock %}

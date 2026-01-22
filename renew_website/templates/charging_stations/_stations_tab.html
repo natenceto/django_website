@@ -1,0 +1,114 @@
+{% load static %}
+
+<link href="{% static 'theme/vendor/datatables/dataTables.bootstrap4.css' %}" rel="stylesheet">
+<link href="{% static 'theme/vendor/datatables/dataTables.bootstrap4.min.css' %}" rel="stylesheet">
+
+<form method="post" action="">
+  {% csrf_token %}
+  <input type="hidden" name="current_tab" value="list">
+
+  <!-- Action buttons -->
+  <div class="mb-3">
+    <button type="button" id="btn-start" class="btn btn-success btn-sm" disabled>Start Charging</button>
+    <button type="button" id="btn-stop" class="btn btn-danger btn-sm" disabled>Stop Charging</button>
+    
+    <span class="ml-3">
+      <label for="power-select" class="mr-2 mb-0">Charging Power:</label>
+      <select id="power-select" class="custom-select d-inline-block w-auto" disabled>
+        <option value="22">Default (22 kW)</option>
+        <option value="11">11 kW</option>
+        <option value="7">7.4 kW</option>
+      </select>
+    </span>
+  </div>
+
+  <!-- Message container for command feedback -->
+  <div id="message-container"></div>
+
+  <div class="card shadow mb-4">
+    <div class="card-header py-3">
+      <h6 class="m-0 font-weight-bold text-primary">Charging stations</h6>
+    </div>
+    <div class="card-body">
+      <div class="table-responsive">
+        {% if stations_list %}
+        <table class="table table-bordered" id="dataTable" width="100%" cellspacing="0">
+          <thead>
+            <tr>
+              <th><input type="checkbox" id="select-all"></th>
+              <th>ID</th>
+              <th>Model</th>
+              <th>Max Power</th>
+              <th>Station Status</th>
+              <th>Connector Status</th>
+              <th>Address</th>
+            </tr>
+          </thead>
+          <tbody id="stations-table">
+            {% for station in stations_list %}
+            <tr>
+              <td><input type="checkbox" name="station_ids" value="{{ station.id }}" data-exists="true"></td>
+              <td><strong>{{ station.id }}</strong></td>
+              <td>{{ station.model|default:"TACW22-G0135" }}</td>
+              <td><strong>{{ station.power_output }} kW</strong></td>
+              <td id="status-{{station.id}}">
+                {% if station.status == "active" %}
+                <span class="badge badge-success">Active</span>
+                {% elif station.status == "inactive" %}
+                <span class="badge badge-secondary">Inactive</span>
+                {% elif station.status == "maintenance" %}
+                <span class="badge badge-warning">Under Maintenance</span>
+                {% else %}
+                <span class="badge badge-secondary">{{ station.status|title }}</span>
+                {% endif %}
+              </td>
+              <td id="connector-status-{{station.id}}">
+                {% if station.status == "inactive" %}
+                  {# Station is offline - connector must be offline too #}
+                  <span class="badge badge-dark">Offline</span>
+                {% elif station.connectors.first %}
+                  {% with connector=station.connectors.first %}
+                    {% if connector.status == "available" %}
+                    <span class="badge badge-success">Available</span>
+                    {% elif connector.status == "preparing" %}
+                    <span class="badge badge-info">Preparing</span>
+                    {% elif connector.status == "charging" %}
+                    <span class="badge badge-primary">Charging</span>
+                    {% elif connector.status == "suspendedEV" %}
+                    <span class="badge badge-warning">Suspended EV</span>
+                    {% elif connector.status == "suspendedEVSE" %}
+                    <span class="badge badge-warning">Suspended EVSE</span>
+                    {% elif connector.status == "finishing" %}
+                    <span class="badge badge-info">Finishing</span>
+                    {% elif connector.status == "reserved" %}
+                    <span class="badge badge-secondary">Reserved</span>
+                    {% elif connector.status == "faulted" %}
+                    <span class="badge badge-danger">Faulted</span>
+                    {% elif connector.status == "offline" %}
+                    <span class="badge badge-dark">Offline</span>
+                    {% else %}
+                    <span class="badge badge-secondary">{{ connector.status|title }}</span>
+                    {% endif %}
+                  {% endwith %}
+                {% else %}
+                  <span class="badge badge-warning">No Connector</span>
+                {% endif %}
+              </td>
+              <td>{{ station.address }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% else %}
+        <p>No stations added yet.</p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</form>
+
+<!-- JS dependencies -->
+<script src="{% static 'theme/vendor/jquery/jquery.min.js' %}"></script>
+<script src="{% static 'theme/vendor/datatables/jquery.dataTables.min.js' %}"></script>
+<script src="{% static 'theme/vendor/datatables/dataTables.bootstrap4.min.js' %}"></script>
+<script src="{% static 'js/stations_tab.js' %}"></script>

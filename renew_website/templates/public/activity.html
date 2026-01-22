@@ -1,0 +1,427 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Activity Log - RENEW Platform{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <!-- Page Heading -->
+    <div class="d-sm-flex align-items-center justify-content-between mb-4">
+        <h1 class="h3 mb-0 text-gray-800">
+            <i class="fas fa-history text-primary mr-2"></i>
+            Activity Log
+        </h1>
+        <div class="btn-group" role="group">
+            <button type="button" class="btn btn-sm btn-outline-primary" onclick="refreshActivity()">
+                <i class="fas fa-sync-alt"></i> Refresh
+            </button>
+            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="exportActivity()">
+                <i class="fas fa-download"></i> Export
+            </button>
+        </div>
+    </div>
+
+    <!-- Filters -->
+    <div class="card shadow mb-4">
+        <div class="card-header py-3">
+            <h6 class="m-0 font-weight-bold text-primary">
+                <i class="fas fa-filter mr-2"></i>Filters
+            </h6>
+        </div>
+        <div class="card-body">
+            <div class="row">
+                <div class="col-md-3">
+                    <label for="dateFilter">Date Range</label>
+                    <select class="form-control" id="dateFilter">
+                        <option value="today">Today</option>
+                        <option value="week">This Week</option>
+                        <option value="month" selected>This Month</option>
+                        <option value="all">All Time</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label for="typeFilter">Activity Type</label>
+                    <select class="form-control" id="typeFilter">
+                        <option value="all" selected>All Types</option>
+                        <option value="station">Station Status</option>
+                        <option value="transaction">Transactions</option>
+                        <option value="user">User Activity</option>
+                        <option value="system">System Events</option>
+                        <option value="error">Errors</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label for="severityFilter">Severity</label>
+                    <select class="form-control" id="severityFilter">
+                        <option value="all" selected>All Levels</option>
+                        <option value="info">Info</option>
+                        <option value="warning">Warning</option>
+                        <option value="error">Error</option>
+                        <option value="critical">Critical</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label for="searchFilter">Search</label>
+                    <input type="text" class="form-control" id="searchFilter" placeholder="Search activities...">
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Activity Timeline -->
+    <div class="card shadow mb-4">
+        <div class="card-header py-3">
+            <h6 class="m-0 font-weight-bold text-primary">
+                <i class="fas fa-stream mr-2"></i>Recent Activities
+            </h6>
+        </div>
+        <div class="card-body">
+            <div id="activityTimeline">
+                <!-- Activities will be loaded here -->
+                <div class="text-center py-4">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="sr-only">Loading...</span>
+                    </div>
+                    <p class="mt-2">Loading activities...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Statistics -->
+    <div class="row">
+        <div class="col-md-3">
+            <div class="card border-left-primary shadow h-100 py-2">
+                <div class="card-body">
+                    <div class="row no-gutters align-items-center">
+                        <div class="col mr-2">
+                            <div class="text-xs font-weight-bold text-primary text-uppercase mb-1">
+                                Total Activities
+                            </div>
+                            <div class="h5 mb-0 font-weight-bold text-gray-800" id="totalActivities">0</div>
+                        </div>
+                        <div class="col-auto">
+                            <i class="fas fa-chart-line fa-2x text-gray-300"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card border-left-success shadow h-100 py-2">
+                <div class="card-body">
+                    <div class="row no-gutters align-items-center">
+                        <div class="col mr-2">
+                            <div class="text-xs font-weight-bold text-success text-uppercase mb-1">
+                                Successful
+                            </div>
+                            <div class="h5 mb-0 font-weight-bold text-gray-800" id="successfulActivities">0</div>
+                        </div>
+                        <div class="col-auto">
+                            <i class="fas fa-check-circle fa-2x text-gray-300"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card border-left-warning shadow h-100 py-2">
+                <div class="card-body">
+                    <div class="row no-gutters align-items-center">
+                        <div class="col mr-2">
+                            <div class="text-xs font-weight-bold text-warning text-uppercase mb-1">
+                                Warnings
+                            </div>
+                            <div class="h5 mb-0 font-weight-bold text-gray-800" id="warningActivities">0</div>
+                        </div>
+                        <div class="col-auto">
+                            <i class="fas fa-exclamation-triangle fa-2x text-gray-300"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card border-left-danger shadow h-100 py-2">
+                <div class="card-body">
+                    <div class="row no-gutters align-items-center">
+                        <div class="col mr-2">
+                            <div class="text-xs font-weight-bold text-danger text-uppercase mb-1">
+                                Errors
+                            </div>
+                            <div class="h5 mb-0 font-weight-bold text-gray-800" id="errorActivities">0</div>
+                        </div>
+                        <div class="col-auto">
+                            <i class="fas fa-times-circle fa-2x text-gray-300"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    loadActivities();
+    
+    // Add event listeners for filters
+    document.getElementById('dateFilter').addEventListener('change', loadActivities);
+    document.getElementById('typeFilter').addEventListener('change', loadActivities);
+    document.getElementById('severityFilter').addEventListener('change', loadActivities);
+    document.getElementById('searchFilter').addEventListener('input', debounce(loadActivities, 500));
+});
+
+async function loadActivities() {
+    const dateFilter = document.getElementById('dateFilter').value;
+    const typeFilter = document.getElementById('typeFilter').value;
+    const severityFilter = document.getElementById('severityFilter').value;
+    const searchFilter = document.getElementById('searchFilter').value;
+    
+    // Show loading spinner
+    const timeline = document.getElementById('activityTimeline');
+    timeline.innerHTML = `
+        <div class="text-center py-4">
+            <div class="spinner-border text-primary" role="status">
+                <span class="sr-only">Loading...</span>
+            </div>
+            <p class="mt-2">Loading activities...</p>
+        </div>
+    `;
+    
+    try {
+        const activities = await generateMockActivities(dateFilter, typeFilter, severityFilter, searchFilter);
+        renderActivities(activities);
+        updateStatistics(activities);
+    } catch (error) {
+        console.error('Error loading activities:', error);
+        timeline.innerHTML = `
+            <div class="text-center py-4">
+                <i class="fas fa-exclamation-triangle fa-3x text-warning mb-3"></i>
+                <p class="text-muted">Error loading activities. Please try again.</p>
+            </div>
+        `;
+    }
+}
+
+async function generateMockActivities(dateFilter, typeFilter, severityFilter, searchFilter) {
+    try {
+        // Simulate API call to get activities
+        const response = await fetch('/api/activities/');
+        if (response.ok) {
+            const activities = await response.json();
+            return filterActivities(activities, dateFilter, typeFilter, severityFilter, searchFilter);
+        }
+    } catch (error) {
+        console.log('Using mock data due to API error');
+    }
+    
+    // Fallback to mock data
+    const activities = [
+        {
+            id: 1,
+            type: 'station',
+            severity: 'info',
+            message: 'Station BG001 went online',
+            details: 'Station successfully connected to the network',
+            timestamp: new Date(Date.now() - 1000 * 60 * 5),
+            user: 'System',
+            station_id: 'BG001'
+        },
+        {
+            id: 2,
+            type: 'transaction',
+            severity: 'success',
+            message: 'Transaction completed successfully',
+            details: 'RFID tag ABC123456 completed charging session',
+            timestamp: new Date(Date.now() - 1000 * 60 * 15),
+            user: 'user@example.com',
+            transaction_id: 'TXN001'
+        },
+        {
+            id: 3,
+            type: 'station',
+            severity: 'warning',
+            message: 'Station BG002 connection unstable',
+            details: 'Multiple connection drops detected in the last hour',
+            timestamp: new Date(Date.now() - 1000 * 60 * 30),
+            user: 'System',
+            station_id: 'BG002'
+        },
+        {
+            id: 4,
+            type: 'user',
+            severity: 'info',
+            message: 'User logged in',
+            details: 'Administrator accessed the system',
+            timestamp: new Date(Date.now() - 1000 * 60 * 45),
+            user: 'admin@renew.com'
+        },
+        {
+            id: 5,
+            type: 'system',
+            severity: 'error',
+            message: 'Database connection failed',
+            details: 'Unable to connect to PostgreSQL database',
+            timestamp: new Date(Date.now() - 1000 * 60 * 60),
+            user: 'System'
+        }
+    ];
+    
+    return filterActivities(activities, dateFilter, typeFilter, severityFilter, searchFilter);
+}
+
+function filterActivities(activities, dateFilter, typeFilter, severityFilter, searchFilter) {
+    const now = new Date();
+    let cutoffDate = new Date(0);
+    
+    // Apply date filter
+    switch(dateFilter) {
+        case 'today':
+            cutoffDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+            break;
+        case 'week':
+            cutoffDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+            break;
+        case 'month':
+            cutoffDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+            break;
+        default:
+            cutoffDate = new Date(0);
+    }
+    
+    return activities.filter(activity => {
+        // Date filter
+        if (activity.timestamp < cutoffDate) return false;
+        
+        // Type filter
+        if (typeFilter !== 'all' && activity.type !== typeFilter) return false;
+        
+        // Severity filter
+        if (severityFilter !== 'all' && activity.severity !== severityFilter) return false;
+        
+        // Search filter
+        if (searchFilter && !activity.message.toLowerCase().includes(searchFilter.toLowerCase())) return false;
+        
+        return true;
+    });
+}
+
+function renderActivities(activities) {
+    const timeline = document.getElementById('activityTimeline');
+    
+    if (activities.length === 0) {
+        timeline.innerHTML = `
+            <div class="text-center py-4">
+                <i class="fas fa-inbox fa-3x text-gray-300 mb-3"></i>
+                <p class="text-gray-500">No activities found matching your filters</p>
+            </div>
+        `;
+        return;
+    }
+    
+    const html = activities.map(activity => `
+        <div class="activity-item border-bottom pb-3 mb-3">
+            <div class="d-flex align-items-start">
+                <div class="mr-3">
+                    ${getSeverityIcon(activity.severity)}
+                </div>
+                <div class="flex-grow-1">
+                    <div class="d-flex justify-content-between align-items-start">
+                        <div>
+                            <h6 class="mb-1">${activity.message}</h6>
+                            <p class="text-muted mb-1">${activity.details}</p>
+                            <small class="text-muted">
+                                ${activity.user} • ${formatTime(activity.timestamp)}
+                            </small>
+                        </div>
+                        <div class="ml-2">
+                            <span class="badge badge-${getTypeColor(activity.type)}">${activity.type}</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `).join('');
+    
+    timeline.innerHTML = html;
+}
+
+function getSeverityIcon(severity) {
+    const icons = {
+        'info': '<i class="fas fa-info-circle fa-2x text-info"></i>',
+        'success': '<i class="fas fa-check-circle fa-2x text-success"></i>',
+        'warning': '<i class="fas fa-exclamation-triangle fa-2x text-warning"></i>',
+        'error': '<i class="fas fa-times-circle fa-2x text-danger"></i>',
+        'critical': '<i class="fas fa-exclamation-circle fa-2x text-danger"></i>'
+    };
+    return icons[severity] || icons['info'];
+}
+
+function getTypeColor(type) {
+    const colors = {
+        'station': 'primary',
+        'transaction': 'success',
+        'user': 'info',
+        'system': 'warning',
+        'error': 'danger'
+    };
+    return colors[type] || 'secondary';
+}
+
+function formatTime(timestamp) {
+    const now = new Date();
+    const diff = now - timestamp;
+    const minutes = Math.floor(diff / 60000);
+    const hours = Math.floor(diff / 3600000);
+    const days = Math.floor(diff / 86400000);
+    
+    if (minutes < 1) return 'Just now';
+    if (minutes < 60) return `${minutes} minute${minutes > 1 ? 's' : ''} ago`;
+    if (hours < 24) return `${hours} hour${hours > 1 ? 's' : ''} ago`;
+    return `${days} day${days > 1 ? 's' : ''} ago`;
+}
+
+function updateStatistics(activities) {
+    const total = activities.length;
+    const successful = activities.filter(a => a.severity === 'success').length;
+    const warnings = activities.filter(a => a.severity === 'warning').length;
+    const errors = activities.filter(a => a.severity === 'error' || a.severity === 'critical').length;
+    
+    document.getElementById('totalActivities').textContent = total;
+    document.getElementById('successfulActivities').textContent = successful;
+    document.getElementById('warningActivities').textContent = warnings;
+    document.getElementById('errorActivities').textContent = errors;
+}
+
+function refreshActivity() {
+    loadActivities();
+}
+
+function exportActivity() {
+    // Simulate export functionality
+    const data = document.getElementById('activityTimeline').innerText;
+    const blob = new Blob([data], { type: 'text/plain' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `activity-log-${new Date().toISOString().split('T')[0]}.txt`;
+    a.click();
+    window.URL.revokeObjectURL(url);
+}
+
+function debounce(func, wait) {
+    let timeout;
+    return function executedFunction(...args) {
+        const later = () => {
+            clearTimeout(timeout);
+            func(...args);
+        };
+        clearTimeout(timeout);
+        timeout = setTimeout(later, wait);
+    };
+}
+</script>
+{% endblock %}

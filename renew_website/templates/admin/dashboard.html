@@ -1,0 +1,185 @@
+{% extends "admin/base_site.html" %}
+{% load static %}
+
+{% block extrastyle %}
+{{ block.super }}
+<style>
+.admin-dashboard {
+    padding: 20px;
+}
+.stat-card {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    border-radius: 10px;
+    padding: 20px;
+    margin-bottom: 20px;
+}
+.stat-card h3 {
+    margin: 0 0 10px 0;
+    font-size: 2rem;
+}
+.stat-card p {
+    margin: 0;
+    opacity: 0.9;
+}
+.activity-item {
+    border-left: 3px solid #007bff;
+    padding-left: 15px;
+    margin-bottom: 10px;
+}
+.health-indicator {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    display: inline-block;
+    margin-right: 8px;
+}
+.health-good { background-color: #28a745; }
+.health-warning { background-color: #ffc107; }
+.health-danger { background-color: #dc3545; }
+</style>
+{% endblock %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+<a href="{% url 'admin:index' %}">Home</a>
+&rsaquo; Dashboard
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="admin-dashboard">
+    <h1>EV Charging Platform Dashboard</h1>
+    
+    <!-- Statistics Cards -->
+    <div class="row">
+        <div class="col-md-3">
+            <div class="stat-card">
+                <h3>{{ station_stats.total }}</h3>
+                <p>Total Stations</p>
+                <small>{{ station_stats.active }} active</small>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="stat-card" style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);">
+                <h3>{{ transaction_stats.today }}</h3>
+                <p>Today's Transactions</p>
+                <small>{{ transaction_stats.active }} active</small>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="stat-card" style="background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);">
+                <h3>{{ energy_stats.today_kwh|floatformat:1 }}</h3>
+                <p>Today's Energy (kWh)</p>
+                <small>{{ energy_stats.week_kwh|floatformat:1 }} this week</small>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="stat-card" style="background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);">
+                <h3>{{ inverter_stats.active }}</h3>
+                <p>Active Inverters</p>
+                <small>{{ inverter_stats.with_data }} with data</small>
+            </div>
+        </div>
+    </div>
+    
+    <!-- System Health -->
+    <div class="row">
+        <div class="col-md-12">
+            <div class="card">
+                <div class="card-header">
+                    <h5>System Health</h5>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-4">
+                            <p>
+                                <span class="health-indicator {% if system_health.stations_with_recent_data > 0 %}health-good{% else %}health-danger{% endif %}"></span>
+                                Stations with recent data: {{ system_health.stations_with_recent_data }}
+                            </p>
+                        </div>
+                        <div class="col-md-4">
+                            <p>
+                                <span class="health-indicator {% if system_health.inverters_with_recent_data > 0 %}health-good{% else %}health-danger{% endif %}"></span>
+                                Inverters with recent data: {{ system_health.inverters_with_recent_data }}
+                            </p>
+                        </div>
+                        <div class="col-md-4">
+                            <p>
+                                <span class="health-indicator {% if system_health.active_sessions > 0 %}health-warning{% else %}health-good{% endif %}"></span>
+                                Active sessions: {{ system_health.active_sessions }}
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Recent Activity -->
+    <div class="row">
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header">
+                    <h5>Recent Stations</h5>
+                </div>
+                <div class="card-body">
+                    {% for station in recent_stations %}
+                    <div class="activity-item">
+                        <strong>{{ station.address }}</strong><br>
+                        <small>{{ station.get_status_display }} - {{ station.connector_type }}</small><br>
+                        <small class="text-muted">{{ station.last_seen|date:"H:i" }}</small>
+                    </div>
+                    {% empty %}
+                    <p class="text-muted">No recent stations</p>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header">
+                    <h5>Recent Inverter Readings</h5>
+                </div>
+                <div class="card-body">
+                    {% for reading in recent_readings %}
+                    <div class="activity-item">
+                        <strong>{{ reading.inverter.device_sn }}</strong><br>
+                        <small>{{ reading.generation_power }}W | {{ reading.battery_soc }}% SOC</small><br>
+                        <small class="text-muted">{{ reading.timestamp|date:"H:i" }}</small>
+                    </div>
+                    {% empty %}
+                    <p class="text-muted">No recent readings</p>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Quick Actions -->
+    <div class="row">
+        <div class="col-md-12">
+            <div class="card">
+                <div class="card-header">
+                    <h5>Quick Actions</h5>
+                </div>
+                <div class="card-body">
+                    <a href="{% url 'admin:data_management' %}" class="btn btn-warning">
+                        <i class="fas fa-database"></i> Data Management
+                    </a>
+                    <a href="{% url 'admin:system_settings' %}" class="btn btn-info">
+                        <i class="fas fa-cog"></i> System Settings
+                    </a>
+                    <a href="/admin/charging_stations/station/" class="btn btn-primary">
+                        <i class="fas fa-charging-station"></i> Manage Stations
+                    </a>
+                    <a href="/admin/api/energy/inverter/" class="btn btn-success">
+                        <i class="fas fa-solar-panel"></i> Manage Inverters
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

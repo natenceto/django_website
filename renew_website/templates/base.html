@@ -1,0 +1,788 @@
+{% load static %}
+
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    <meta name="description" content="">
+    <meta name="author" content="">
+    <link rel="icon" type="image/x-icon" href="{% static 'theme/img/favicon.ico' %}">
+    <link rel="icon" type="image/png" href="{% static 'theme/img/favicon-16x16.png' %}" sizes="16x16">
+    <link rel="icon" type="image/png" href="{% static 'theme/img/favicon-32x32.png' %}" sizes="32x32">
+    <link rel="icon" type="image/png" href="{% static 'theme/img/android-chrome-192x192.png' %}" sizes="192x192">
+    <link rel="icon" type="image/png" href="{% static 'theme/img/android-chrome-512x512.png' %}" sizes="512x512">
+
+    <title>{% block title %}Tab title{% endblock %}</title>
+
+    <!-- Custom fonts -->
+    <link href="{% static 'theme/vendor/fontawesome-free/css/all.min.css' %}" rel="stylesheet" type="text/css">
+    <link href="https://fonts.googleapis.com/css?family=Nunito:200,300,400,600,700,800,900" rel="stylesheet">
+
+
+    <!-- Custom styles -->
+    <link href="{% static 'theme/css/sb-admin-2.min.css' %}" rel="stylesheet">
+    <link href="{% static 'css/style.css' %}" rel="stylesheet">
+
+    <!-- DataTables CSS -->
+    <link href="{% static 'theme/vendor/datatables/dataTables.bootstrap4.min.css' %}" rel="stylesheet">
+
+    {% block extra_css %}{% endblock %}
+</head>
+
+<body id="page-top">
+
+    <!-- Wrapper -->
+    <div id="wrapper">
+
+        <!-- Sidebar -->
+        {% include 'navbar.html' %}
+        <!-- End of Sidebar -->
+
+        <!-- Content Wrapper -->
+        <div id="content-wrapper" class="d-flex flex-column">
+
+            <!-- Main Content -->
+            <div id="content">
+
+                <!-- Topbar -->
+                <nav class="navbar navbar-expand navbar-light bg-white topbar mb-4 static-top shadow">
+
+                    <!-- Sidebar Toggle (Topbar) -->
+                    <button id="sidebarToggleTop" class="btn btn-link d-md-none rounded-circle mr-3">
+                        <i class="fa fa-bars"></i>
+                    </button>
+
+                    <!-- Topbar Search -->
+                    <form
+                        class="d-none d-sm-inline-block form-inline mr-auto ml-md-3 my-2 my-md-0 mw-100 navbar-search">
+                        <div class="input-group">
+                            <input type="text" class="form-control bg-light border-0 small" placeholder="Search for..."
+                                aria-label="Search" aria-describedby="basic-addon2">
+                            <div class="input-group-append">
+                                <button class="btn btn-primary" type="button">
+                                    <i class="fas fa-search fa-sm"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </form>
+
+                    <!-- Topbar Navbar -->
+                    <ul class="navbar-nav ml-auto">
+
+                        <!-- Nav Item - Search Dropdown (Visible Only XS) -->
+                        <li class="nav-item dropdown no-arrow d-sm-none">
+                            <a class="nav-link dropdown-toggle" href="#" id="searchDropdown" role="button"
+                                data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                                <i class="fas fa-search fa-fw"></i>
+                            </a>
+                            <!-- Dropdown - Messages -->
+                            <div class="dropdown-menu dropdown-menu-right p-3 shadow animated--grow-in"
+                                aria-labelledby="searchDropdown">
+                                <form class="form-inline mr-auto w-100 navbar-search">
+                                    <div class="input-group">
+                                        <input type="text" class="form-control bg-light border-0 small"
+                                            placeholder="Search for..." aria-label="Search"
+                                            aria-describedby="basic-addon2">
+                                        <div class="input-group-append">
+                                            <button class="btn btn-primary" type="button">
+                                                <i class="fas fa-search fa-sm"></i>
+                                            </button>
+                                        </div>
+                                    </div>
+                                </form>
+                            </div>
+                        </li>
+
+                        <!-- Nav Item - Alerts -->
+                        <li class="nav-item dropdown no-arrow mx-1">
+                            <a class="nav-link dropdown-toggle" href="#" id="alertsDropdown" role="button"
+                                data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                                <i class="fas fa-bell fa-fw"></i>
+                                <!-- Counter - Alerts -->
+                                <span class="badge badge-danger badge-counter">3+</span>
+                            </a>
+                            <!-- Dropdown - Alerts -->
+                            <div class="dropdown-list dropdown-menu dropdown-menu-right shadow animated--grow-in"
+                                aria-labelledby="alertsDropdown" id="alertsDropdownMenu">
+                                <h6 class="dropdown-header">
+                                    System Alerts
+                                </h6>
+                                <div id="alertsList">
+                                    <div class="text-center py-3">
+                                        <div class="spinner-border spinner-border-sm text-primary" role="status">
+                                            <span class="sr-only">Loading...</span>
+                                        </div>
+                                        <p class="small text-muted mt-1">Loading alerts...</p>
+                                    </div>
+                                </div>
+                                <a class="dropdown-item text-center small text-gray-500" href="#" onclick="showAllAlerts(); return false;">
+                                    <i class="fas fa-list mr-1"></i> Show All Alerts
+                                </a>
+                            </div>
+                        </li>
+
+                        <div class="topbar-divider d-none d-sm-block"></div>
+
+                        <!-- Nav Item - User Information -->
+                        <li class="nav-item dropdown no-arrow">
+                            {% if user.is_authenticated %}
+                            <a class="nav-link dropdown-toggle" href="#" id="userDropdown" role="button"
+                                data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                                <span class="mr-2 d-none d-lg-inline text-gray-600 small">{{ user.username }}</span>
+                                <img class="img-profile rounded-circle"
+                                    src="{% static 'theme/img/undraw_profile.svg' %}">
+                            </a>
+                            <div class="dropdown-menu dropdown-menu-right shadow animated--grow-in"
+                                aria-labelledby="userDropdown">
+                                <a class="dropdown-item" href="{% url 'account' %}">
+                                    <i class="fas fa-user-cog fa-sm fa-fw mr-2 text-gray-400"></i> Account Settings
+                                </a>
+                                <a class="dropdown-item" href="{% url 'activity' %}">
+                                    <i class="fas fa-history fa-sm fa-fw mr-2 text-gray-400"></i> Activity Log
+                                </a>
+                                <a class="dropdown-item" href="/admin">
+                                    <i class="fas fa-cogs fa-sm fa-fw mr-2 text-gray-400"></i> Admin Panel
+                                </a>
+                                <div class="dropdown-divider"></div>
+                                <div class="dropdown-divider"></div>
+                                <form method="post" action="{% url 'accounts:logout' %}">
+                                    {% csrf_token %}
+                                    <button type="submit" class="dropdown-item">
+                                        <i class="fas fa-sign-out-alt fa-sm fa-fw mr-2 text-gray-400"></i> Logout
+                                    </button>
+                                </form>
+                            </div>
+                            {% else %}
+                            <a class="nav-link" href="{% url 'accounts:login' %}">Login</a>
+                            {% endif %}
+                        </li>
+                    </ul>
+                </nav>
+                <!-- End of Topbar -->
+
+                <!-- Begin Page Content -->
+                <main>
+                    <div class="container-fluid">
+                        {% block content %}
+                        <!-- Съдържанието на всяка страница ще се вмъква тук -->
+                        {% endblock %}
+                    </div>
+                </main>
+                <!-- End Page Content -->
+
+            </div>
+            <!-- End Main Content -->
+
+            <!-- Footer -->
+            <footer class="sticky-footer bg-white">
+                <div class="container my-auto">
+                    <div class="copyright text-center my-auto">
+                        <span>&copy; RENEW 2025</span>
+                    </div>
+                </div>
+            </footer>
+            <!-- End of Footer -->
+
+        </div>
+        <!-- End Content Wrapper -->
+
+    </div>
+    <!-- End Wrapper -->
+
+    <!-- Scroll to Top Button-->
+    <a class="scroll-to-top rounded" href="#page-top">
+        <i class="fas fa-angle-up"></i>
+    </a>
+
+    {% block scripts %}
+    <!-- Custom scripts -->
+    <script src="{% static 'theme/vendor/jquery/jquery.min.js' %}"></script>
+    <script src="{% static 'theme/vendor/bootstrap/js/bootstrap.bundle.min.js' %}"></script>
+
+    <!-- Core plugin JavaScript-->
+    <script src="{% static 'theme/vendor/jquery-easing/jquery.easing.min.js' %}"></script>
+
+    <!-- Custom scripts for all pages-->
+    <script src="{% static 'theme/js/sb-admin-2.min.js' %}"></script>
+
+    <!-- Page level plugins -->
+    <script src="{% static 'theme/vendor/chart.js/Chart.min.js' %}"></script>
+
+    <!-- DataTables JavaScript -->
+    <script src="{% static 'theme/vendor/datatables/jquery.dataTables.min.js' %}"></script>
+    <script src="{% static 'theme/vendor/datatables/dataTables.bootstrap4.min.js' %}"></script>
+
+    <!-- WebSocket Connection -->
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            // Connect to WebSocket for real-time updates
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}/ws/stations/status/`;
+            let socket = new WebSocket(wsUrl);
+            let reconnectAttempts = 0;
+            const maxReconnectAttempts = 10;  // Increased max reconnection attempts
+            const reconnectDelay = 3000; // 3 seconds
+
+            // Connection opened
+            function onSocketOpen() {
+                console.log('WebSocket connected to station status updates');
+                reconnectAttempts = 0; // Reset reconnect attempts on successful connection
+                // Request initial data
+                socket.send(JSON.stringify({type: 'get_initial_data'}));
+            }
+            socket.onopen = onSocketOpen;
+
+            // Helper function to escape HTML to prevent XSS
+            function escapeHtml(text) {
+                if (text === null || text === undefined) return '';
+                const div = document.createElement('div');
+                div.textContent = String(text);
+                return div.innerHTML;
+            }
+
+            // Helper function to format time
+            function formatTime(isoString) {
+                if (!isoString) return 'N/A';
+                try {
+                    const date = new Date(isoString);
+                    return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+                } catch (e) {
+                    return 'N/A';
+                }
+            }
+
+            // Format time duration
+            function formatDuration(seconds) {
+                const hours = Math.floor(seconds / 3600);
+                const minutes = Math.floor((seconds % 3600) / 60);
+                return `${hours}:${minutes.toString().padStart(2, '0')}:00`;
+            }
+
+            // Update station status badge in the UI
+            function updateStationStatusBadge(stationId, status) {
+                const statusCell = document.getElementById(`status-${stationId}`);
+                if (!statusCell) return;
+                
+                let badgeClass = 'badge-secondary';
+                let statusText = status;
+                
+                switch(status.toLowerCase()) {
+                    case 'active':
+                        badgeClass = 'badge-success';
+                        statusText = 'Active';
+                        break;
+                    case 'inactive':
+                        badgeClass = 'badge-secondary';
+                        statusText = 'Inactive';
+                        break;
+                    case 'maintenance':
+                        badgeClass = 'badge-warning';
+                        statusText = 'Under Maintenance';
+                        break;
+                    default:
+                        statusText = status.charAt(0).toUpperCase() + status.slice(1);
+                }
+                
+                statusCell.innerHTML = `<span class="badge ${badgeClass}">${escapeHtml(statusText)}</span>`;
+            }
+
+            // Update connector status in the UI
+            function updateConnectorStatus(stationId, status) {
+                // Handle both "stationId-connectorId" format and just "stationId"
+                const parts = String(stationId).split('-');
+                const actualStationId = parts[0];
+                
+                const connectorCell = document.getElementById(`connector-status-${actualStationId}`);
+                if (!connectorCell) return;
+                
+                let badgeClass = 'badge-secondary';
+                let statusText = status;
+                
+                switch(status.toLowerCase()) {
+                    case 'available':
+                        badgeClass = 'badge-success';
+                        statusText = 'Available';
+                        break;
+                    case 'preparing':
+                        badgeClass = 'badge-info';
+                        statusText = 'Preparing';
+                        break;
+                    case 'charging':
+                        badgeClass = 'badge-primary';
+                        statusText = 'Charging';
+                        break;
+                    case 'suspendedev':
+                    case 'suspendedevse':
+                        badgeClass = 'badge-warning';
+                        statusText = 'Suspended';
+                        break;
+                    case 'finishing':
+                        badgeClass = 'badge-info';
+                        statusText = 'Finishing';
+                        break;
+                    case 'reserved':
+                        badgeClass = 'badge-secondary';
+                        statusText = 'Reserved';
+                        break;
+                    case 'faulted':
+                        badgeClass = 'badge-danger';
+                        statusText = 'Faulted';
+                        break;
+                    case 'offline':
+                        badgeClass = 'badge-dark';
+                        statusText = 'Offline';
+                        break;
+                    default:
+                        statusText = status.charAt(0).toUpperCase() + status.slice(1);
+                }
+                
+                connectorCell.innerHTML = `<span class="badge ${badgeClass}">${escapeHtml(statusText)}</span>`;
+            }
+
+            // Reconnect WebSocket function
+            function reconnectWebSocket() {
+                if (reconnectAttempts < maxReconnectAttempts) {
+                    reconnectAttempts++;
+                    const delay = Math.min(reconnectDelay * Math.pow(1.5, reconnectAttempts), 30000);
+                    console.log(`Reconnection attempt ${reconnectAttempts} of ${maxReconnectAttempts} in ${delay/1000}s...`);
+                    
+                    setTimeout(function() {
+                        socket = new WebSocket(wsUrl);
+                        // Re-attach event handlers
+                        socket.onopen = onSocketOpen;
+                        socket.onmessage = onSocketMessage;
+                        socket.onerror = onSocketError;
+                        socket.onclose = onSocketClose;
+                    }, delay);
+                } else {
+                    console.error('Max reconnection attempts reached. Please refresh the page.');
+                    const connectionStatus = document.getElementById('connectionStatus');
+                    if (connectionStatus) {
+                        connectionStatus.innerHTML = '<span class="text-danger">Connection lost. Please refresh the page.</span>';
+                    }
+                }
+            }
+
+            // Update active sessions table
+            function updateActiveSessionsTable(sessions) {
+                const tbody = document.querySelector('#activeChargingSessions tbody');
+                if (!tbody) return;
+                
+                tbody.innerHTML = ''; // Clear existing rows
+                
+                if (sessions.length === 0) {
+                    const row = document.createElement('tr');
+                    row.innerHTML = '<td colspan="7" class="text-center">No active charging sessions</td>';
+                    tbody.appendChild(row);
+                    return;
+                }
+                
+                sessions.forEach(session => {
+                    const row = document.createElement('tr');
+                    const startTime = new Date(session.start_time);
+                    const duration = formatDuration(Math.floor((new Date() - startTime) / 1000));
+                    
+                    row.innerHTML = `
+                        <td>${escapeHtml(session.station_id || 'N/A')}</td>
+                        <td>${escapeHtml(session.connector_id || 'N/A')}</td>
+                        <td>${escapeHtml(session.id_tag || 'Guest')}</td>
+                        <td>${formatTime(session.start_time)}</td>
+                        <td>${Number(session.energy_delivered || 0).toFixed(2)} kWh</td>
+                        <td>${escapeHtml(duration)}</td>
+                        <td><span class="badge badge-${session.status === 'Charging' ? 'success' : 'warning'}">${escapeHtml(session.status || 'Unknown')}</span></td>
+                    `;
+                    tbody.appendChild(row);
+                });
+            }
+
+            // Handle incoming WebSocket messages
+            function onSocketMessage(event) {
+                try {
+                    if (!event.data) {
+                        console.error('Received empty WebSocket message');
+                        return;
+                    }
+
+                    const data = JSON.parse(event.data);
+                    if (!data) {
+                        console.error('Invalid WebSocket message format:', event.data);
+                        return;
+                    }
+
+                    console.debug('WebSocket message received:', data);
+                    
+                    // Dispatch custom event for page-specific handlers
+                    window.dispatchEvent(new CustomEvent('ws-status-update', { detail: data }));
+                    
+                    // Handle connector status updates
+                    if (data.type === 'connector_status_update') {
+                        console.log('Received connector status update:', data);
+                        const stationId = data.station_id;
+                        const connectorId = data.connector_id;
+                        const status = data.status;
+                        
+                        // Update the connector status in the UI
+                        if (connectorId) {
+                            updateConnectorStatus(`${stationId}-${connectorId}`, status);
+                        }
+                        // If no connector ID, update the station status
+                        else {
+                            updateStationStatusBadge(stationId, status);
+                        }
+                        return;
+                    }
+                    
+                    // Handle station status updates
+                    if (data.type === 'status_update') {
+                        console.log('Received status update:', data);
+                        const stationId = data.station_id;
+                        const status = data.status;
+                        
+                        // Update the station status in the UI
+                        updateStationStatusBadge(stationId, status);
+                        
+                        // Also update the connector status if it exists
+                        const connectorId = data.connector_id;
+                        if (connectorId) {
+                            updateConnectorStatus(`${stationId}-${connectorId}`, status);
+                        }
+                        return;
+                    }
+                    
+                    // Handle full status updates
+                    if (data.type === 'status_update' && data.data) {
+                        const status = data.data;
+                        
+                        // Update dashboard counters if they exist on the page
+                        if (status.station_count !== undefined) {
+                            const totalStations = document.getElementById('totalStations');
+                            if (totalStations) totalStations.textContent = status.station_count;
+                            
+                            const onlineStations = document.getElementById('onlineStations');
+                            if (onlineStations) onlineStations.textContent = status.online_count || 0;
+                            
+                            const availableStations = document.getElementById('availableStations');
+                            if (availableStations) availableStations.textContent = status.available_count || 0;
+                            
+                            // Update progress bar
+                            const progressBar = document.getElementById('stationStatusBar');
+                            if (progressBar) {
+                                const percentage = status.station_count > 0 
+                                    ? Math.round((status.online_count / status.station_count) * 100) 
+                                    : 0;
+                                progressBar.style.width = `${percentage}%`;
+                                progressBar.setAttribute('aria-valuenow', percentage);
+                                
+                                // Update progress bar color based on status
+                                if (percentage < 30) {
+                                    progressBar.className = 'progress-bar bg-danger';
+                                } else if (percentage < 70) {
+                                    progressBar.className = 'progress-bar bg-warning';
+                                } else {
+                                    progressBar.className = 'progress-bar bg-success';
+                                }
+                            }
+                        }
+                        
+                        // Update active sessions if the element exists
+                        if (status.active_sessions !== undefined) {
+                            const activeSessions = document.getElementById('activeSessions');
+                            if (activeSessions) activeSessions.textContent = status.active_sessions;
+                        }
+                        
+                        // Update energy delivered if the element exists
+                        if (status.energy_delivered !== undefined) {
+                            const energyDelivered = document.getElementById('energyDelivered');
+                            if (energyDelivered) energyDelivered.textContent = status.energy_delivered.toFixed(2);
+                        }
+                        
+                        // Update total sessions if the element exists
+                        if (status.total_sessions !== undefined) {
+                            const totalSessions = document.getElementById('totalSessions');
+                            if (totalSessions) totalSessions.textContent = status.total_sessions;
+                        }
+                        
+                        // Update active charging sessions table if data is available
+                        if (status.active_charging_sessions) {
+                            updateActiveSessionsTable(status.active_charging_sessions);
+                        }
+                    } 
+                    // Handle full table updates
+                    else if (data.type === 'station_table_update' && data.html) {
+                        console.log('Updating station table with new HTML');
+                        // Find the stations table and replace its content
+                        const tempDiv = document.createElement('div');
+                        tempDiv.innerHTML = data.html;
+                        const newTable = tempDiv.querySelector('#dataTable');
+                        const currentTable = document.querySelector('#dataTable');
+                        
+                        if (newTable && currentTable) {
+                            // Store reference to parent before replacement
+                            const parentNode = currentTable.parentNode;
+                            
+                            // Destroy DataTables first if it exists
+                            if (typeof $ !== 'undefined' && $.fn.DataTable && $.fn.DataTable.isDataTable('#dataTable')) {
+                                $('#dataTable').DataTable().destroy();
+                            }
+                            
+                            // Replace the table with the new one
+                            parentNode.replaceChild(newTable.cloneNode(true), currentTable);
+                            
+                            // Reinitialize DataTables
+                            if (typeof $ !== 'undefined' && $.fn.DataTable) {
+                                $('#dataTable').DataTable({
+                                    responsive: true,
+                                    pageLength: 10
+                                });
+                            }
+                            
+                            console.log('Station table updated successfully');
+                        }
+                    }
+                    // Handle individual status updates
+                    else if (data.type === 'status_update' && data.station_id) {
+                        console.log(`Updating status for station ${data.station_id} to ${data.status}`);
+                        updateStationStatusBadge(data.station_id, data.status);
+                        
+                        // If connector status is also included in the update
+                        if (data.connector_status) {
+                            updateConnectorStatus(data.station_id, data.connector_status);
+                        }
+                    }
+                    
+                } catch (error) {
+                    console.error('Error processing WebSocket message:', error, event.data);
+                }
+            }
+            socket.onmessage = onSocketMessage
+
+            // Handle WebSocket errors
+            function onSocketError(error) {
+                console.error('WebSocket error:', error);
+                const errorDiv = document.getElementById('websocket-error');
+                if (errorDiv) {
+                    errorDiv.textContent = 'Connection error. Trying to reconnect...';
+                    errorDiv.style.display = 'block';
+                }
+                reconnectWebSocket();
+            }
+            socket.onerror = onSocketError;
+
+            // Handle WebSocket close
+            function onSocketClose(event) {
+                console.log('WebSocket connection closed:', event);
+                // Attempt to reconnect if not a normal closure
+                if (event.code !== 1000) {
+                    reconnectWebSocket();
+                }
+            }
+            socket.onclose = onSocketClose;
+
+        });
+    </script>
+
+    <!-- Global Search Functionality -->
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            // Global search functionality
+            function initializeSearch() {
+                const searchInputs = document.querySelectorAll('input[placeholder*="Search"]');
+                const searchButtons = document.querySelectorAll('button[type="button"]:has(.fa-search)');
+                
+                searchInputs.forEach(input => {
+                    input.addEventListener('keypress', function(e) {
+                        if (e.key === 'Enter') {
+                            performSearch(this.value);
+                        }
+                    });
+                });
+                
+                searchButtons.forEach(button => {
+                    button.addEventListener('click', function() {
+                        const input = this.closest('.input-group').querySelector('input');
+                        if (input) {
+                            performSearch(input.value);
+                        }
+                    });
+                });
+            }
+            
+            function performSearch(query) {
+                if (!query.trim()) {
+                    alert('Please enter a search term');
+                    return;
+                }
+                
+                // Determine search type based on query format
+                let searchType = 'all';
+                let searchUrl = '/admin/search/?q=' + encodeURIComponent(query);
+                
+                // Check if it's a transaction ID (UUID format)
+                if (query.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)) {
+                    searchUrl = '/admin/charging_stations/transaction/?transaction_id=' + encodeURIComponent(query);
+                }
+                // Check if it's RFID tag
+                else if (query.match(/^[A-Z0-9]{8,}$/)) {
+                    searchUrl = '/admin/charging_stations/transaction/?id_tag=' + encodeURIComponent(query);
+                }
+                // Check if it's station serial
+                else if (query.match(/^[A-Z]{2,}\d{4,}/)) {
+                    searchUrl = '/admin/charging_stations/station/?serial_number=' + encodeURIComponent(query);
+                }
+                // Check if it's address
+                else if (query.match(/^[a-zA-Z\s,]+$/)) {
+                    searchUrl = '/admin/charging_stations/station/?address=' + encodeURIComponent(query);
+                }
+                
+                // Redirect to search results
+                window.location.href = searchUrl;
+            }
+            
+            // Initialize search when page loads
+            initializeSearch();
+            
+            // Initialize alerts
+            loadAlerts();
+        });
+        
+        // Alerts functionality
+        async function loadAlerts() {
+            try {
+                const response = await fetch('/accounts/alerts/?limit=5');
+                const data = await response.json();
+                renderAlerts(data.alerts);
+                updateAlertCounter(data.statistics.total_active);
+            } catch (error) {
+                console.error('Error loading alerts:', error);
+                // Show fallback alerts
+                renderFallbackAlerts();
+            }
+        }
+        
+        function renderAlerts(alerts) {
+            const container = document.getElementById('alertsList');
+            
+            if (alerts.length === 0) {
+                container.innerHTML = `
+                    <div class="text-center py-3">
+                        <i class="fas fa-check-circle fa-2x text-success mb-2"></i>
+                        <p class="small text-muted">No active alerts</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            let html = '';
+            alerts.forEach(alert => {
+                const iconClass = getAlertIcon(alert.severity);
+                const bgClass = getAlertBgClass(alert.severity);
+                const timeAgo = getTimeAgo(new Date(alert.created_at));
+                
+                html += `
+                    <a class="dropdown-item d-flex align-items-center" href="#" onclick="handleAlertClick(${alert.id}); return false;">
+                        <div class="mr-3">
+                            <div class="icon-circle ${bgClass}">
+                                <i class="${iconClass} text-white"></i>
+                            </div>
+                        </div>
+                        <div class="flex-grow-1">
+                            <div class="small text-gray-500">${timeAgo}</div>
+                            <span class="${alert.severity === 'critical' || alert.severity === 'error' ? 'font-weight-bold' : ''}">${alert.title}</span>
+                            ${alert.is_acknowledged ? '<span class="badge badge-secondary ml-2">Acknowledged</span>' : ''}
+                        </div>
+                    </a>
+                `;
+            });
+            
+            container.innerHTML = html;
+        }
+        
+        function renderFallbackAlerts() {
+            const container = document.getElementById('alertsList');
+            container.innerHTML = `
+                <a class="dropdown-item d-flex align-items-center" href="#">
+                    <div class="mr-3">
+                        <div class="icon-circle bg-primary">
+                            <i class="fas fa-info text-white"></i>
+                        </div>
+                    </div>
+                    <div>
+                        <div class="small text-gray-500">System</div>
+                        <span>System alerts loading...</span>
+                    </div>
+                </a>
+            `;
+        }
+        
+        function getAlertIcon(severity) {
+            const icons = {
+                'info': 'fas fa-info',
+                'warning': 'fas fa-exclamation-triangle',
+                'error': 'fas fa-times-circle',
+                'critical': 'fas fa-exclamation-circle'
+            };
+            return icons[severity] || 'fas fa-info';
+        }
+        
+        function getAlertBgClass(severity) {
+            const classes = {
+                'info': 'bg-info',
+                'warning': 'bg-warning',
+                'error': 'bg-danger',
+                'critical': 'bg-danger'
+            };
+            return classes[severity] || 'bg-info';
+        }
+        
+        function getTimeAgo(date) {
+            const seconds = Math.floor((new Date() - date) / 1000);
+            
+            if (seconds < 60) return 'Just now';
+            if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+            if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
+            return `${Math.floor(seconds / 86400)}d ago`;
+        }
+        
+        function updateAlertCounter(count) {
+            const counter = document.querySelector('.badge-counter');
+            if (counter) {
+                if (count === 0) {
+                    counter.style.display = 'none';
+                } else if (count > 99) {
+                    counter.textContent = '99+';
+                } else {
+                    counter.textContent = count;
+                }
+            }
+        }
+        
+        function handleAlertClick(alertId) {
+            // Show alert details modal or navigate to alert details
+            showAlertDetails(alertId);
+        }
+        
+        function showAlertDetails(alertId) {
+            // Placeholder for alert details functionality
+            console.log('Show details for alert:', alertId);
+            // Could implement modal with alert details and actions (acknowledge, resolve)
+        }
+        
+        function showAllAlerts() {
+            // Navigate to alerts page or show modal with all alerts
+            console.log('Show all alerts');
+            // Could implement a dedicated alerts page
+        }
+        
+        // Auto-refresh alerts every 30 seconds
+        setInterval(loadAlerts, 30000);
+    </script>
+    
+    {% block extra_js %}{% endblock %}
+    {% endblock %}
+
+</body>
+
+</html>

@@ -1,0 +1,281 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container-fluid">
+    <!-- Page Heading -->
+    <div class="d-sm-flex align-items-center justify-content-between mb-4">
+        <h1 class="h3 mb-0 text-gray-800">API Demo</h1>
+        <div>
+            <button onclick="loadEnergyData()" class="btn btn-primary btn-sm">
+                <i class="fas fa-sync"></i> Refresh Energy Data
+            </button>
+            <button onclick="testChargingAPI()" class="btn btn-success btn-sm">
+                <i class="fas fa-car"></i> Test Charging API
+            </button>
+        </div>
+    </div>
+
+    <!-- Energy Data Section -->
+    <div class="row">
+        <div class="col-12">
+            <div class="card shadow mb-4">
+                <div class="card-header py-3">
+                    <h6 class="m-0 font-weight-bold text-primary">Energy Management Data</h6>
+                </div>
+                <div class="card-body">
+                    <div id="energy-data">
+                        <div class="text-center text-gray-500 py-4">
+                            <i class="fas fa-bolt fa-3x mb-3"></i>
+                            <p>Click "Refresh Energy Data" to load real-time data from the API</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Stations Section -->
+    <div class="row">
+        <div class="col-12">
+            <div class="card shadow mb-4">
+                <div class="card-header py-3">
+                    <h6 class="m-0 font-weight-bold text-primary">Charging Stations</h6>
+                </div>
+                <div class="card-body">
+                    <div id="stations-data">
+                        <div class="text-center text-gray-500 py-4">
+                            <i class="fas fa-charging-station fa-3x mb-3"></i>
+                            <p>Loading stations...</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- API Testing Section -->
+    <div class="row">
+        <div class="col-md-6">
+            <div class="card shadow mb-4">
+                <div class="card-header py-3">
+                    <h6 class="m-0 font-weight-bold text-primary">API Testing</h6>
+                </div>
+                <div class="card-body">
+                    <h6>Test Different API Endpoints:</h6>
+                    
+                    <div class="mb-3">
+                        <button onclick="testInverterStatus()" class="btn btn-outline-primary btn-sm me-2">
+                            Inverter Status
+                        </button>
+                        <button onclick="testChargingRecommendation()" class="btn btn-outline-success btn-sm me-2">
+                            Charging Recommendation
+                        </button>
+                        <button onclick="testDeyeAPI()" class="btn btn-outline-info btn-sm me-2">
+                            DeyeCloud Data
+                        </button>
+                    </div>
+                    
+                    <div id="api-test-results" class="mt-3">
+                        <small class="text-muted">Click a button to test API endpoints</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-md-6">
+            <div class="card shadow mb-4">
+                <div class="card-header py-3">
+                    <h6 class="m-0 font-weight-bold text-primary">Quick Actions</h6>
+                </div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <label class="form-label">Start Charging Session:</label>
+                        <div class="input-group">
+                            <input type="text" id="station-id" class="form-control" placeholder="Station ID" value="1">
+                            <input type="text" id="rfid-tag" class="form-control" placeholder="RFID Tag" value="1234567890">
+                            <button onclick="startChargingDemo()" class="btn btn-success">
+                                <i class="fas fa-play"></i> Start
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label class="form-label">Collect Energy Data:</label>
+                        <button onclick="collectDataDemo()" class="btn btn-warning w-100">
+                            <i class="fas fa-download"></i> Collect Data Now
+                        </button>
+                    </div>
+                    
+                    <div id="action-results" class="mt-3">
+                        <small class="text-muted">Results will appear here</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{% static 'js/api-client.js' %}"></script>
+<script>
+// Load data when page loads
+document.addEventListener('DOMContentLoaded', function() {
+    loadEnergyData();
+    loadStations();
+});
+
+// Load stations data
+async function loadStations() {
+    try {
+        window.EVPlatformAPI.showLoading('stations-data');
+        const stations = await window.EVPlatformAPI.getStations();
+        
+        const container = document.getElementById('stations-data');
+        container.innerHTML = `
+            <div class="row">
+                ${stations.results.map(station => `
+                    <div class="col-md-4 mb-3">
+                        <div class="card ${station.status === 'Available' ? 'border-success' : 'border-danger'}">
+                            <div class="card-body">
+                                <h6 class="card-title">${station.name}</h6>
+                                <p class="card-text">
+                                    <strong>Status:</strong> 
+                                    <span class="badge bg-${station.status === 'Available' ? 'success' : 'danger'}">
+                                        ${station.status}
+                                    </span><br>
+                                    <strong>Location:</strong> ${station.location}<br>
+                                    <strong>Connectors:</strong> ${station.connectors.length}
+                                </p>
+                                ${station.status === 'Available' ? `
+                                    <button onclick="startChargingFromStation(${station.id})" class="btn btn-success btn-sm">
+                                        <i class="fas fa-charging-station"></i> Start Charging
+                                    </button>
+                                ` : ''}
+                            </div>
+                        </div>
+                    </div>
+                `).join('')}
+            </div>
+        `;
+    } catch (error) {
+        window.EVPlatformAPI.showError('stations-data', error.message);
+    }
+}
+
+// Test functions
+async function testInverterStatus() {
+    try {
+        const data = await window.EVPlatformAPI.getInverterStatus();
+        document.getElementById('api-test-results').innerHTML = `
+            <div class="alert alert-success">
+                <strong>Inverter Status:</strong><br>
+                <pre>${JSON.stringify(data, null, 2)}</pre>
+            </div>
+        `;
+    } catch (error) {
+        document.getElementById('api-test-results').innerHTML = `
+            <div class="alert alert-danger">
+                <strong>Error:</strong> ${error.message}
+            </div>
+        `;
+    }
+}
+
+async function testChargingRecommendation() {
+    try {
+        const data = await window.EVPlatformAPI.getChargingRecommendation(
+            'EV123', 80, 30, 7200
+        );
+        document.getElementById('api-test-results').innerHTML = `
+            <div class="alert alert-success">
+                <strong>Charging Recommendation:</strong><br>
+                <pre>${JSON.stringify(data, null, 2)}</pre>
+            </div>
+        `;
+    } catch (error) {
+        document.getElementById('api-test-results').innerHTML = `
+            <div class="alert alert-danger">
+                <strong>Error:</strong> ${error.message}
+            </div>
+        `;
+    }
+}
+
+async function testDeyeAPI() {
+    try {
+        const stations = await window.EVPlatformAPI.getDeyeStations();
+        document.getElementById('api-test-results').innerHTML = `
+            <div class="alert alert-success">
+                <strong>DeyeCloud Stations:</strong><br>
+                <pre>${JSON.stringify(stations, null, 2)}</pre>
+            </div>
+        `;
+    } catch (error) {
+        document.getElementById('api-test-results').innerHTML = `
+            <div class="alert alert-danger">
+                <strong>Error:</strong> ${error.message}
+            </div>
+        `;
+    }
+}
+
+async function testChargingAPI() {
+    try {
+        const stations = await window.EVPlatformAPI.getStations();
+        showNotification('Charging API test completed successfully!', 'success');
+    } catch (error) {
+        showNotification(`Charging API test failed: ${error.message}`, 'error');
+    }
+}
+
+// Demo functions
+async function startChargingDemo() {
+    const stationId = document.getElementById('station-id').value;
+    const rfidTag = document.getElementById('rfid-tag').value;
+    
+    try {
+        const result = await window.EVPlatformAPI.startCharging(stationId, 1, rfidTag);
+        document.getElementById('action-results').innerHTML = `
+            <div class="alert alert-success">
+                <strong>Charging Started!</strong><br>
+                Transaction ID: ${result.transaction_id}<br>
+                Status: ${result.status}
+            </div>
+        `;
+    } catch (error) {
+        document.getElementById('action-results').innerHTML = `
+            <div class="alert alert-danger">
+                <strong>Error:</strong> ${error.message}
+            </div>
+        `;
+    }
+}
+
+async function collectDataDemo() {
+    try {
+        const result = await window.EVPlatformAPI.collectEnergyData();
+        document.getElementById('action-results').innerHTML = `
+            <div class="alert alert-success">
+                <strong>Data Collection Started!</strong><br>
+                Status: ${result.message || 'Data collection initiated successfully'}
+            </div>
+        `;
+        
+        // Refresh energy data after collection
+        setTimeout(() => loadEnergyData(), 2000);
+    } catch (error) {
+        document.getElementById('action-results').innerHTML = `
+            <div class="alert alert-danger">
+                <strong>Error:</strong> ${error.message}
+            </div>
+        `;
+    }
+}
+
+function startChargingFromStation(stationId) {
+    document.getElementById('station-id').value = stationId;
+    startChargingDemo();
+}
+</script>
+{% endblock %}
