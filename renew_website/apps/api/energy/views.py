@@ -11,19 +11,22 @@ from django.utils import timezone
 from rest_framework.views import APIView
 
 from .services import InverterDataService, EVChargingOptimizer
-from .models import InverterReading
+from .models import InverterReading, WorkMode
 from .serializers import (
     InverterReadingSerializer, 
     DashboardDataSerializer,
     ChargingRecommendationRequestSerializer,
-    ChargingRecommendationResponseSerializer
+    ChargingRecommendationResponseSerializer,
+    WorkModeSerializer
 )
+from renew_website.apps.api.deye.client import DeyeCloudClient, DeyeCloudError, WORK_MODE_MAP
+from .utils import run_work_mode_algorithm
 
 logger = logging.getLogger(__name__)
 
+# Global cache for websocket performance
+_ws_performance_stats = {}
 
-<<<<<<< Updated upstream
-=======
 # -----------------------
 # Deye helpers
 # -----------------------
@@ -55,7 +58,7 @@ def get_master_inverter() -> dict | None:
         client = DeyeCloudClient()
         
         # Use listWithDevice and filter deviceType=INVERTER (as per your client implementation).
-        stations_payload = client.station_list_with_device(page=1, size=20, device_type="INVERTER")
+        stations_payload = client.get_station_list(page=1, size=20, device_type="INVERTER")
 
         station_list = _extract_station_list(stations_payload)
         if not station_list:
@@ -177,7 +180,6 @@ def get_deye_work_mode() -> dict | None:
 # Views
 # -----------------------
 
->>>>>>> Stashed changes
 class InverterStatusView(APIView):
     """Get current status of all inverters."""
     permission_classes = [IsAuthenticated]
@@ -311,10 +313,7 @@ def dashboard_data(request):
         
         # Recent readings
         recent_readings = service.get_latest_readings()
-        
-<<<<<<< Updated upstream
-        # Calculate daily stats - use station data to avoid double counting
-=======
+
         # Get today's energy from Deye API directly (more accurate)
         try:
             # station_latest API returns minimal data (mostly powers), not daily energy
@@ -378,8 +377,6 @@ def dashboard_data(request):
             
             total_energy = 0.0  # Would need historical data for this
 
-        # Calculate peak generation from individual readings
->>>>>>> Stashed changes
         today = timezone.now().date()
         
         # Get all readings for today to calculate energy and peak
@@ -430,12 +427,7 @@ def dashboard_data(request):
 
 
 def energy_dashboard(request):
-<<<<<<< Updated upstream
-    """Energy management dashboard page."""
-    return render(request, 'deye/dashboard.html')
-=======
     return render(request, "deye/dashboard.html")
-
 
 @api_view(["GET", "POST"])
 @permission_classes([IsAuthenticated])
@@ -658,4 +650,3 @@ def run_algorithm(request):
     except Exception as e:
         logger.error("Failed to run algorithm: %s", e, exc_info=True)
         return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
->>>>>>> Stashed changes

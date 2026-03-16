@@ -321,3 +321,12 @@ def statistics(request: HttpRequest) -> HttpResponse:
 
 def tables(request: HttpRequest) -> HttpResponse:
     return render(request, "charging_stations/tables.html")
+
+def get_current_soc(request: HttpRequest, station_id: int) -> JsonResponse:
+    return JsonResponse({"status": "error", "message": "Not implemented"}, status=501)
+
+def get_soc_history(request: HttpRequest, station_id: int) -> JsonResponse:
+    return JsonResponse({"status": "error", "message": "Not implemented"}, status=501)
+
+def update_station_soc_config(request: HttpRequest, station_id: int) -> JsonResponse:
+    return JsonResponse({"status": "error", "message": "Not implemented"}, status=501)

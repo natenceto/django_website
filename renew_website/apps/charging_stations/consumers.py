@@ -1,1558 +1,1501 @@
-"""
-OCPP WebSocket Consumers for EV Charging Platform.
-
-This module contains:
-- ChargePoint: OCPP 1.6 protocol handler
-- ChargePointConsumer: WebSocket consumer for charging stations
-- StationStatusConsumer: WebSocket consumer for browser clients
-
-Module structure (future refactoring):
-- ocpp/registry.py: Active stations registry
-- ocpp/websocket.py: WebSocket wrapper for OCPP
-- ocpp/chargepoint.py: ChargePoint class (to be moved)
-"""
+# consumers.py
 import asyncio
 import json
 import logging
-from datetime import datetime, timedelta
+import datetime as py_datetime
+from datetime import timedelta
+from typing import Dict, Any, Union, Optional, Tuple
+
 from django.utils import timezone
-from django.core.serializers.json import DjangoJSONEncoder
+from django.db import transaction as db_transaction
 from channels.generic.websocket import AsyncWebsocketConsumer
 from channels.db import database_sync_to_async
-from django.db import transaction as db_transaction
+
 from ocpp.routing import on
 from ocpp.v16 import ChargePoint as OCPPChargePoint
 from ocpp.v16 import call, call_result
-from ocpp.v16.enums import RegistrationStatus, Action, AuthorizationStatus, AvailabilityType, ResetType, RemoteStartStopStatus
+from ocpp.v16.enums import (
+    RegistrationStatus,
+    Action,
+    AuthorizationStatus,
+    AvailabilityType,
+    ResetType,
+)
 
-# Import models at module level
+from .logging_config import get_ocpp_logger, get_station_logger
 from .models import Station, Connector, Transaction, UserRFID, MeterValue
+from .registry import ACTIVE_STATIONS
 
-# Global registry for active stations
-ACTIVE_STATIONS = {}
 
-# Global heartbeat tracking
-_last_heartbeat_log = {}
+# -------------------------
+# Logging
+# -------------------------
+ocpp_logger = get_ocpp_logger("consumers")
+logger = logging.getLogger("charging_stations")
 
-def register_station(station_id, consumer):
-    """Register a station as active."""
-    ACTIVE_STATIONS[station_id] = consumer
-    print(f"Station {station_id} registered in ACTIVE_STATIONS")
-    print(f"[DEBUG] ACTIVE_STATIONS after register: {list(ACTIVE_STATIONS.keys())}")
 
-def unregister_station(station_id):
-    """Unregister a station."""
-    if station_id in ACTIVE_STATIONS:
-        del ACTIVE_STATIONS[station_id]
-        print(f"Station {station_id} unregistered from ACTIVE_STATIONS")
-        print(f"[DEBUG] ACTIVE_STATIONS after unregister: {list(ACTIVE_STATIONS.keys())}")
+# -------------------------
+# Heartbeat throttling state
+# -------------------------
+_last_heartbeat_log: Dict[Union[int, str], py_datetime.datetime] = {}
+_last_heartbeat_db_update: Dict[Union[int, str], py_datetime.datetime] = {}
+_rapid_heartbeat_count: Dict[Union[int, str], Dict[str, Any]] = {}
+
+
+# -------------------------
+# WebSocket Performance Tracking
+# -------------------------
+_ws_performance_stats: Dict[Union[int, str], Dict[str, Any]] = {}
+_ws_metric_db_cache: Dict[Union[int, str], Any] = {}  # Cache DB metric objects
+
+def track_ws_performance(station_id: str, message_size: int, direction: str):
+    """
+    Track WebSocket performance metrics in memory and periodically save to database.
+    """
+    now = timezone.now()
+    
+    if station_id not in _ws_performance_stats:
+        _ws_performance_stats[station_id] = {
+            'messages_sent': 0,
+            'messages_received': 0,
+            'bytes_sent': 0,
+            'bytes_received': 0,
+            'last_activity': now,
+            'connection_start': now,
+            'db_save_count': 0,  # Track how many times we've saved to DB
+        }
+    
+    stats = _ws_performance_stats[station_id]
+    stats['last_activity'] = now
+    
+    if direction == 'sent':
+        stats['messages_sent'] += 1
+        stats['bytes_sent'] += message_size
+    elif direction == 'received':
+        stats['messages_received'] += 1
+        stats['bytes_received'] += message_size
+    
+    # Save to database periodically (every 100 messages or at least every 60 seconds)
+    total_messages = stats['messages_sent'] + stats['messages_received']
+    last_save_seconds = (now - stats['connection_start']).total_seconds()
+    
+    should_save = (
+        (total_messages % 100 == 0) or  # Every 100 messages
+        (stats['db_save_count'] == 0 and last_save_seconds >= 5) or  # First save after 5 seconds
+        (stats['db_save_count'] > 0 and last_save_seconds >= (stats['db_save_count'] * 60))  # Then every 60 seconds
+    )
+    
+    if should_save:
+        try:
+            _save_ws_metric_to_db(station_id, stats)
+            stats['db_save_count'] += 1
+        except Exception as e:
+            get_station_logger(station_id).warning(f"Failed to save WebSocket metric to DB: {e}")
+
+
+def _save_ws_metric_to_db(station_id: Union[int, str], stats: Dict[str, Any]):
+    """Save WebSocket performance metric to database (async-friendly)."""
+    from renew_website.apps.charging_stations.models import WebSocketPerformanceMetric, Station
+    
+    try:
+        station_id_int = int(station_id)
+        station = Station.objects.filter(id=station_id_int).first()
+        if not station:
+            return
         
-        # Clean up heartbeat tracking
-        if station_id in _last_heartbeat_log:
-            del _last_heartbeat_log[station_id]
-            print(f"[DEBUG] Cleaned up heartbeat tracking for station {station_id}")
-    else:
-        print(f"[DEBUG] Station {station_id} not found in ACTIVE_STATIONS for unregister")
+        # Get or create metric record
+        metric = _ws_metric_db_cache.get(station_id)
+        if not metric:
+            # Try to get active metric from DB
+            metric = WebSocketPerformanceMetric.objects.filter(
+                station_id=station_id_int,
+                is_active=True
+            ).order_by('-connection_start').first()
+            
+            # If no active metric or it's too old, create new one
+            if not metric:
+                metric = WebSocketPerformanceMetric.objects.create(
+                    station=station,
+                    connection_start=stats['connection_start']
+                )
+            
+            _ws_metric_db_cache[station_id] = metric
+        
+        # Update metric fields
+        metric.messages_sent = stats['messages_sent']
+        metric.messages_received = stats['messages_received']
+        metric.bytes_sent = stats['bytes_sent']
+        metric.bytes_received = stats['bytes_received']
+        metric.last_activity = stats['last_activity']
+        metric.update_metrics()  # Recalculate derived metrics
+        
+    except Exception as e:
+        ocpp_logger.warning(f"Error saving WS metric for station {station_id}: {e}")
 
-# Logger for this module
-logger = logging.getLogger('charging_stations')
+
+# -------------------------
+# Groups (single source of truth)
+# -------------------------
+UI_STATUS_GROUP = "stations_status"          # Browser UI websocket(s)
+UI_HTML_GROUP = "charging_stations_group"    # Existing HTML partial updates (if you use it)
+
+
+def _normalize_station_key(station_id: Union[int, str]) -> int:
+    return int(station_id)
+
+
+def register_station(station_id: Union[int, str], consumer) -> None:
+    key = _normalize_station_key(station_id)
+    ACTIVE_STATIONS[key] = consumer
+    ocpp_logger.info(f"Station {key} registered in ACTIVE_STATIONS")
+
+
+def unregister_station(station_id: Union[int, str]) -> None:
+    key = _normalize_station_key(station_id)
+    ACTIVE_STATIONS.pop(key, None)
+    for d in (_last_heartbeat_log, _last_heartbeat_db_update, _rapid_heartbeat_count):
+        d.pop(key, None)
+    
+    # Finalize WebSocket performance metric when station disconnects
+    _finalize_ws_metric(station_id)
+    
+    ocpp_logger.info(f"Station {key} unregistered from ACTIVE_STATIONS")
+
+
+def _finalize_ws_metric(station_id: Union[int, str]):
+    """Finalize WebSocket metric when connection ends."""
+    try:
+        stats = _ws_performance_stats.get(station_id)
+        if not stats:
+            return
+        
+        now = timezone.now()
+        _save_ws_metric_to_db(station_id, stats)  # Final save
+        
+        # Mark metric as disconnected in DB
+        from renew_website.apps.charging_stations.models import WebSocketPerformanceMetric
+        metric = _ws_metric_db_cache.get(station_id)
+        if metric:
+            metric.is_active = False
+            metric.connection_end = now
+            metric.update_metrics()
+            _ws_metric_db_cache.pop(station_id, None)
+        
+        # Clean up in-memory stats
+        _ws_performance_stats.pop(station_id, None)
+        
+    except Exception as e:
+        ocpp_logger.warning(f"Error finalizing WS metric for station {station_id}: {e}")
+
 
 # -------------------------
 # WebSocket wrapper for OCPP
 # -------------------------
 class WebSocketWrapper:
-    def __init__(self, consumer):
+    def __init__(self, consumer: AsyncWebsocketConsumer):
         self.consumer = consumer
-        self.queue = asyncio.Queue()
+        self.queue: asyncio.Queue[str] = asyncio.Queue()
 
-    async def send(self, message):
-        # Guard against sending after close - silently ignore instead of raising
+    async def send(self, message: str) -> None:
         if not getattr(self.consumer, "_connected", False) or getattr(self.consumer, "_is_closing", False):
-            return  # Silently ignore sends after close
+            return
         try:
+            # Track WebSocket performance for sent messages
+            try:
+                st_id = getattr(self.consumer, "station_id", None)
+                if st_id is not None:
+                    track_ws_performance(st_id, len(message), 'sent')
+            except Exception:
+                pass
+            
             await self.consumer.send(text_data=message)
         except RuntimeError:
-            # Connection already closed, ignore
-            pass
+            return
 
-    async def recv(self):
+    async def recv(self) -> str:
         return await self.queue.get()
 
-    async def feed(self, message):
-        # Check if this is a WebSocket ping message
-        if message.strip() == "ping" or message.strip() == "PING":
-            # Silently handle ping/pong
+    async def feed(self, message: str) -> None:
+        if message.strip().lower() == "ping":
             await self.send("pong")
             return
-        
         await self.queue.put(message)
 
+
 # -------------------------
-# OCPP ChargePoint class
+# OCPP ChargePoint (Central System endpoint)
 # -------------------------
 class ChargePoint(OCPPChargePoint):
-    def __init__(self, station_id, websocket, consumer):
-        super().__init__(station_id, websocket)
-        # Ensure station_id is consistently an int for DB lookups
-        try:
-            self.station_id = int(station_id)
-        except Exception:
-            self.station_id = station_id
+    """
+    Rules enforced:
+      - ACTIVE_STATIONS key is int station_id.
+      - UI events always go to UI_STATUS_GROUP with JSON {type: ...}.
+      - OCPP transactionId returned in StartTransaction is stored in Transaction.transaction_id.
+      - All lookups from OCPP transactionId use Transaction.transaction_id (fallback to pk).
+    """
+
+    def __init__(self, station_id: Union[int, str], websocket: WebSocketWrapper, consumer):
+        super().__init__(str(station_id), websocket)
+        self.station_id: int = _normalize_station_key(station_id)
+
         self.consumer = consumer
-        self.pending_requested_power = {}  # Store requested power per (connector_id, id_tag)
         self.db_lock = asyncio.Lock()
-        # Connection tracking
+
+        # optional: remember requested power for (connectorId, idTag) when RemoteStart includes profile
+        self.pending_requested_power: Dict[Tuple[int, str], Optional[float]] = {}
+
         self.last_seen = timezone.now()
-        self._connection_verified = False
-        self._heartbeat_task = None
-        self._connection_retries = 0
-        self._max_retries = 3
-        self._watchdog_task = None
-    
-    async def route_message(self, raw_msg):
-        """Override to handle malformed messages from simulator"""
+        self.heartbeat_interval = 60
+
+
+    async def route_message(self, raw_msg: str):
+        self.last_seen = timezone.now()
         try:
-            # Update liveness on any inbound message
-            self.last_seen = datetime.now().astimezone()
             return await super().route_message(raw_msg)
         except Exception as e:
-            # Suppress malformed error messages from simulator (incomplete CallError)
-            error_str = str(e)
-            if ("Payload for Action is incomplete" in error_str or 
-                "missing 2 required positional arguments" in error_str or
-                "doesn't seem to be valid OCPP" in error_str):
-                print(f"Ignoring malformed message from simulator: {raw_msg}")
+            s = str(e)
+            if (
+                "Payload for Action is incomplete" in s
+                or "missing 2 required positional arguments" in s
+                or "doesn't seem to be valid OCPP" in s
+            ):
+                ocpp_logger.warning(f"Ignoring malformed message from station/simulator: {raw_msg}")
                 return
-            # Re-raise other exceptions
             raise
 
-    # HEARTBEAT SENDER REMOVED - Central System should NOT send Heartbeat requests
-    # Only Charge Points should send Heartbeat to Central System
+    # -------------------------
+    # DB helpers
+    # -------------------------
+    @database_sync_to_async
+    def update_station_model(self, station_id: int, model: str, vendor: Optional[str] = None) -> bool:
+        try:
+            st = Station.objects.filter(id=station_id).first()
+            if not st:
+                return False
+            update_fields = []
+            if getattr(st, "model", None) in (None, ""):
+                st.model = model
+                update_fields.append("model")
+            # keep existing behavior: vendor -> connector_type (if you rely on it)
+            if vendor and getattr(st, "connector_type", None) in (None, ""):
+                st.connector_type = vendor
+                update_fields.append("connector_type")
+            if update_fields:
+                st.save(update_fields=update_fields)
+            return True
+        except Exception:
+            ocpp_logger.exception("Error updating station model")
+            return False
 
     @database_sync_to_async
-    def update_station_model(self, station_id, model, vendor=None):
-        """Update station model and vendor information."""
-        from .models import Station
+    def _touch_station_last_seen(self) -> None:
+        Station.objects.filter(id=self.station_id).update(last_seen=timezone.now())
+
+    async def _update_station_status_async(self, status: str, reason: str = "") -> bool:
+        station_id = self.station_id
+
+        @database_sync_to_async
+        def update_db() -> bool:
+            with db_transaction.atomic():
+                st = Station.objects.select_for_update().filter(id=station_id).first()
+                if not st:
+                    return False
+                changed = (st.status != status)
+                st.status = status
+                st.last_seen = timezone.now()
+                st.save(update_fields=["status", "last_seen"])
+                return changed
+
         try:
-            station = Station.objects.get(id=station_id)
-            if not station.model:  # Only update if model is not already set
-                station.model = model
-                if vendor and not station.connector_type:  # Set connector type if not set
-                    station.connector_type = vendor
-                station.save()
-                print(f"Updated station {station_id} model to {model}")
-            return True
-        except Exception as e:
-            print(f"Error updating station model: {e}")
+            changed = await update_db()
+        except Exception:
+            ocpp_logger.exception("Error updating station status in DB")
             return False
 
-    async def _debug_connection(self):
-        """Debug connection status and handshake"""
-        try:
-            print("\n=== Connection Debug ===")
-            print(f"Station ID: {getattr(self, 'station_id', 'N/A')}")
-            print(f"WebSocket state: {'OPEN' if hasattr(self, '_connection') and self._connection.open else 'CLOSED'}")
-            print(f"Last seen: {getattr(self, 'last_seen', 'Never')}")
-            print(f"Heartbeat interval: {getattr(self, 'heartbeat_interval', 'N/A')}s")
-            
-            # Try a simple ping
+        if changed and getattr(self, "consumer", None):
             try:
-                await asyncio.wait_for(self.call_heartbeat(), timeout=2.0)
-                print("Ping successful")
-                return True
-            except Exception as e:
-                print(f"Ping failed: {e}")
-                return False
-                
-        except Exception as e:
-            print(f"Debug error: {e}")
-            return False
+                await self.consumer.broadcast_station_status(station_id, status=status, reason=reason)
+            except Exception:
+                ocpp_logger.exception("Error broadcasting station status update")
 
-    async def verify_connection(self):
-        """Verify the connection is working properly."""
-        try:
-            print("\n=== Verifying Connection ===")
-            print("Sending GetConfiguration request...")
-            
-            # Add timeout to prevent hanging
-            config = await asyncio.wait_for(
-                self.call_get_configuration(keys=["HeartbeatInterval"]), 
-                timeout=5.0  # 5 seconds timeout
-            )
-            print(f"Got configuration: {config}")
-            
-            # Check if we can get meter values
-            print("Requesting meter values...")
-            try:
-                meter = await asyncio.wait_for(
-                    self.call_meter_values(connector_id=0), 
-                    timeout=3.0  # 3 seconds timeout
-                )
-                print(f"Got meter values: {meter}")
-            except Exception as e:
-                print(f"Could not get meter values (may be normal): {e}")
-                
-            print("Connection verification complete")
-            return True
-            
-        except asyncio.TimeoutError:
-            print("Connection verification failed: timeout")
-            return False
-        except Exception as e:
-            print(f"Connection verification failed: {e}")
-            return False
+        return changed
 
-    async def _connection_watchdog(self):
-        """Monitor the connection and attempt recovery if needed."""
-        while True:
-            try:
-                if not hasattr(self, 'last_seen') or (timezone.now() - self.last_seen).total_seconds() > self.heartbeat_interval * 2:
-                    print("No recent activity, checking connection...")
-                    if not await self._debug_connection():
-                        print("Connection appears down, attempting to recover...")
-                        self._connection_retries += 1
-                        if self._connection_retries > self._max_retries:
-                            print("Max retries reached, giving up...")
-                            break
-                            
-                        # Try to reset the connection safely
-                        try:
-                            if hasattr(self, 'consumer') and hasattr(self.consumer, 'close'):
-                                await self.consumer.close()
-                            await asyncio.sleep(1)
-                            # Reconnect logic would go here
-                        except Exception as e:
-                            print(f"Error during connection reset: {e}")
-                            break
-                else:
-                    self._connection_retries = 0  # Reset retry counter on successful activity
-                
-                await asyncio.sleep(self.heartbeat_interval)
-                
-            except asyncio.CancelledError:
-                print("Watchdog task cancelled")
-                break
-            except Exception as e:
-                print(f"Watchdog error: {e}")
-                await asyncio.sleep(5)  # Prevent tight loop on error
-
-    @on(Action.BootNotification)
-    async def on_boot_notification(self, charge_point_model=None, charge_point_vendor=None, **kwargs):
-        """Optimized boot notification handler with minimal blocking operations."""
-        try:
-            self.last_seen = timezone.now()
-            current_time = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S") + "Z"
-            station_id = getattr(self, "station_id", None)
-            
-            # Log boot notification
-            print("\n=== OCPP 1.6 BootNotification ===")
-            print(f"Station ID: {station_id}")
-            if charge_point_model:
-                print(f"Model: {charge_point_model}")
-            if charge_point_vendor:
-                print(f"Vendor: {charge_point_vendor}")
-            if kwargs.get('firmware_version'):
-                print(f"Firmware: {kwargs.get('firmware_version')}")
-            
-            # Set heartbeat interval (default 60s, can be overridden by station)
-            self.heartbeat_interval = 60
-            print(f"Heartbeat interval: {self.heartbeat_interval}s")
-            print("Status: Accepted\n")
-            
-            # Start async tasks that can run in parallel
-            model_update_task = None
-            if charge_point_model and station_id:
-                model_update_task = asyncio.create_task(
-                    self.update_station_model(station_id, charge_point_model, charge_point_vendor)
-                )
-            
-            # Update station status without waiting for completion
-            status_task = asyncio.create_task(
-                self._update_station_status_async('active', 'boot') if station_id else asyncio.sleep(0)
-            )
-            
-            # Schedule post-boot setup to run in background
-            asyncio.create_task(self._post_boot_setup())
-            
-            # Wait for critical tasks to complete (with timeout to prevent hanging)
-            if model_update_task:
-                try:
-                    await asyncio.wait_for(model_update_task, timeout=2.0)
-                except asyncio.TimeoutError:
-                    print("Warning: Model update took too long, continuing...")
-            
-            try:
-                await asyncio.wait_for(status_task, timeout=1.0)
-            except asyncio.TimeoutError:
-                print("Warning: Status update took too long, continuing...")
-            
-            # Start watchdog if not already running
-            if not hasattr(self, '_watchdog_task') or self._watchdog_task is None or self._watchdog_task.done():
-                self._watchdog_task = asyncio.create_task(self._connection_watchdog())
-                print("Started connection watchdog")
-            
-            # Skip connection verification to avoid disconnect
-            # asyncio.create_task(self._post_boot_verification())
-            
-            # Return response immediately
-            return call_result.BootNotificationPayload(
-                current_time=current_time,
-                interval=self.heartbeat_interval,
-                status=RegistrationStatus.accepted
-            )
-            
-        except Exception as e:
-            print(f"Error in boot notification (non-critical): {e}")
-            # Always return a response to the station
-            return call_result.BootNotificationPayload(
-                current_time=datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S") + "Z",
-                interval=60,
-                status=RegistrationStatus.accepted
-            )
-    
-    async def _update_station_status_async(self, status, reason=""):
-        """Update station status in the database and broadcast to clients"""
-        try:
-            # Database update in sync context
-            @database_sync_to_async
-            def update_db():
-                with db_transaction.atomic():
-                    station = Station.objects.select_for_update().filter(id=self.station_id).first()
-                    if station and station.status != status:
-                        old_status = station.status
-                        station.status = status
-                        station.last_seen = timezone.now()
-                        station.save(update_fields=['status', 'last_seen'])
-                        print(f"Station {self.station_id} status updated: {old_status} -> {status} (Reason: {reason})")
-                        return True
-                return False
-            
-            updated = await update_db()
-            
-            # Broadcast to WebSocket clients (in async context)
-            if updated and hasattr(self, 'consumer') and self.consumer:
-                try:
-                    await self.consumer.broadcast_status_update(status, reason)
-                except Exception as e:
-                    print(f"Error broadcasting status update: {e}")
-            
-            return updated
-        except Exception as e:
-            print(f"Error in _update_station_status_async: {e}")
-            import traceback
-            traceback.print_exc()
-            return False
-
-    async def _post_boot_setup(self):
-        """Optimized background setup with batched operations."""
-        try:
-            # Don't proceed if connection already closed
-            if not getattr(self.consumer, "_connected", False):
-                return
-                
-            # Get configuration with timeout
-            try:
-                config = await asyncio.wait_for(
-                    self.call_get_configuration(keys=["NumberOfConnectors"]), 
-                    timeout=3.0
-                )
-            except (asyncio.TimeoutError, Exception) as e:
-                print(f"Warning: Could not get configuration: {e}")
-                config = None
-            
-            # Determine number of connectors
-            num_connectors = 1  # Default to 1 connector
-            if config:
-                # Try to extract number of connectors from response
-                config_list = None
-                if isinstance(config, dict):
-                    config_list = config.get('configurationKey') or config.get('configuration_key') or config.get('key')
-                else:
-                    config_list = getattr(config, 'configuration_key', None) or getattr(config, 'configurationKey', None)
-                
-                if isinstance(config_list, (list, tuple)):
-                    for item in config_list:
-                        k = (item.get('key') if isinstance(item, dict) else getattr(item, 'key', None))
-                        if (k or '').lower() == 'numberofconnectors':
-                            v = item.get('value') if isinstance(item, dict) else getattr(item, 'value', None)
-                            try:
-                                num_connectors = max(1, int(v))
-                                break
-                            except (ValueError, TypeError):
-                                pass
-            
-            # Batch create missing connectors
-            await self._batch_create_connectors(num_connectors)
-            
-            # REMOVED: call_status_notification - doesn't exist in OCPP 1.6
-            # Chargers send StatusNotification on their own via @on(Action.StatusNotification)
-        except Exception as e:
-            print(f"Error in post-boot setup: {e}")
-            import traceback
-            traceback.print_exc()
-    
     @database_sync_to_async
-    def _batch_create_connectors(self, num_connectors):
-        """Efficiently create missing connectors in a single query."""
-        from django.db.models import Q
-        from .models import Connector
-        
-        if not hasattr(self, 'station_id') or not self.station_id:
-            return
-            
-        # Get existing connector IDs in a single query
-        existing = set(Connector.objects.filter(
-            station_id=self.station_id
-        ).values_list('connector_id', flat=True))
-        
-        # Prepare new connectors
-        new_connectors = [
-            Connector(
-                station_id=self.station_id,
-                connector_id=conn_id,
-                status='available',
-                created_at=timezone.now(),
-                updated_at=timezone.now()
-            )
-            for conn_id in range(1, num_connectors + 1)
-            if conn_id not in existing
+    def _batch_create_connectors(self, num_connectors: int) -> None:
+        existing = set(
+            Connector.objects.filter(station_id=self.station_id)
+            .values_list("connector_id", flat=True)
+        )
+        new = [
+            Connector(station_id=self.station_id, connector_id=cid, status="available")
+            for cid in range(1, num_connectors + 1)
+            if cid not in existing
         ]
-        
-        # Batch create all new connectors
-        if new_connectors:
-            Connector.objects.bulk_create(new_connectors)
-            print(f"Created {len(new_connectors)} new connectors for station {self.station_id}")
+        if new:
+            Connector.objects.bulk_create(new)
+
+    async def _post_boot_setup(self) -> None:
+        consumer = getattr(self, "consumer", None)
+        if not consumer or not getattr(consumer, "_connected", False):
+            return
+
+        config = None
+        try:
+            config = await asyncio.wait_for(
+                self.call_get_configuration(keys=["NumberOfConnectors"]),
+                timeout=10.0,
+            )
+        except asyncio.TimeoutError:
+            ocpp_logger.warning("GetConfiguration timeout (non-critical)")
+        except Exception:
+            ocpp_logger.exception("GetConfiguration failed (non-critical)")
+
+        num_connectors = 1
+        try:
+            cfg_list = getattr(config, "configuration_key", None) if config else None
+            if isinstance(cfg_list, (list, tuple)):
+                for item in cfg_list:
+                    if getattr(item, "key", None) == "NumberOfConnectors":
+                        num_connectors = max(1, int(getattr(item, "value", 1)))
+                        break
+        except Exception:
+            ocpp_logger.exception("Failed to parse NumberOfConnectors; using default 1")
+
+        try:
+            await self._batch_create_connectors(num_connectors)
+        except Exception:
+            ocpp_logger.exception("Failed to batch create connectors (non-critical)")
+
+        for cid in range(1, num_connectors + 1):
+            try:
+                await consumer.broadcast_connector_status(self.station_id, "available", cid)
+            except Exception:
+                ocpp_logger.exception("Failed to broadcast connector status")
+
+
+    # -------------------------
+    # OCPP 1.6J handlers
+    # -------------------------
+    @on(Action.BootNotification)
+    async def on_boot_notification(self, charge_point_vendor: str, charge_point_model: str, **kwargs):
+        station_id = self.station_id
+        station_logger = get_station_logger(station_id)
+
+        station_logger.info("=== OCPP 1.6 BootNotification ===")
+        station_logger.info(f"Station ID: {station_id}")
+        station_logger.info(f"Vendor: {charge_point_vendor}")
+        station_logger.info(f"Model: {charge_point_model}")
+
+        firmware_version = kwargs.get("firmware_version") or kwargs.get("firmwareVersion")
+        if firmware_version:
+            station_logger.info(f"Firmware: {firmware_version}")
+
+        self.heartbeat_interval = int(getattr(self, "default_heartbeat_interval", 60))
+        station_logger.info(f"Heartbeat interval: {self.heartbeat_interval}s")
+
+        try:
+            asyncio.create_task(self._update_station_status_async("active", "boot"))
+            asyncio.create_task(self._post_boot_setup())
+            asyncio.create_task(self.update_station_model(station_id, charge_point_model, charge_point_vendor))
+        except Exception:
+            ocpp_logger.exception("BootNotification background task error")
+
+        current_time = (
+            timezone.now()
+            .astimezone(py_datetime.timezone.utc)
+            .replace(microsecond=0)
+            .isoformat()
+            .replace("+00:00", "Z")
+        )
+
+        return call_result.BootNotificationPayload(
+            status=RegistrationStatus.accepted,
+            current_time=current_time,
+            interval=self.heartbeat_interval,
+        )
+
+    @on(Action.Authorize)
+    async def on_authorize(self, id_tag: str, **kwargs):
+        id_tag = (id_tag or "")[:20]
+
+        try:
+            is_valid = await database_sync_to_async(
+                lambda: UserRFID.objects.filter(
+                    tag=id_tag,
+                    stations__id=self.station_id,
+                    is_active=True,
+                ).exists()
+            )()
+        except Exception:
+            ocpp_logger.exception("Error checking RFID")
+            is_valid = False
+
+        if is_valid:
+            status = AuthorizationStatus.accepted.value
+        else:
+            status = AuthorizationStatus.invalid.value
+
+        if is_valid and getattr(self, "consumer", None):
+            try:
+                await self.consumer.broadcast_authorization_success(self.station_id, id_tag)
+            except Exception:
+                ocpp_logger.exception("Error broadcasting authorization success")
+
+        return call_result.AuthorizePayload(id_tag_info={"status": status})
 
     @on(Action.StatusNotification)
     async def on_status_notification(self, connector_id: int, error_code: str, status: str, **kwargs):
-        """
-        Handle StatusNotification message from the charging station.
-        Updates the connector status in the database.
-        """
-        from .models import Connector, Transaction, MeterValue
-        
-        # Update last_seen on every StatusNotification to prevent watchdog timeout
         self.last_seen = timezone.now()
-        
-        # Clean status notification output
-        print("\n=== OCPP 1.6 StatusNotification ===")
-        print(f"Station ID: {getattr(self, 'station_id', 'N/A')}")
-        print(f"Connector: {connector_id}")
-        print(f"Status: {status}")
-        if error_code and error_code != 'NoError':
-            print(f"Error Code: {error_code}")
-            
-        # Log important status changes
-        if status in ['Charging', 'SuspendedEVSE', 'SuspendedEV']:
-            print(f"Charging session in progress (Status: {status})")
-        elif status == 'Available':
-            print("Connector is available")
-            
-        # Extract and log timestamp if available
-        timestamp = kwargs.get('timestamp')
-        if timestamp:
-            print(f"Timestamp: {timestamp}")
-            
-        print()  # Add spacing between notifications
-        
-        # Extract vendor_connector_id from various possible locations
-        vendor_connector_id = None
-        info = kwargs.get('info', '')
-        
-        # Debug: Log all available fields in the message
-        print(f"[DEBUG] All available fields in StatusNotification: {', '.join(kwargs.keys())}")
-        
-        # Check common locations for vendor connector ID
-        vendor_connector_id = (
-            # Direct fields
-            kwargs.get('vendor_connector_id') or 
-            kwargs.get('vendorConnectorId') or
-            kwargs.get('connectorCode') or
-            kwargs.get('connector_id') or
-            # Sometimes it's in the vendor_error_code
-            (kwargs.get('vendor_error_code') if kwargs.get('vendor_error_code') not in ['0x0000', '0', ''] else None) or
-            # Check if serial number is in the path (from WebSocket URL)
-            (getattr(self.consumer, 'serial_number', None) if hasattr(self, 'consumer') else None)
-        )
-        
-        if vendor_connector_id:
-            print(f"[DEBUG] Found vendor_connector_id in message fields: {vendor_connector_id}")
-        
-        # Only process info field if it's not None, empty, or 'null' string
-        if info and str(info).strip().lower() not in ['', 'null']:
-            print(f"[DEBUG] Raw info field content: {info}")  # Debug log
-            
-            # Try to parse info as JSON if it looks like JSON
-            if info.strip().startswith('{') and info.strip().endswith('}'):
-                try:
-                    info_json = json.loads(info)
-                    print(f"[DEBUG] Parsed info JSON: {info_json}")  # Debug log
-                    
-                    # Look for common vendor-specific connector ID fields
-                    vendor_id_fields = [
-                        'vendorConnectorId', 'vendor_connector_id', 'connectorCode', 
-                        'externalId', 'connector_id', 'connectorId', 'id', 'connector',
-                        'connectorID', 'connector_id_number', 'serial_number', 'sn',
-                        'connector_serial', 'connectorSerial', 'connectorSerialNumber'
-                    ]
-                    
-                    # Try exact matches first (case sensitive)
-                    for field in vendor_id_fields:
-                        if field in info_json:
-                            vendor_connector_id = str(info_json[field])
-                            print(f"[DEBUG] Found vendor_connector_id in field '{field}': {vendor_connector_id}")
-                            break
-                    
-                    # If not found, try case-insensitive search
-                    if not vendor_connector_id:
-                        info_lower = {k.lower(): v for k, v in info_json.items()}
-                        for field in [f.lower() for f in vendor_id_fields]:
-                            if field in info_lower:
-                                vendor_connector_id = str(info_lower[field])
-                                print(f"[DEBUG] Found vendor_connector_id (case-insensitive) in field '{field}': {vendor_connector_id}")
-                                break
-                    
-                    # If still not found, try to find any field that might contain an ID
-                    if not vendor_connector_id:
-                        for k, v in info_json.items():
-                            if isinstance(v, str) and any(term in k.lower() for term in ['id', 'connector', 'serial']):
-                                vendor_connector_id = str(v)
-                                print(f"[DEBUG] Found potential ID in field '{k}': {vendor_connector_id}")
-                                break
-                                
-                except json.JSONDecodeError:
-                    print("[DEBUG] Info is not valid JSON, trying string patterns")  # Debug log
-                    # If not JSON, try to extract ID from string patterns
-                    import re
-                    # Common patterns for extracting IDs from strings
-                    patterns = [
-                        r'[Cc]onnector[ _-]?[Ii][Dd][:=]\s*["\']?([\w-]+)["\']?',
-                        r'[Ii][Dd][:=]\s*["\']?([\w-]+)["\']?',
-                        r'[Ss]erial[ _-]?[Nn]o?[\s:=]+["\']?([\w-]+)["\']?',
-                        r'[Cc]onnector[\s:]+([\w-]+)',
-                        r'ID[\s:]+([\w-]+)',
-                        r'([A-Z]{2,3}\d{4,})',  # Common ID patterns like AB1234, XYZ56789
-                        r'(\d{4,})'  # Any 4+ digit number
-                    ]
-                    
-                    for pattern in patterns:
-                        matches = re.findall(pattern, info)
-                        if matches:
-                            # Take the first non-empty match
-                            for match in matches:
-                                if match:  # Ensure match is not empty
-                                    vendor_connector_id = match
-                                    print(f"[DEBUG] Extracted ID using pattern '{pattern}': {vendor_connector_id}")
-                                    break
-                            if vendor_connector_id:
-                                break
-        
-        # Normalize OCPP status to model choices
+        station_id = self.station_id
+        station_logger = get_station_logger(station_id)
+
         def normalize_status(s: str) -> str:
             s_lower = (s or "").strip().lower()
-            # Map OCPP 1.6 statuses to our model choices
             mapping = {
                 "available": "available",
                 "preparing": "preparing",
                 "charging": "charging",
-                "suspendedev": "suspendedEV",
                 "suspendedevse": "suspendedEVSE",
+                "suspendedev": "suspendedEV",
                 "finishing": "finishing",
                 "reserved": "reserved",
                 "faulted": "faulted",
-                # OCPP has "unavailable" which we represent as "offline"
                 "unavailable": "offline",
             }
-            # direct match first
-            if s_lower in mapping:
-                return mapping[s_lower]
-            # handle exact case strings already matching model
-            allowed = {"available","preparing","charging","suspendedEV","suspendedEVSE","finishing","reserved","faulted","offline"}
-            if status in allowed:
-                return status
-            return "available"
+            return mapping.get(s_lower, "available")
 
-        normalized_status = normalize_status(status)
+        normalized = normalize_status(status)
 
-        # ConnectorId 0 is the EVSE (charge point) status, not a physical connector. Don't create DB records for it.
-        if connector_id == 0:
-            # Optionally, we could update station-level status here, but avoid creating a Connector(0)
-            print("Ignoring connector_id 0 for DB creation; treated as station-level status")
+        station_logger.info(
+            f"StatusNotification: station={station_id} connectorId={connector_id} status={status} -> {normalized} errorCode={error_code}"
+        )
+
+        # connectorId=0 is station-level state
+        if int(connector_id) == 0:
+            s = (status or "").strip().lower()
+            try:
+                if s == "available":
+                    asyncio.create_task(self._update_station_status_async("active", "status0"))
+                elif s in {"faulted", "unavailable"}:
+                    asyncio.create_task(self._update_station_status_async("inactive", "status0"))
+            except Exception:
+                ocpp_logger.exception("Failed scheduling station status update for connectorId=0")
             return call_result.StatusNotificationPayload()
 
-        # Update connector status in database
         try:
             async with self.db_lock:
-                def get_or_create_connector():
-                    # Prepare defaults including vendor_connector_id if available
-                    defaults = {
-                        "status": normalized_status,
-                    }
-                    if vendor_connector_id:
-                        defaults["vendor_connector_id"] = vendor_connector_id
-                    
-                    # Create or update connector record
-                    connector, created = Connector.objects.get_or_create(
-                        station_id=self.station_id,
-                        connector_id=connector_id,
-                        defaults=defaults
+
+                @database_sync_to_async
+                def upsert_connector():
+                    conn, created = Connector.objects.get_or_create(
+                        station_id=station_id,
+                        connector_id=int(connector_id),
+                        defaults={"status": normalized},
                     )
-                    
-                    # If connector exists, update vendor_connector_id if not already set or different
-                    if not created and vendor_connector_id and connector.vendor_connector_id != vendor_connector_id:
-                        connector.vendor_connector_id = vendor_connector_id
-                        connector.save(update_fields=['vendor_connector_id'])
-                    
-                    return connector, created
-                    
-                connector, created = await database_sync_to_async(get_or_create_connector)()
-                
-                if created:
-                    print(f"Connector {connector_id} created with status {normalized_status}")
-                elif connector.status != normalized_status:
-                    old_status = connector.status
-                    connector.status = normalized_status
-                    await database_sync_to_async(connector.save)()
-                    print(f"Connector {connector_id} status updated: {old_status} -> {normalized_status}")
-                
-                # Reconcile orphan active transaction if connector moves to a terminal/non-charging state
-                if normalized_status in ["available", "faulted"]:
-                    def finalize_active_transaction():
-                        # Find latest active transaction for this connector
+                    changed = False
+                    old = conn.status
+                    if old != normalized:
+                        conn.status = normalized
+                        conn.save(update_fields=["status"])
+                        changed = True
+                    return conn.id, created, changed, old
+
+                connector_pk, created, changed, old = await upsert_connector()
+
+                # reconcile active tx if connector ends or faults
+                if normalized in {"available", "faulted", "offline"}:
+
+                    @database_sync_to_async
+                    def reconcile_tx():
+                        conn = Connector.objects.get(pk=connector_pk)
                         tx = (
                             Transaction.objects
-                            .filter(connector=connector, status="active")
-                            .order_by("-id")
+                            .filter(connector=conn, status="active")
+                            .order_by("-started_at", "-id")
                             .first()
                         )
                         if not tx:
                             return None
-                        # Try to get the latest meter value to use as meter_stop
+
                         last_mv = (
                             MeterValue.objects
                             .filter(transaction=tx)
-                            .order_by("-timestamp")
+                            .order_by("-timestamp", "-id")
                             .first()
                         )
-                        if last_mv:
+                        if last_mv and last_mv.value is not None:
                             tx.meter_stop = last_mv.value
-                        tx.stopped_at = datetime.now().astimezone()
-                        tx.status = "completed" if status == "available" else "error"
-                        tx.save()
-                        return tx.id
-                    finalized_tx_id = await database_sync_to_async(finalize_active_transaction)()
-                    if finalized_tx_id:
-                        print(f"Reconciled transaction {finalized_tx_id} due to connector status '{status}'")
 
-                # Ensure station is marked active even if BootNotification wasn't received
-                if hasattr(self, 'consumer'):
-                    await self.consumer.update_station_status(self.station_id, "active", "status")
-                    # Broadcast connector status AFTER station status so UI updates correctly
-                    await self.consumer.broadcast_connector_status(self.station_id, normalized_status)
-        except Exception as e:
-            print(f"Error updating connector status: {e}")
-        
+                        tx.stopped_at = timezone.now()
+                        tx.status = "completed" if normalized == "available" else "error"
+                        tx.save(update_fields=["meter_stop", "stopped_at", "status"])
+                        return tx.transaction_id or tx.id
+
+                    finalized = await reconcile_tx()
+                    if finalized:
+                        station_logger.warning(f"Reconciled transaction {finalized} due to connector status {status}")
+
+                asyncio.create_task(self._update_station_status_async("active", "status"))
+
+                consumer = getattr(self, "consumer", None)
+                if consumer:
+                    await consumer.broadcast_connector_status(station_id, normalized, int(connector_id))
+
+        except Exception:
+            ocpp_logger.exception("Error processing StatusNotification")
+
         return call_result.StatusNotificationPayload()
-
-
-    # DUPLICATE _post_boot_setup METHODS REMOVED - Using the first implementation above
-
-    async def _post_boot_verification(self):
-        """Run after boot to verify the connection is stable."""
-        # Completely disable post-boot verification to avoid disconnect
-        print("[DEBUG] Skipping post-boot verification to maintain connection")
-        
-        # If we have a consumer, update the status
-        if hasattr(self, 'consumer') and hasattr(self, 'station_id'):
-            await self.consumer.update_station_status(self.station_id, "active", "boot")
 
     @on(Action.Heartbeat)
     async def on_heartbeat(self):
-        """Handle heartbeat from charging station."""
         self.last_seen = timezone.now()
-        local_time = timezone.localtime(self.last_seen)
-        
-        # Only log every 60 seconds to reduce spam
-        # Use simple global variable to persist between calls
-        global _last_heartbeat_log
-        
-        station_id = getattr(self, 'station_id', '?')
-        if station_id not in _last_heartbeat_log:
-            _last_heartbeat_log[station_id] = None
-        
-        current_time = timezone.now()
-        last_log = _last_heartbeat_log[station_id]
-        
-        # Debug: Check time difference
-        time_diff = 0
-        if last_log is not None:
-            time_diff = (current_time - last_log).total_seconds()
-        
-        if (last_log is None or time_diff >= 60):
-            print(f"[Heartbeat] Station {station_id} - {local_time.strftime('%H:%M:%S')} (diff: {time_diff:.0f}s)")
-            _last_heartbeat_log[station_id] = current_time
-        else:
-            # Skip logging to reduce spam
-            pass
-        
-        # Update last seen in database
-        if hasattr(self, 'station_id') and self.station_id:
-            await self._update_station_last_seen()
-            
-        return call_result.HeartbeatPayload(
-            current_time=datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S") + "Z"
-        )
-        
-    @database_sync_to_async
-    def _update_station_last_seen(self):
-        """Update station's last seen timestamp."""
-        from .models import Station
-        try:
-            Station.objects.filter(id=self.station_id).update(
-                last_seen=timezone.now()
-            )
-        except Exception as e:
-            print(f"Error updating last_seen: {e}")
+        station_id = self.station_id
+        station_logger = get_station_logger(station_id)
 
-    # DUPLICATE _post_boot_setup METHODS REMOVED - Using the first implementation above
+        LOG_THROTTLE = 60
+        DB_UPDATE_THROTTLE = 15
+        RAPID_COUNT_LIMIT = 10
+
+        now_ts = timezone.now()
+
+        last_log = _last_heartbeat_log.get(station_id)
+        if not last_log or (now_ts - last_log).total_seconds() >= LOG_THROTTLE:
+            station_logger.info("Heartbeat received")
+            _last_heartbeat_log[station_id] = now_ts
+
+        last_db = _last_heartbeat_db_update.get(station_id)
+        if not last_db or (now_ts - last_db).total_seconds() >= DB_UPDATE_THROTTLE:
+            _last_heartbeat_db_update[station_id] = now_ts
+            try:
+                await self._touch_station_last_seen()
+            except Exception:
+                ocpp_logger.exception("Failed updating station last_seen")
+
+        window = _rapid_heartbeat_count.setdefault(station_id, {"count": 0, "window_start": now_ts})
+        if (now_ts - window["window_start"]).total_seconds() < LOG_THROTTLE:
+            window["count"] += 1
+        else:
+            window["count"] = 1
+            window["window_start"] = now_ts
+
+        if window["count"] > RAPID_COUNT_LIMIT:
+            station_logger.warning(f"Rapid heartbeats detected ({window['count']} in {LOG_THROTTLE}s)")
+
+        current_time = (
+            now_ts.astimezone(py_datetime.timezone.utc)
+            .replace(microsecond=0)
+            .isoformat()
+            .replace("+00:00", "Z")
+        )
+        return call_result.HeartbeatPayload(current_time=current_time)
+
 
     @on(Action.MeterValues)
-    async def on_meter_value(self, connector_id, meter_value, transaction_id=None, **kwargs):
-        from .models import Transaction, MeterValue, Station
-        
-        print(f"MeterValues received: connector={connector_id}, transaction={transaction_id}")
-        print(f"Raw meter_value data: {meter_value}")
-        
-        # Get station information for intelligent defaults
-        station_info = await database_sync_to_async(
-            lambda: Station.objects.filter(id=self.station_id).values(
-                'connector_type', 'power_output', 'address'
-            ).first()
-        )()
-        
-        # Determine intelligent defaults based on station info
-        is_dc_charger = 'DC' in str(station_info.get('connector_type', '')).upper() or station_info.get('power_output', 0) > 50
-        power_output = station_info.get('power_output', 22)
-        
-        # Set defaults based on station characteristics
-        default_measurand = 'Energy.Active.Import.Register'  # Default for AC charging
-        if is_dc_charger:
-            default_measurand = 'Energy.Active.Import.Register'  # Could be different for DC
-        
-        default_unit = 'Wh'  # Default unit
-        
-        print(f"Station info: {station_info}, is_dc_charger: {is_dc_charger}")
-        
-        # Save meter values to database if transaction exists
-        if transaction_id:
-            async def save_meter_values():
-                try:
-                    transaction = await database_sync_to_async(
-                        Transaction.objects.get
-                    )(id=transaction_id)
-                    print(f"Found transaction {transaction_id}")
+    async def on_meter_values(
+        self,
+        connector_id: int,
+        meter_value,
+        transaction_id: Optional[int] = None,
+        **kwargs,
+    ):
+        self.last_seen = timezone.now()
 
-                    # Ensure aggregate MeterValue exists
-                    def get_or_create_mv():
-                        mv, created = MeterValue.objects.get_or_create(
-                            transaction=transaction,
-                            defaults={
-                                "value": transaction.meter_start,
-                                "data": {"start": {"meter_start": transaction.meter_start}, "samples": []},
-                            },
+        soc_percentage: Optional[float] = None
+        soc_timestamp: Optional[str] = None
+        soc_source: Optional[str] = None
+
+        # ---------------------------
+        # Define vendor-specific measurands
+        # ---------------------------
+        vendor_soc_fields = ["BatterySOC", "BatteryLevel", "SOCPercent"]  # ABB or other vendors
+
+        # ---------------------------
+        # Parse SoC safely
+        # ---------------------------
+        try:
+            for mv in meter_value or []:
+                parent_ts = mv.get("timestamp")
+
+                for sv in (mv.get("sampled_value") or []):
+                    measurand = sv.get("measurand")
+                    unit = sv.get("unit")
+                    value = sv.get("value")
+
+                    if measurand in ("SoC", "StateOfCharge", "soc") or measurand in vendor_soc_fields:
+                        if unit not in (None, "Percent", "%"):
+                            continue
+
+                        try:
+                            parsed = float(value)
+                            # Convert fraction to percent if necessary
+                            if parsed <= 1:
+                                parsed *= 100
+                        except (TypeError, ValueError):
+                            continue
+
+                        # sanity bounds
+                        if 0 <= parsed <= 100:
+                            soc_percentage = parsed
+                            soc_timestamp = parent_ts
+                            soc_source = "iso15118" if measurand in ("SoC", "StateOfCharge", "soc") else "vendor"
+                            break
+
+                if soc_percentage is not None:
+                    break
+
+        except Exception:
+            ocpp_logger.exception("Failed parsing SoC from MeterValues")
+
+        if not transaction_id:
+            return call_result.MeterValuesPayload()
+
+        # ---------------------------
+        # Persist safely
+        # ---------------------------
+        async with self.db_lock:
+
+            @database_sync_to_async
+            def persist():
+                tx = (
+                    Transaction.objects
+                    .filter(transaction_id=int(transaction_id))
+                    .first()
+                )
+
+                if not tx:
+                    tx = Transaction.objects.filter(id=int(transaction_id)).first()
+
+                if not tx:
+                    tx = (
+                        Transaction.objects
+                        .filter(
+                            connector__station_id=self.station_id,
+                            status="active",
                         )
-                        return mv, created
+                        .order_by("-started_at", "-id")
+                        .first()
+                    )
 
-                    mv, created = await database_sync_to_async(get_or_create_mv)()
+                    if not tx:
+                        return None
 
-                    # Append sampled values to mv.data["samples"]
-                    data = mv.data or {}
-                    samples = data.get("samples") or []
-                    saved_count = 0
-                    for sample in meter_value:
-                        print(f"   Processing sample: {sample}")
-                        sampled_values = sample.get('sampled_value', [])
-                        print(f"   Found {len(sampled_values)} sampled_value(s)")
-                        parent_ts = sample.get('timestamp')
-                        for sv in sampled_values:
-                            value = sv.get('value')
-                            print(f"   Sampled value: {sv}, extracted value: {value}")
-                            if value is None:
-                                continue
-                            enriched_sv = {
-                                'value': sv.get('value'),
-                                'context': sv.get('context', 'Sample.Periodic'),
-                                'format': sv.get('format', 'Raw'),
-                                'measurand': sv.get('measurand', default_measurand),
-                                'phase': sv.get('phase', 'L1' if not is_dc_charger else 'L1'),
-                                'location': sv.get('location', 'Outlet'),
-                                'unit': sv.get('unit', default_unit),
-                                'timestamp': parent_ts,
+                agg, _ = MeterValue.objects.get_or_create(
+                    transaction=tx,
+                    defaults={
+                        "value": tx.meter_start,
+                        "data": {
+                            "start": {"meter_start": tx.meter_start},
+                            "samples": [],
+                        },
+                    },
+                )
+
+                data = agg.data or {}
+                samples = data.get("samples") or []
+
+                # ---------------------------
+                # Append new samples
+                # ---------------------------
+                for mv in meter_value or []:
+                    ts = mv.get("timestamp")
+
+                    for sv in (mv.get("sampled_value") or []):
+                        if sv.get("value") is None:
+                            continue
+
+                        samples.append(
+                            {
+                                "timestamp": ts,
+                                "value": sv.get("value"),
+                                "context": sv.get("context"),
+                                "format": sv.get("format"),
+                                "measurand": sv.get("measurand"),
+                                "phase": sv.get("phase"),
+                                "location": sv.get("location"),
+                                "unit": sv.get("unit"),
                             }
-                            samples.append(enriched_sv)
-                            saved_count += 1
+                        )
 
-                    data["samples"] = samples
-                    mv.data = data
-                    await database_sync_to_async(mv.save)()
+                # ---------------------------
+                # Prevent unbounded growth (keep last 500 samples)
+                # ---------------------------
+                MAX_SAMPLES = 500
+                if len(samples) > MAX_SAMPLES:
+                    samples = samples[-MAX_SAMPLES:]
 
-                    if saved_count == 0:
-                        print(f"No meter values were saved (data structure might be different)")
-                    else:
-                        print(f"Total saved: {saved_count} sampled_value(s) appended to aggregate record")
+                data["samples"] = samples
+                agg.data = data
 
-                except Transaction.DoesNotExist:
-                    print(f"Transaction {transaction_id} not found in database")
-                except Exception as e:
-                    print(f"Error saving meter values: {type(e).__name__}: {e}")
-                    import traceback
-                    traceback.print_exc()
-            
-            await save_meter_values()
-        else:
-            print(f"No transaction_id provided, skipping save")
-        
+                # ---------------------------
+                # Persist SoC if valid
+                # ---------------------------
+                if soc_percentage is not None:
+                    agg.soc_percentage = soc_percentage
+                    agg.soc_timestamp = soc_timestamp or timezone.now()
+                    agg.soc_source = soc_source
+
+                agg.save()
+
+                return {
+                    "station_id": self.station_id,
+                    "soc_percentage": soc_percentage,
+                }
+
+            result = await persist()
+
+        # ---------------------------
+        # Broadcast SoC update
+        # ---------------------------
+        if (
+            result
+            and result.get("soc_percentage") is not None
+            and getattr(self, "consumer", None)
+        ):
+            try:
+                await self.consumer.broadcast_soc_update(
+                    self.station_id,
+                    float(result["soc_percentage"]),
+                )
+            except Exception:
+                ocpp_logger.exception("Failed broadcasting SoC update")
+
         return call_result.MeterValuesPayload()
 
 
-    @on(Action.SecurityEventNotification)
-    async def on_security_event_notification(self, type: str, timestamp: str, tech_info: str | None = None, **kwargs):
+    @on(Action.DataTransfer)
+    async def on_data_transfer(self, vendor_id: str, message_id: Optional[str] = None, data: Optional[str] = None, **kwargs):
         """
-        Handle SecurityEventNotification from the station (OCPP 1.6 Security extension).
-        Minimal implementation: log and acknowledge.
+        Supports:
+          - Generic / SoCData: data is JSON string {"soc": <num>, "timestamp": "<iso>"}
+          - Optional vendor parsing based on Station.supports_vendor_soc + Station.vendor_id
         """
-        try:
-            print(
-                f"SecurityEventNotification received: type={type}, timestamp={timestamp}, tech_info={tech_info}, extra={kwargs}"
-            )
-        except Exception as e:
-            # Ensure we always ack even if logging fails
-            print(f"Error logging SecurityEventNotification: {e}")
+        # Generic SoCData (your simulator)
+        if (vendor_id or "") == "Generic" and (message_id or "") == "SoCData" and data:
+            try:
+                payload = json.loads(data) if isinstance(data, str) else data
+                soc_raw = payload.get("soc")
+                if soc_raw is not None:
+                    soc_value = float(soc_raw)
 
-        # Acknowledge receipt per OCPP spec with an empty payload
+                    ts = None
+                    ts_raw = payload.get("timestamp")
+                    if ts_raw:
+                        try:
+                            ts = timezone.datetime.fromisoformat(str(ts_raw).replace("Z", "+00:00"))
+                        except Exception:
+                            ts = None
+                    ts = ts or timezone.now()
+
+                    await self._persist_soc_from_vendor(soc_value, ts, source="vendor:generic")
+                    if getattr(self, "consumer", None):
+                        await self.consumer.broadcast_soc_update(self.station_id, soc_value)
+            except Exception:
+                ocpp_logger.exception("Error processing Generic SoCData")
+            return call_result.DataTransferPayload(status="Accepted")
+
+        # Vendor SoC based on station config
+        try:
+            station_info = await database_sync_to_async(
+                lambda: Station.objects.filter(id=self.station_id).values("vendor_id", "supports_vendor_soc").first()
+            )()
+        except Exception:
+            station_info = None
+
+        if station_info and station_info.get("supports_vendor_soc") and station_info.get("vendor_id") == vendor_id and data:
+            try:
+                soc_data = self.parse_vendor_soc_data(data, vendor_id)
+                if soc_data:
+                    await self.process_vendor_soc(soc_data)
+            except Exception:
+                ocpp_logger.exception("Error processing vendor DataTransfer")
+
+        return call_result.DataTransferPayload(status="Accepted")
+
+    @database_sync_to_async
+    def _persist_soc_from_vendor(self, soc_value: float, ts, source: str) -> None:
+        tx = (
+            Transaction.objects
+            .filter(connector__station_id=self.station_id, status="active")
+            .order_by("-started_at", "-id")
+            .first()
+        )
+        if not tx:
+            return
+
+        mv = (
+            MeterValue.objects
+            .filter(transaction=tx)
+            .order_by("-timestamp", "-id")
+            .first()
+        )
+        if not mv:
+            mv = MeterValue.objects.create(
+                transaction=tx,
+                value=tx.meter_start,
+                timestamp=ts,
+                data={"samples": []},
+            )
+
+        mv.soc_percentage = float(soc_value)
+        mv.soc_timestamp = ts
+        mv.soc_source = source
+        mv.save(update_fields=["soc_percentage", "soc_timestamp", "soc_source"])
+
+    @on(Action.DiagnosticsStatusNotification)
+    async def on_diagnostics_status_notification(self, status: str, **kwargs):
+        ocpp_logger.info(f"DiagnosticsStatusNotification: station={self.station_id} status={status}")
+        return call_result.DiagnosticsStatusNotificationPayload()
+
+    @on("SecurityEventNotification")
+    async def on_security_event_notification(self, type: str, timestamp: str, **kwargs):
+        try:
+            get_station_logger(self.station_id).info(
+                "SecurityEventNotification: station=%s type=%s timestamp=%s techInfo=%s",
+                self.station_id,
+                type,
+                timestamp,
+                kwargs.get("techInfo"),
+            )
+        except Exception:
+            pass
         return call_result.SecurityEventNotificationPayload()
 
-    @on(Action.Authorize)
-    async def on_authorize(self, id_tag, **kwargs):
-        from .models import UserRFID
-
-        # Check if RFID tag exists, is active, and is assigned to this station
-        async def check_rfid():
-            try:
-                # UserRFID has ManyToMany 'stations' field, so use stations__id for lookup
-                return await database_sync_to_async(
-                    lambda: UserRFID.objects.filter(
-                        tag=id_tag,
-                        stations__id=self.station_id,
-                        is_active=True
-                    ).exists()
-                )()
-            except Exception as e:
-                print(f"Error checking RFID: {e}")
-                return False
-
-        is_valid = await check_rfid()
-        status = AuthorizationStatus.accepted if is_valid else AuthorizationStatus.invalid
-        
-        # Clean, professional authorization logging
-        print("\n=== OCPP 1.6 Authorize ===")
-        print(f"Station ID: {getattr(self, 'station_id', 'N/A')}")
-        print(f"RFID Tag: {id_tag}")
-        print(f"Authorization: {'GRANTED' if is_valid else 'DENIED'}")
-        if not is_valid:
-            print("Reason: Invalid or unauthorized RFID tag")
-        print()  # Add spacing
-
-        # Return the authorization result
-        return call_result.AuthorizePayload(
-            id_tag_info={"status": status}
-        )
-
-    
     @on(Action.StartTransaction)
-    async def on_start_transaction(self, connector_id, id_tag, timestamp, meter_start, **kwargs):
+    async def on_start_transaction(self, connector_id: int, id_tag: str, timestamp: str, meter_start: int, **kwargs):
+        id_tag = (id_tag or "")[:20]
+
         try:
-            # Validate RFID tag before starting a transaction
-            is_valid_tag = await database_sync_to_async(
-                lambda: UserRFID.objects.filter(tag=id_tag).exists()
+            is_valid = await database_sync_to_async(
+                lambda: UserRFID.objects.filter(
+                    tag=id_tag,
+                    stations__id=self.station_id,
+                    is_active=True,
+                ).exists()
             )()
+        except Exception:
+            ocpp_logger.exception("RFID validation error")
+            is_valid = False
 
-            if not is_valid_tag:
-                print(f"StartTransaction rejected: invalid id_tag={id_tag}")
-                return call_result.StartTransactionPayload(
-                    transaction_id=0,
-                    id_tag_info={"status": AuthorizationStatus.invalid.value}
-                )
-            
-            print(f"StartTransaction: connector={connector_id}, id_tag={id_tag}")
+        if not is_valid:
+            return call_result.StartTransactionPayload(
+                transaction_id=0,
+                id_tag_info={"status": AuthorizationStatus.invalid.value},
+            )
 
-            # Get requested power from pending requests
-            key = (connector_id, id_tag)
-            requested_power = self.pending_requested_power.get(key, None)
-            
-            # Wrap entire atomic operation in database_sync_to_async
+        requested_power = self.pending_requested_power.get((int(connector_id), id_tag))
+
+        async with self.db_lock:
+
             @database_sync_to_async
-            def create_transaction_atomic():
+            def create_tx():
                 with db_transaction.atomic():
-                    # Get or create connector
-                    connector, _ = Connector.objects.select_related("station").get_or_create(
+                    conn, _ = Connector.objects.get_or_create(
                         station_id=self.station_id,
-                        connector_id=connector_id,
-                        defaults={"status": "available"}
+                        connector_id=int(connector_id),
+                        defaults={"status": "available"},
                     )
 
-                    # Create transaction
-                    transaction = Transaction.objects.create(
-                        connector=connector,
+                    tx = Transaction.objects.create(
+                        connector=conn,
                         id_tag=id_tag,
                         meter_start=meter_start,
                         requested_power_kw=requested_power,
-                        status="active"
+                        status="active",
                     )
 
-                    # Create initial meter value
-                    MeterValue.objects.create(
-                        transaction=transaction,
-                        value=meter_start,
-                        data={
-                            "start": {
-                                "ocpp_timestamp": str(timestamp),
-                                "meter_start": meter_start,
+                    # OCPP transactionId == returned transaction_id; store into tx.transaction_id
+                    if hasattr(tx, "transaction_id"):
+                        tx.transaction_id = int(tx.id)
+                        tx.save(update_fields=["transaction_id"])
+
+                    MeterValue.objects.get_or_create(
+                        transaction=tx,
+                        defaults={
+                            "value": meter_start,
+                            "data": {
+                                "start": {"ocpp_timestamp": str(timestamp), "meter_start": meter_start},
+                                "samples": [],
                             },
-                            "samples": [],
-                        }
+                        },
                     )
 
-                    # Update connector status
-                    connector.status = "charging"
-                    connector.save()
+                    conn.status = "charging"
+                    conn.save(update_fields=["status"])
 
-                    return connector, transaction
+                    return int(tx.id)
 
-            async with self.db_lock:
-                connector, transaction = await create_transaction_atomic()
+            tx_pk = await create_tx()
 
-            # Clear pending power
-            key = (connector_id, id_tag)
-            if key in self.pending_requested_power:
-                del self.pending_requested_power[key]
+        self.pending_requested_power.pop((int(connector_id), id_tag), None)
 
-            # Update station status and broadcast to clients
-            await self._update_station_status_async('active', 'start')
-            
-            # Broadcast connector status change to all connected browsers
-            if hasattr(self, 'consumer') and self.consumer:
-                try:
-                    await self.consumer.channel_layer.group_send(
-                        self.consumer.group_name,
-                        {
-                            "type": "station_message",
-                            "message": json.dumps({
-                                "type": "connector_status_update",
-                                "station_id": str(self.station_id),
-                                "connector_id": connector_id,
-                                "connector_status": "charging",
-                                "status": "active",
-                                "transaction_id": transaction.id,
-                                "timestamp": timezone.now().isoformat()
-                            })
-                        }
-                    )
-                except Exception as e:
-                    print(f"Error broadcasting connector status: {e}")
-                    # Continue without broadcasting to avoid disconnect
+        try:
+            asyncio.create_task(self._update_station_status_async("active", "start"))
+        except Exception:
+            pass
 
-            print(f"Transaction {transaction.id} started on connector {connector_id}")
+        if getattr(self, "consumer", None):
+            try:
+                await self.consumer.broadcast_connector_status(self.station_id, "charging", int(connector_id))
+            except Exception:
+                ocpp_logger.exception("Failed broadcasting connector charging status")
 
-            return call_result.StartTransactionPayload(
-                transaction_id=transaction.id,
-                id_tag_info={"status": AuthorizationStatus.accepted.value}
-            )
-
-        except Exception as e:
-            print(f"Error in on_start_transaction: {e}")
-            import traceback
-            traceback.print_exc()
-            return call_result.StartTransactionPayload(
-                transaction_id=0,
-                id_tag_info={"status": AuthorizationStatus.invalid.value}
-            )
-
+        # Return OCPP transactionId (we use DB pk)
+        return call_result.StartTransactionPayload(
+            transaction_id=int(tx_pk),
+            id_tag_info={"status": AuthorizationStatus.accepted.value},
+        )
 
     @on(Action.StopTransaction)
-    async def on_stop_transaction(self, transaction_id, id_tag, timestamp, meter_stop, reason, **kwargs):
-        from .models import Transaction, Connector, MeterValue
-
-        print(f"StopTransaction received: transaction_id={transaction_id}, id_tag={id_tag}, meter_stop={meter_stop}, reason={reason}")
-
-        # Validate and normalize reason
+    async def on_stop_transaction(
+        self,
+        transaction_id: int,
+        timestamp: str,
+        meter_stop: int,
+        id_tag: Optional[str] = None,
+        reason: Optional[str] = None,
+        **kwargs,
+    ):
         valid_reasons = {
-            "EmergencyStop", "EVDisconnected", "HardReset",
-            "Local", "Other", "PowerLoss", "Reboot", "Remote", "SoftReset"
+            "EmergencyStop", "EVDisconnected", "HardReset", "Local", "Other", "PowerLoss",
+            "Reboot", "Remote", "SoftReset", "UnlockCommand", "DeAuthorized",
         }
         safe_reason = reason if reason in valid_reasons else "Other"
 
-        response = call_result.StopTransactionPayload(
+        async with self.db_lock:
+
+            @database_sync_to_async
+            def stop_tx():
+                with db_transaction.atomic():
+                    # transaction_id here is OCPP transactionId
+                    tx = (
+                        Transaction.objects
+                        .select_related("connector")
+                        .select_for_update()
+                        .filter(transaction_id=int(transaction_id))
+                        .first()
+                    )
+                    if not tx:
+                        tx = (
+                            Transaction.objects
+                            .select_related("connector")
+                            .select_for_update()
+                            .filter(id=int(transaction_id))
+                            .first()
+                        )
+                    if not tx:
+                        return None
+
+                    tx.meter_stop = meter_stop
+                    tx.stopped_at = timezone.now()
+                    tx.status = "completed"
+                    tx.save(update_fields=["meter_stop", "stopped_at", "status"])
+
+                    conn = tx.connector
+                    if conn:
+                        conn.status = "available"
+                        conn.save(update_fields=["status"])
+
+                    try:
+                        MeterValue.objects.create(
+                            transaction=tx,
+                            value=meter_stop,
+                            data={
+                                "type": "final",
+                                "ocpp_timestamp": str(timestamp),
+                                "meter_start": tx.meter_start,
+                                "meter_stop": meter_stop,
+                                "reason": safe_reason,
+                            },
+                        )
+                    except Exception:
+                        pass
+
+                    return int(conn.connector_id) if conn else None
+
+            conn_id = await stop_tx()
+
+        if getattr(self, "consumer", None) and conn_id:
+            try:
+                await self.consumer.broadcast_connector_status(self.station_id, "available", int(conn_id))
+            except Exception:
+                ocpp_logger.exception("Failed broadcasting connector available status")
+
+        return call_result.StopTransactionPayload(
             id_tag_info={"status": AuthorizationStatus.accepted.value}
         )
 
-        # Function to stop transaction and update connector in atomic operation
-        def stop_transaction():
-            with db_transaction.atomic():
-                # Use select_for_update to prevent race conditions
-                transaction_obj = (
-                    Transaction.objects
-                    .select_related("connector__station")
-                    .select_for_update()
-                    .get(id=transaction_id)
-                )
-                
-                # Validate transaction belongs to this station
-                if transaction_obj.connector.station_id != self.station_id:
-                    print(f"Transaction {transaction_id} does not belong to station {self.station_id}")
-                    return None
-                
-                # Check if already completed to avoid duplicate processing
-                if transaction_obj.status == "completed":
-                    print(f"Transaction {transaction_id} already completed, skipping")
-                    return None
-                
-                transaction_obj.meter_stop = meter_stop
-                transaction_obj.stopped_at = timezone.now()
-                transaction_obj.status = "completed"
-                transaction_obj.save()
-
-                # Update connector status in the same atomic transaction
-                connector = transaction_obj.connector
-                connector.status = "available"
-                connector.save()
-
-                # Create final MeterValue record (don't overwrite historical data)
-                try:
-                    MeterValue.objects.create(
-                        transaction=transaction_obj,
-                        value=meter_stop,
-                        data={
-                            "type": "final",
-                            "ocpp_timestamp": str(timestamp),
-                            "meter_start": transaction_obj.meter_start,
-                            "meter_stop": meter_stop,
-                            "reason": reason or "",
-                        },
-                    )
-                except Exception as e:
-                    # Best-effort: do not block completion if meter value update fails
-                    print(f"Failed to persist final meter data for transaction {transaction_id}: {e}")
-
-                return transaction_obj.connector.station.id
-
+    # -------------------------
+    # Vendor SoC helpers (internal only)
+    # -------------------------
+    def parse_vendor_soc_data(self, data: Union[str, dict], vendor_id: str):
         try:
-            station_id = await database_sync_to_async(stop_transaction)()
-            if not station_id:
-                return response
-        except Transaction.DoesNotExist:
-            print(f"Transaction {transaction_id} does not exist!")
-            return response
+            payload = data
+            if isinstance(data, str):
+                payload = json.loads(data)
+            if not isinstance(payload, dict):
+                return None
 
-        # Broadcast status updates via WebSocket
-        if getattr(self, "consumer", None):
-            await self.consumer.update_station_status(station_id, "active", "stop")
-            # Broadcast connector and transaction status change
-            await self.consumer.channel_layer.group_send(
-                self.consumer.group_name,
-                {
-                    "type": "station_message",
-                    "message": json.dumps({
-                        "type": "transaction_stopped",
-                        "station_id": str(station_id),
-                        "transaction_id": transaction_id,
-                        "connector_status": "available",
-                        "timestamp": timezone.now().isoformat()
-                    })
-                }
-            )
+            v = (vendor_id or "").upper()
 
-        print(f"Transaction {transaction_id} stopped successfully")
-        return response
-    
+            if "soc" in payload:
+                return {"percentage": payload.get("soc"), "timestamp": payload.get("timestamp", timezone.now()), "source": "vendor"}
+            if "batteryLevel" in payload:
+                return {"percentage": payload.get("batteryLevel"), "timestamp": payload.get("timestamp", timezone.now()), "source": "vendor"}
+            if v == "SIEMENS" and isinstance(payload.get("stateOfCharge"), dict):
+                return {"percentage": payload["stateOfCharge"].get("value"), "timestamp": timezone.now(), "source": "vendor"}
+            if v == "EVBOX" and isinstance(payload.get("vehicle"), dict) and "soc" in payload["vehicle"]:
+                return {"percentage": payload["vehicle"].get("soc"), "timestamp": timezone.now(), "source": "vendor"}
+            if "percentage" in payload:
+                return {"percentage": payload.get("percentage"), "timestamp": payload.get("timestamp", timezone.now()), "source": "vendor"}
 
-    # REMOVED: call_heartbeat() - Central System must NEVER send Heartbeat.req
-    # Only Charge Points should send Heartbeat to Central System
-    
-    async def call_authorize(self, id_tag):
-        """Platform requests authorization for an RFID tag"""
-        req = call.Authorize(id_tag=id_tag)
+            return None
+        except Exception:
+            return None
+
+    async def process_vendor_soc(self, soc_data: dict):
+        try:
+            active_tx = await database_sync_to_async(
+                lambda: (
+                    Transaction.objects
+                    .filter(connector__station_id=self.station_id, status="active")
+                    .order_by("-started_at", "-id")
+                    .first()
+                )
+            )()
+            if active_tx:
+                await self.save_soc_data(active_tx.transaction_id or active_tx.id, soc_data)
+        except Exception:
+            ocpp_logger.exception("Error processing vendor SoC")
+
+    async def save_soc_data(self, transaction_id: int, soc_data: dict):
+        try:
+            pct = soc_data.get("percentage")
+            ts = soc_data.get("timestamp", timezone.now())
+            src = soc_data.get("source", "vendor")
+
+            @database_sync_to_async
+            def update_mv():
+                tx = Transaction.objects.filter(transaction_id=int(transaction_id)).first()
+                if not tx:
+                    tx = Transaction.objects.filter(id=int(transaction_id)).first()
+                if not tx:
+                    return False
+                mv = (
+                    MeterValue.objects
+                    .filter(transaction=tx)
+                    .order_by("-timestamp", "-id")
+                    .first()
+                )
+                if not mv:
+                    mv = MeterValue.objects.create(transaction=tx, value=tx.meter_start, data={"samples": []})
+                mv.soc_percentage = pct
+                mv.soc_timestamp = ts
+                mv.soc_source = src
+                mv.save(update_fields=["soc_percentage", "soc_timestamp", "soc_source"])
+                return True
+
+            ok = await update_mv()
+            if ok and getattr(self, "consumer", None) and pct is not None:
+                await self.consumer.broadcast_soc_update(self.station_id, float(pct))
+        except Exception:
+            ocpp_logger.exception("Error saving SoC data")
+
+    # -------------------------
+    # Outbound calls (CS -> CP)
+    # -------------------------
+    async def call_authorize(self, id_tag: str):
+        req = call.AuthorizePayload(id_tag=(id_tag or "")[:20])
         return await self.call(req)
-    
-    async def call_remote_start_transaction(self, connector_id, id_tag, requested_power=None):
-        """Platform remotely starts charging on the station"""
-        # Store requested power for when StartTransaction notification arrives
-        self.pending_requested_power[(connector_id, id_tag)] = requested_power
-        
+
+    async def call_remote_start_transaction(
+        self,
+        connector_id: int,
+        id_tag: str,
+        requested_power_kw: Optional[float] = None,
+        requested_power: Optional[float] = None,
+    ):
+        """
+        OCPP 1.6: RemoteStartTransaction supports chargingProfile (optional).
+        requested_power_kw is used ONLY to build a chargingProfile (W limit).
+        """
+        id_tag = (id_tag or "")[:20]
+        if requested_power_kw is None and requested_power is not None:
+            requested_power_kw = requested_power
+        self.pending_requested_power[(int(connector_id), id_tag)] = requested_power_kw
+
         charging_profile = None
-        
-        # Create ChargingProfile to actually control station output power
-        if requested_power:
+        if requested_power_kw is not None:
             charging_profile = {
                 "chargingProfileId": 1,
-                "stackLevel": 0,
-                "chargingProfilePurpose": "TxProfile",  # Transaction-specific profile
-                "chargingProfileKind": "Relative",      # Relative to start of charging
+                "stackLevel": 1,
+                "chargingProfilePurpose": "TxProfile",
+                "chargingProfileKind": "Absolute",
                 "chargingSchedule": {
-                    "chargingRateUnit": "W",            # Watts
-                    "chargingSchedulePeriod": [
-                        {
-                            "startPeriod": 0,           # Start immediately
-                            "limit": requested_power * 1000  # Convert kW to W
-                        }
-                    ]
-                }
+                    "chargingRateUnit": "W",
+                    "chargingSchedulePeriod": [{"startPeriod": 0, "limit": float(requested_power_kw) * 1000.0}],
+                },
             }
-            print(f"Sending power limit to station: {requested_power} kW ({requested_power * 1000} W)")
-        
+
         req = call.RemoteStartTransactionPayload(
-            connector_id=connector_id,
+            connector_id=int(connector_id),
             id_tag=id_tag,
-            charging_profile=charging_profile
+            charging_profile=charging_profile,
         )
         return await self.call(req)
-    
-    async def call_remote_stop_transaction(self, transaction_id):
-        """Platform remotely stops charging on the station"""
-        req = call.RemoteStopTransactionPayload(
-            transaction_id=transaction_id
-        )
+
+    async def call_remote_stop_transaction(self, transaction_id: int):
+        req = call.RemoteStopTransactionPayload(transaction_id=int(transaction_id))
         return await self.call(req)
-    
-    async def call_change_availability(self, connector_id, availability_type):
-        """Platform changes station/connector availability (Operative/Inoperative)"""
-        req = call.ChangeAvailabilityPayload(
-            connector_id=connector_id,
-            type=availability_type  # "Operative" or "Inoperative"
-        )
-        print(f"Changing availability for connector {connector_id} to {availability_type}")
+
+    async def call_change_availability(self, connector_id: int, availability_type: Union[str, AvailabilityType]):
+        t = availability_type
+        if isinstance(t, str):
+            t = AvailabilityType(t)
+        req = call.ChangeAvailabilityPayload(connector_id=int(connector_id), type=t)
         return await self.call(req)
-    
-    async def call_reset(self, reset_type="Soft"):
-        """Platform resets the station (Soft or Hard)"""
-        req = call.ResetPayload(
-            type=reset_type  # "Soft" or "Hard"
-        )
-        print(f"Sending {reset_type} reset to station")
+
+    async def call_reset(self, reset_type: Union[str, ResetType] = "Soft"):
+        t = reset_type
+        if isinstance(t, str):
+            t = ResetType(t)
+        req = call.ResetPayload(type=t)
         return await self.call(req)
-    
-    async def call_unlock_connector(self, connector_id):
-        """Platform unlocks a connector"""
-        req = call.UnlockConnectorPayload(
-            connector_id=connector_id
-        )
-        print(f"Unlocking connector {connector_id}")
+
+    async def call_unlock_connector(self, connector_id: int):
+        req = call.UnlockConnectorPayload(connector_id=int(connector_id))
         return await self.call(req)
-    
+
     async def call_get_configuration(self, keys=None):
-        """Platform retrieves station configuration"""
-        req = call.GetConfigurationPayload(
-            key=keys  # None = get all keys
-        )
-        print(f"Getting configuration from station")
+        req = call.GetConfigurationPayload(key=keys)
         return await self.call(req)
-    
-    # REMOVED: call_get_meter_values() - MeterValues is CP → CS only
-    # There is NO request called MeterValues.req in OCPP 1.6
-    # Use GetCompositeSchedule or wait for periodic MeterValues
-    
+
 
 # -------------------------
-# Channels WebSocket Consumer
+# Channels WebSocket Consumer (OCPP endpoint for stations)
 # -------------------------
-    class ChargePointConsumer(AsyncWebsocketConsumer):
+class ChargePointConsumer(AsyncWebsocketConsumer):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.db_lock = asyncio.Lock()  # Lock за всички записи към SQLite
         self._is_closing = False  # Guard to prevent sends while closing
         self._connected = False   # Track websocket connection state
 
-    @database_sync_to_async
-    def station_exists(self, station_id):
-        from .models import Station
-        return Station.objects.filter(id=station_id).exists()
-
-
     async def connect(self):
-        # Get station_id from URL parameters and convert to int for consistent key type
-        self.station_id = int(self.scope['url_route']['kwargs']['station_id'])
-        
-        # Get serial_number if it exists
+        self.station_id = _normalize_station_key(self.scope["url_route"]["kwargs"]["station_id"])
+        self.ocpp_identity = self.scope.get("url_route", {}).get("kwargs", {}).get("ocpp_identity")
         self._connected = True
         self._is_closing = False
-        
-        print(f"Station {self.station_id} (Serial: None) connecting...")
-        
+
+        station_logger = get_station_logger(self.station_id)
         try:
-            # Accept the WebSocket connection with ping/pong
-            await self.accept(subprotocol="ocpp1.6")
-            print("Accepted connection from station")
-            
-            # Create WebSocket wrapper for OCPP communication
+            station_logger.info(
+                "WS connect: station=%s ocpp_identity=%s client=%s subprotocols=%s headers_host=%s",
+                self.station_id,
+                self.ocpp_identity,
+                self.scope.get("client"),
+                self.scope.get("subprotocols"),
+                dict(self.scope.get("headers") or []).get(b"host"),
+            )
+        except Exception:
+            pass
+
+        if self.ocpp_identity:
+            try:
+                await database_sync_to_async(
+                    lambda: Station.objects.filter(id=self.station_id).update(ocpp_identity=str(self.ocpp_identity))
+                )()
+            except Exception:
+                ocpp_logger.exception("Failed updating Station.ocpp_identity")
+
+        try:
+            offered = self.scope.get("subprotocols") or []
+            chosen = None
+            if "ocpp1.6" in offered:
+                chosen = "ocpp1.6"
+            elif "OCPP1.6" in offered:
+                chosen = "OCPP1.6"
+
+            if chosen:
+                await self.accept(subprotocol=chosen)
+            else:
+                await self.accept()
+
+            try:
+                station_logger.info(
+                    "WS accepted: station=%s chosen_subprotocol=%s",
+                    self.station_id,
+                    self.scope.get("subprotocol"),
+                )
+            except Exception:
+                pass
+
             self.ws_wrapper = WebSocketWrapper(self)
-            
-            # Initialize ChargePoint with the wrapper
             self.cp = ChargePoint(self.station_id, self.ws_wrapper, self)
             self.cp_task = asyncio.create_task(self.cp.start())
-            # Start liveness watchdog to detect unexpected power-off
-            self.watchdog_task = asyncio.create_task(self.liveness_watchdog())
-            
-            # Add to channel group
-            self.group_name = "charging_stations_group"
-            await self.channel_layer.group_add(self.group_name, self.channel_name)
-            
-            # Register this consumer in the global registry
-            register_station(self.station_id, self)
-            print(f"Station {self.station_id} fully initialized and registered")
-            
-        except Exception as e:
-            print(f"Error during station initialization: {e}")
-            await self.close(code=1011)  # Internal error
 
+            def _log_cp_done(task: asyncio.Task) -> None:
+                try:
+                    exc = task.exception()
+                except asyncio.CancelledError:
+                    return
+                except Exception:
+                    exc = None
+                if exc:
+                    ocpp_logger.error(
+                        "OCPP task crashed: station=%s error=%r",
+                        getattr(self, "station_id", None),
+                        exc,
+                        exc_info=exc,
+                    )
+
+            try:
+                self.cp_task.add_done_callback(_log_cp_done)
+            except Exception:
+                pass
+
+            self.watchdog_task = asyncio.create_task(self.liveness_watchdog())
+
+            self.group_name = UI_HTML_GROUP
+            await self.channel_layer.group_add(self.group_name, self.channel_name)
+
+            register_station(self.station_id, self)
+
+        except Exception:
+            ocpp_logger.exception("Error during station initialization")
+            await self.close(code=1011)
 
     async def disconnect(self, close_code):
-        # FIRST: Broadcast station offline immediately (before any cleanup)
-        await self.broadcast_station_offline()
-        
-        # THEN: Update database and other status updates
         try:
-            if hasattr(self, 'station_id') and hasattr(self, 'channel_layer'):
-                # Update database and broadcast disconnect status
-                await self.update_station_status(self.station_id, "inactive", "disconnect")
-                
-                # Update all connectors for this station to offline
-                from .models import Connector
-                if hasattr(self, 'db_lock'):
-                    async with self.db_lock:
-                        await database_sync_to_async(
-                            lambda: Connector.objects.filter(station_id=self.station_id).update(status="offline")
-                        )()
-                
-                print(f"Station {self.station_id} disconnected")
-        except Exception as e:
-            print(f"Error updating statuses on disconnect: {e}")
-        
-        # FINALLY: Mark as closing to prevent further sends
+            get_station_logger(getattr(self, "station_id", "?")).warning(
+                "WS disconnect: station=%s close_code=%s connected=%s closing=%s",
+                getattr(self, "station_id", None),
+                close_code,
+                getattr(self, "_connected", None),
+                getattr(self, "_is_closing", None),
+            )
+        except Exception:
+            pass
+        await self.broadcast_station_offline()
+
+        try:
+            await self.update_station_status(self.station_id, "inactive", "disconnect")
+            await database_sync_to_async(
+                lambda: Connector.objects.filter(station_id=self.station_id).update(status="offline")
+            )()
+            await self.broadcast_all_connectors_offline()
+        except Exception:
+            ocpp_logger.exception("Error updating statuses on disconnect")
+
         self._is_closing = True
         self._connected = False
-        
-        # Cancel the ChargePoint task
-        if hasattr(self, 'cp_task'):
+
+        if hasattr(self, "cp_task"):
             self.cp_task.cancel()
             try:
                 await self.cp_task
             except asyncio.CancelledError:
                 pass
-        
-        # Cancel liveness watchdog
-        if hasattr(self, 'watchdog_task'):
+
+        if hasattr(self, "watchdog_task"):
             self.watchdog_task.cancel()
             try:
                 await self.watchdog_task
             except asyncio.CancelledError:
                 pass
-        
-        # Remove from channel group AFTER broadcasting
-        if hasattr(self, 'group_name'):
-            await self.channel_layer.group_discard(self.group_name, self.channel_name)
-        
-        # Unregister from global registry (already cleans up ACTIVE_STATIONS and _last_heartbeat_log)
-        if hasattr(self, 'station_id') and self.station_id in ACTIVE_STATIONS:
-            unregister_station(self.station_id)
-        else:
-            # Ensure cleanup even if not in ACTIVE_STATIONS
-            if hasattr(self, 'station_id'):
-                ACTIVE_STATIONS.pop(self.station_id, None)
-                _last_heartbeat_log.pop(self.station_id, None)
 
+        try:
+            await self.channel_layer.group_discard(self.group_name, self.channel_name)
+        except Exception:
+            pass
+
+        unregister_station(self.station_id)
 
     async def receive(self, text_data=None, bytes_data=None):
-        if not text_data:
-            # Check for WebSocket ping/pong frames
-            if bytes_data:
-                # WebSocket ping/pong frames are handled by the server automatically
-                # We don't need to process them here
-                return
+        if not text_data or not hasattr(self, "ws_wrapper"):
             return
-
-        # Ensure ws_wrapper is initialized
-        if not hasattr(self, 'ws_wrapper'):
-            print("Warning: Received message before WebSocket wrapper was initialized")
-            return
-
+        
+        # Track WebSocket performance
         try:
-            data = json.loads(text_data)
-        except json.JSONDecodeError:
-            # Check if this is a WebSocket ping (not JSON)
-            if text_data.strip() == "ping" or text_data.strip() == "PING":
-                # Respond with pong
+            st_id = getattr(self, "station_id", None)
+            if st_id is not None:
+                _msg_len = len(text_data)
+                track_ws_performance(st_id, _msg_len, 'received')
+                
+                if _msg_len > 20000:
+                    get_station_logger(st_id).warning("Large WS frame: station=%s bytes=%s", st_id, _msg_len)
+        except Exception:
+            pass
+        
+        try:
+            json.loads(text_data)
+        except Exception:
+            if text_data.strip().lower() == "ping":
                 await self.send(text_data="pong")
-                # Skip logging to reduce spam
-                return
-            print(f"[receive] Invalid JSON received: {text_data}")
             return
 
-        # All OCPP messages (dict or list) are forwarded to the ChargePoint
-        if isinstance(data, (dict, list)):
-            try:
-                await self.ws_wrapper.feed(text_data)
-            except Exception as e:
-                print(f"Error forwarding message to ChargePoint: {e}")
-        else:
-            print(f"[receive] Unexpected data type: {type(data)} - {data}") 
+        await self.ws_wrapper.feed(text_data)
 
+    async def station_message(self, event):
+        # UI_HTML_GROUP messages for templates; ignore here
+        return
 
-    async def broadcast_status_update(self, status, action):
-        try:
-            await self.channel_layer.group_send(
-                self.group_name,
-                {
-                    "type": "station_message",
-                    "message": json.dumps({
-                        "type": "station_status_update",
-                        "station_id": str(self.station_id),
-                        "status": status,
-                        "action": action
-                    })
-                }
-            )
-        except Exception as e:
-            print(f"Error in broadcast_status_update: {e}")
-            # Continue without broadcasting to avoid disconnect
-
-    @database_sync_to_async
-    def _get_station(self, station_id):
-        from .models import Station
-        return Station.objects.get(id=station_id)
-    
-    @database_sync_to_async
-    def _save_station(self, station):
-        station.save()
-        return station
-    
-    async def update_station_status(self, station_id, status, reason=""):
-        """Update station status in the database and broadcast to all connected clients."""
-        try:
-            # Get the station using the async helper
-            station = await self._get_station(station_id)
-            if not station:
-                print(f"Station {station_id} not found")
-                return False
-
-            async with self.db_lock:
-                old_status = station.status
-                station.status = status
-                station.last_seen = timezone.now()
-                
-                # Save using the async helper
-                await self._save_station(station)
-                
-                print(f"Station {station_id} status updated: {old_status} -> {status} (Reason: {reason})")
-                
-                # Broadcast the status update to all connected clients
-                await self.channel_layer.group_send(
-                    self.group_name,
-                    {
-                        "type": "station_message",
-                        "message": json.dumps({
-                            "type": "status_update",
-                            "station_id": str(station_id),
-                            "status": status,
-                            "reason": reason,
-                            "timestamp": timezone.now().isoformat()
-                        })
-                    }
-                )
-                    
-                # Also refresh the station table in the UI
-                await self.broadcast_station_table()
-                
-                return True
-        except Exception as e:
-            print(f"Error updating station status: {e}")
-            import traceback
-            traceback.print_exc()
-            return False
-
-    # REMOVED: station_message from ChargePointConsumer
-    # ChargePointConsumer should only emit messages, not handle UI events
-    # StationStatusConsumer handles all station_message events
-
-    async def broadcast_connector_status(self, station_id, connector_status):
-        """Broadcast connector status change to all connected browsers"""
-        from .models import Connector, Transaction
-        
-        # Get the connector from the database
-        connector = await database_sync_to_async(
-            lambda: Connector.objects.filter(station_id=station_id).first()
-        )()
-        
-        if not connector:
-            # No connector record yet, create a default one
-            connector = await database_sync_to_async(Connector.objects.create)(
-                station_id=station_id,
-                connector_id=1,  # Default to connector 1 if none exists
-                status=connector_status
-            )
-        
-        # Update connector status to the requested status
-        old_connector_status = connector.status
-        connector.status = connector_status
-        await database_sync_to_async(connector.save)()
-        print(f"Connector {connector.connector_id} status updated: {old_connector_status} -> {connector_status}")
-        
-        # Clean up any stale "active" transactions if going offline
-        if connector_status == "offline":
-            stale_transactions = await database_sync_to_async(
-                lambda: list(Transaction.objects.filter(
-                    connector=connector,
-                    status="active"
-                ))
-            )()
-            
-            if stale_transactions:
-                print(f"Cleaning up {len(stale_transactions)} stale transaction(s)")
-                for txn in stale_transactions:
-                    txn.status = "stopped"
-                    await database_sync_to_async(txn.save)()
-        
-        # Determine station status based on connector status
-        station_status = "inactive" if connector_status == "offline" else "active"
-        
-        # Broadcast connector status update
+    # -------------------------
+    # UI broadcast helpers (single schema)
+    # -------------------------
+    async def _ui_send(self, data: Dict[str, Any]) -> None:
         await self.channel_layer.group_send(
-            self.group_name,
-            {
-                "type": "station_message",
-                "message": json.dumps({
-                    "type": "connector_status_update",
-                    "station_id": str(station_id),
-                    "connector_status": connector_status,
-                    "status": station_status,
-                    "connector_id": connector.connector_id if connector else 1
-                })
-            }
+            UI_STATUS_GROUP,
+            {"type": "broadcast", "data": data},
         )
 
+    async def broadcast_station_status(self, station_id: int, status: str, reason: str = ""):
+        await self._ui_send({
+            "type": "station_status",
+            "station_id": int(station_id),
+            "status": status,
+            "reason": reason,
+            "timestamp": timezone.now().isoformat(),
+        })
 
-    @database_sync_to_async
-    def _get_stations(self):
-        from .models import Station
-        return list(Station.objects.all().prefetch_related('connectors'))
+    async def broadcast_authorization_success(self, station_id: int, id_tag: str):
+        await self._ui_send({
+            "type": "authorization_success",
+            "station_id": int(station_id),
+            "id_tag": str(id_tag),
+            "timestamp": timezone.now().isoformat(),
+        })
 
-    @database_sync_to_async
-    def _render_station_table(self, stations):
-        from django.template.loader import render_to_string
-        from django.template import RequestContext
-        from django.http import HttpRequest
-        
-        # Create a basic request to ensure CSRF token is available if needed
-        request = HttpRequest()
-        request.META['SERVER_NAME'] = 'localhost'
-        request.META['SERVER_PORT'] = '8000'
-        
-        return render_to_string(
-            "charging_stations/_stations_tab.html", 
-            {"stations_list": stations},
-            request=request
-        )
+    async def broadcast_connector_status(self, station_id: int, connector_status: str, connector_id: Optional[int] = None):
+        station_id = int(station_id)
+        connector_id = int(connector_id or 1)
 
-    async def broadcast_station_table(self):
-        """Broadcast updated station table HTML to all connected clients"""
         try:
-            # Get stations asynchronously with related data
-            stations = await self._get_stations()
-            
-            # Render template asynchronously
-            html = await self._render_station_table(stations)
-            
-            # Broadcast to all connected clients
-            if hasattr(self, 'channel_layer') and hasattr(self, 'group_name'):
-                await self.channel_layer.group_send(
-                    self.group_name,
-                    {
-                        "type": "station_message",
-                        "message": json.dumps({
-                            "type": "station_table_update",
-                            "html": html
-                        }, cls=DjangoJSONEncoder)
-                    }
-                )
-        except Exception as e:
-            print(f"Error broadcasting station table: {e}")
-            import traceback
-            traceback.print_exc()
+            conn = await database_sync_to_async(
+                lambda: Connector.objects.filter(station_id=station_id, connector_id=connector_id).first()
+            )()
 
-    # DUPLICATE REMOVED - Using the first station_message implementation above
+            if not conn:
+                conn = await database_sync_to_async(Connector.objects.create)(
+                    station_id=station_id,
+                    connector_id=connector_id,
+                    status=connector_status,
+                )
+            else:
+                if conn.status != connector_status:
+                    conn.status = connector_status
+                    await database_sync_to_async(conn.save)(update_fields=["status"])
+
+            await self._ui_send({
+                "type": "connector_status_update",
+                "station_id": station_id,
+                "connector_id": connector_id,
+                "connector_status": connector_status,
+                "station_status": "inactive" if connector_status == "offline" else "active",
+                "timestamp": timezone.now().isoformat(),
+            })
+        except Exception:
+            ocpp_logger.exception("broadcast_connector_status failed")
+
+    async def broadcast_all_connectors_offline(self):
+        try:
+            connector_ids = await database_sync_to_async(
+                lambda: list(
+                    Connector.objects.filter(station_id=self.station_id)
+                    .values_list("connector_id", flat=True)
+                    .order_by("connector_id")
+                )
+            )()
+            if not connector_ids:
+                connector_ids = [1]
+            for cid in connector_ids:
+                await self._ui_send({
+                    "type": "connector_status_update",
+                    "station_id": int(self.station_id),
+                    "connector_id": int(cid),
+                    "connector_status": "offline",
+                    "station_status": "inactive",
+                    "timestamp": timezone.now().isoformat(),
+                })
+        except Exception:
+            return
 
     async def broadcast_station_offline(self):
-        """Broadcast station offline status immediately on disconnect."""
         try:
-            await self.channel_layer.group_send(
-                "charging_stations_group",
-                {
-                    "type": "station_message",
-                    "message": json.dumps({
-                        "type": "station_offline",
-                        "station_id": str(self.station_id),
-                        "status": "inactive",
-                        "connector_status": "offline",
-                        "timestamp": timezone.now().isoformat()
-                    })
-                }
-            )
-            print(f"[BROADCAST] Station {self.station_id} offline message sent")
-        except Exception as e:
-            print(f"[BROADCAST] Error sending station offline: {e}")
-            # Never block disconnect
+            await self._ui_send({
+                "type": "station_status",
+                "station_id": int(self.station_id),
+                "status": "offline",
+                "action": "disconnect",
+                "timestamp": timezone.now().isoformat(),
+            })
+        except Exception:
+            return
+
+    async def broadcast_soc_update(self, station_id: int, soc_percentage: float):
+        try:
+            # This is what stations_tab.js expects: data.type === "soc_update"
+            await self._ui_send({
+                "type": "soc_update",
+                "station_id": int(station_id),
+                "soc_percentage": float(soc_percentage),
+                "timestamp": timezone.now().isoformat(),
+            })
+        except Exception:
+            ocpp_logger.exception("broadcast_soc_update failed")
+
+    # -------------------------
+    # Station DB status update (used by disconnect/watchdog)
+    # -------------------------
+    @database_sync_to_async
+    def _get_station(self, station_id: int):
+        return Station.objects.get(id=station_id)
+
+    @database_sync_to_async
+    def _save_station(self, station: Station):
+        station.save(update_fields=["status", "last_seen"])
+        return station
+
+    async def update_station_status(self, station_id: int, status: str, reason: str = "") -> bool:
+        try:
+            st = await self._get_station(int(station_id))
+            async with self.db_lock:
+                st.status = status
+                st.last_seen = timezone.now()
+                await self._save_station(st)
+
+            await self.broadcast_station_status(int(station_id), status=status, reason=reason)
+            return True
+        except Exception:
+            ocpp_logger.exception("update_station_status failed")
+            return False
 
     async def liveness_watchdog(self):
-        """Mark station inactive/offline if no heartbeats/messages within timeout."""
         try:
             while True:
                 await asyncio.sleep(5)
-                if not hasattr(self, 'cp'):
+                if not hasattr(self, "cp"):
                     continue
-                now = datetime.now().astimezone()
-                interval = getattr(self.cp, 'heartbeat_interval', 60)
-                # Use 10x heartbeat interval with minimum 300 seconds to avoid premature timeouts
-                timeout_seconds = max(300, interval * 10)
+                now = timezone.now()
+                timeout_seconds = 300
                 if (now - self.cp.last_seen) > timedelta(seconds=timeout_seconds):
-                    print(f"Watchdog timeout for station {self.station_id}: marking inactive/offline")
-                    # Broadcast offline immediately
+                    try:
+                        get_station_logger(getattr(self, "station_id", "?")).warning(
+                            "Watchdog timeout: station=%s last_seen=%s now=%s diff_s=%s -> closing websocket",
+                            getattr(self, "station_id", None),
+                            getattr(self.cp, "last_seen", None),
+                            now,
+                            (now - self.cp.last_seen).total_seconds() if getattr(self, "cp", None) else None,
+                        )
+                    except Exception:
+                        pass
                     await self.broadcast_station_offline()
                     await self.update_station_status(self.station_id, "inactive", "timeout")
-                    from .models import Connector, Transaction, MeterValue
-                    async with self.db_lock:
-                        #Finalize any active transactions for this station
-                        def finalize_station_transactions():
-                            active_txs = (
-                                Transaction.objects
-                                .filter(connector__station_id=self.station_id, status="active")
-                            )
-                            for tx in active_txs:
-                                last_mv = (
-                                    MeterValue.objects
-                                    .filter(transaction=tx)
-                                    .order_by("-timestamp")
-                                    .first()
-                                )
-                                if last_mv:
-                                    tx.meter_stop = last_mv.value
-                                tx.stopped_at = datetime.now().astimezone()
-                                tx.status = "error"
-                                tx.save()
-                        await database_sync_to_async(finalize_station_transactions)()
-                        await database_sync_to_async(
-                            lambda: Connector.objects.filter(station_id=self.station_id).update(status="offline")
-                        )()
-                    await self.broadcast_connector_status(self.station_id, "offline")
-                    # Close the socket last, and mark closing to prevent race on sends
+
+                    await database_sync_to_async(
+                        lambda: Connector.objects.filter(station_id=self.station_id).update(status="offline")
+                    )()
+                    await self.broadcast_all_connectors_offline()
+
                     self._is_closing = True
                     try:
                         await self.close()
@@ -1560,271 +1503,86 @@ class ChargePoint(OCPPChargePoint):
                         pass
                     break
         except asyncio.CancelledError:
-            # Normal on disconnect
             return
 
 
-    # DUPLICATE REMOVED - Using the first station_message implementation above
-
-
 # -------------------------
-# Station Status Consumer for Browser Clients
+# Station Status Consumer (browser clients)
 # -------------------------
-    class StationStatusConsumer(AsyncWebsocketConsumer):
+class StationStatusConsumer(AsyncWebsocketConsumer):
     """
-    WebSocket consumer for browser clients to receive real-time station status updates.
-    Browsers connect to this endpoint (not the OCPP endpoint).
+    Browser-facing WebSocket consumer.
+    Listens to UI_STATUS_GROUP and forwards JSON as-is.
     """
-    
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.group_name = "status_updates"  # Default group name
-    
-    # StationStatusConsumer needs to handle station_message events
-    async def station_message(self, event):
-        """Handle messages from charging_stations_group for browser clients."""
-        if getattr(self, "_is_closing", False):
-            return
+        self._is_closing = False
+        self._connected = False
 
-        message = event.get("message")
-        if not message:
-            return
-
-        try:
-            await self.send(text_data=message)
-        except Exception:
-            pass
-    
-    @database_sync_to_async
-    def get_station_status(self):
-        """Fetch current status of all stations and active charging sessions"""
-        from .models import Station, Connector, Transaction
-        from django.db.models import Sum, Q
-        from django.utils import timezone
-        from datetime import datetime, time, timedelta
-        
-        try:
-            # Get current time and today's date range
-            now = timezone.now()
-            today_start = timezone.make_aware(datetime.combine(now.date(), time.min))
-            
-            # Get all stations and their status using the correct related_name 'connectors'
-            stations = list(Station.objects.all().prefetch_related('connectors'))
-            total_stations = len(stations)
-            # Count online stations based on actual WebSocket connections, not DB status
-            online_stations = sum(1 for s in stations if s.id in ACTIVE_STATIONS)
-            
-            # Debug: Log ACTIVE_STATIONS content
-            print(f"[DEBUG] ACTIVE_STATIONS: {list(ACTIVE_STATIONS.keys())}")
-            print(f"[DEBUG] Station IDs in DB: {[s.id for s in stations]}")
-            print(f"[DEBUG] Online stations: {online_stations}/{total_stations}")
-            
-            # Get all connectors and their status
-            connectors = Connector.objects.filter(station__in=stations)
-            available_connectors = connectors.filter(status='available').count()
-            
-            # Get active charging sessions
-            active_sessions = connectors.filter(status='charging').count()
-            
-            # Calculate total energy delivered today
-            today_energy = Transaction.objects.filter(
-                started_at__date=now.date()
-            ).aggregate(total=Sum('meter_stop'))['total'] or 0
-            
-            # Convert to kWh if needed (assuming meter values are in Wh)
-            today_energy_kwh = float(today_energy) / 1000.0 if today_energy else 0.0
-            
-            # Get total sessions today
-            total_sessions_today = Transaction.objects.filter(
-                started_at__date=now.date()
-            ).count()
-            
-            # Get active charging sessions with details
-            active_charging_sessions = []
-            active_transactions = Transaction.objects.filter(
-                stopped_at__isnull=True
-            ).select_related('connector', 'connector__station')
-            
-            for txn in active_transactions:
-                duration = now - txn.started_at if txn.started_at else timedelta(0)
-                hours, remainder = divmod(duration.seconds, 3600)
-                minutes, _ = divmod(remainder, 60)
-                
-                # Calculate energy delivered in kWh
-                energy_delivered = 0
-                if txn.meter_start is not None and txn.meter_stop is not None:
-                    energy_delivered = (txn.meter_stop - txn.meter_start) / 1000.0  # Convert to kWh
-                elif txn.meter_start is not None:
-                    # For active sessions, we don't have meter_stop yet
-                    energy_delivered = 0
-                
-                active_charging_sessions.append({
-                    'station_id': txn.connector.station.id,
-                    'station_name': txn.connector.station.formatted_serial(),
-                    'connector_id': txn.connector.connector_id,
-                    'id_tag': txn.id_tag,
-                    'start_time': txn.started_at.isoformat() if txn.started_at else now.isoformat(),
-                    'energy_delivered': energy_delivered,
-                    'duration': f"{hours:02d}:{minutes:02d}",
-                    'status': txn.status.capitalize(),
-                    'power': txn.requested_power_kw or 0
-                })
-            
-            # Get recent alerts/notifications (last 24 hours)
-            recent_alerts = []  # You can implement this based on your alert system
-            
-            return {
-                'success': True,
-                'station_count': total_stations,
-                'online_count': online_stations,
-                'available_count': available_connectors,
-                'active_sessions': active_sessions,
-                'energy_delivered': today_energy_kwh,
-                'total_sessions': total_sessions_today,
-                'active_charging_sessions': active_charging_sessions,
-                'last_updated': timezone.now().isoformat(),
-                'recent_alerts': recent_alerts,
-                'status': 'success'
-            }
-            
-        except Exception as e:
-            import traceback
-            error_msg = str(e)
-            print(f"Error in get_station_status: {error_msg}")
-            traceback.print_exc()
-            
-            # Return error response
-            return {
-                'success': False,
-                'error': error_msg,
-                'status': 'error',
-                'station_count': 0,
-                'online_count': 0,
-                'available_count': 0,
-                'active_sessions': 0,
-                'energy_delivered': 0.0,
-                'total_sessions': 0,
-                'active_charging_sessions': [],
-                'last_updated': timezone.now().isoformat()
-            }
-    
     async def connect(self):
-        """Handle new WebSocket connection."""
         try:
-            station_id = self.scope['url_route']['kwargs'].get('station_id')
-            
-            if station_id:
-                # If station_id is provided, add to station-specific group
-                station_group = f"station_{station_id}"
-                await self.channel_layer.group_add(
-                    station_group,
-                    self.channel_name
-                )
-                self.group_name = station_group
-            
-            # Always add to global status group
-            await self.channel_layer.group_add(
-                "status_updates",
-                self.channel_name
-            )
-            
-            # Also join the charging_stations_group to receive station updates
-            await self.channel_layer.group_add(
-                "charging_stations_group",
-                self.channel_name
-            )
-            
+            self._is_closing = False
+            await self.channel_layer.group_add(UI_STATUS_GROUP, self.channel_name)
             await self.accept()
             self._connected = True
-            await self.send_initial_status()
-            
-        except Exception as e:
-            print(f"Error in StationStatusConsumer.connect: {e}")
-            await self.close()
+            await self.send_initial_snapshot()
+        except Exception:
+            self._connected = False
+            self._is_closing = True
+            try:
+                await self.close()
+            except Exception:
+                pass
 
     async def disconnect(self, close_code):
+        self._is_closing = True
+        self._connected = False
         try:
-            # Leave the broadcast group if group_name is set
-            if hasattr(self, 'group_name'):
-                await self.channel_layer.group_discard(
-                    self.group_name,
-                    self.channel_name
-                )
-                
-            # Remove from the global status group
-            await self.channel_layer.group_discard(
-                "status_updates",
-                self.channel_name
-            )
-            
-            # Remove from charging_stations_group
-            await self.channel_layer.group_discard(
-                "charging_stations_group",
-                self.channel_name
-            )
-                
-            print(f"Browser client disconnected from status updates")
-        except Exception as e:
-            print(f"Error in StationStatusConsumer.disconnect: {e}")
-    
-    # DUPLICATE REMOVED - station_message already defined above
+            await self.channel_layer.group_discard(UI_STATUS_GROUP, self.channel_name)
+        except Exception:
+            pass
 
-    async def receive(self, text_data=None):
-        """Handle incoming WebSocket messages from the client"""
-        if not text_data:
+    async def receive(self, text_data=None, bytes_data=None):
+        # UI doesn't need inbound messages; ignore safely
+        return
+
+    async def broadcast(self, event):
+        if self._is_closing or not self._connected:
             return
-            
+        data = event.get("data")
+        if not isinstance(data, dict):
+            return
         try:
-            data = json.loads(text_data)
-            message_type = data.get('type')
-            
-            if message_type == 'get_initial_data':
-                # Client is requesting fresh data
-                await self.send_initial_status()
-                
-        except json.JSONDecodeError:
-            print(f"Received invalid JSON: {text_data}")
-        except Exception as e:
-            print(f"Error processing WebSocket message: {e}")
-            import traceback
-            traceback.print_exc()
-    
-    async def send_initial_status(self):
-        """Send the current status of all stations to the client"""
+            await self.send(text_data=json.dumps(data))
+        except Exception:
+            return
+
+    @database_sync_to_async
+    def _snapshot(self) -> Dict[str, Any]:
+        stations = list(Station.objects.all().prefetch_related("connectors"))
+        active_keys = set(ACTIVE_STATIONS.keys())
+
+        out = []
+        for st in stations:
+            online = (st.id in active_keys)
+            out.append({
+                "station_id": st.id,
+                "online": online,
+                "status": "active" if online else "inactive",
+            })
+
+        return {
+            "type": "status_snapshot",
+            "timestamp": timezone.now().isoformat(),
+            "stations": out,
+        }
+
+    async def send_initial_snapshot(self):
+        if self._is_closing or not self._connected:
+            return
         try:
-            status_data = await self.get_station_status()
-            await self.send(text_data=json.dumps({
-                'type': 'status_update',
-                'data': status_data,
-                'timestamp': timezone.now().isoformat()
-            }))
-            # Also send individual station status updates for each connected station
-            # This ensures the frontend UI updates correctly
-            for station_id in ACTIVE_STATIONS.keys():
-                # Get connector status for this station
-                connector_status = await database_sync_to_async(
-                    lambda sid=station_id: Connector.objects.filter(station_id=sid).values_list('status', flat=True).first() or 'available'
-                )()
-                
-                await self.send(text_data=json.dumps({
-                    'type': 'connector_status_update',
-                    'station_id': str(station_id),
-                    'status': 'active',
-                    'connector_status': connector_status,
-                    'timestamp': timezone.now().isoformat()
-                }))
-                
-        except Exception as e:
-            print(f"Error sending initial status: {e}")
-            import traceback
-            traceback.print_exc()
-    
-    # DUPLICATE REMOVED - Using the first station_message implementation above
-            # The frontend JavaScript will handle the different message types
-            if message_data:
-                await self.send(text_data=json.dumps(message_data))
-                
-        except Exception as e:
-            print(f"Error in station_message: {e}")
-            import traceback
-            traceback.print_exc()
+            snap = await self._snapshot()
+            await self.send(text_data=json.dumps(snap))
+        except Exception:
+            return

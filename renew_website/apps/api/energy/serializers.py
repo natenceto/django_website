@@ -2,7 +2,18 @@
 Energy management API serializers.
 """
 from rest_framework import serializers
-from .models import Inverter, InverterReading
+from .models import Inverter, InverterReading, WorkMode
+
+
+class WorkModeSerializer(serializers.ModelSerializer):
+    """Serializer for WorkMode model."""
+    
+    class Meta:
+        model = WorkMode
+        fields = [
+            'mode', 'control_mode', 'is_active', 
+            'algorithm_selected_mode', 'last_updated'
+        ]
 
 
 class InverterSerializer(serializers.ModelSerializer):

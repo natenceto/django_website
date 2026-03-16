@@ -6,7 +6,7 @@ from django.db import migrations
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('energy', '0003_workmode'),
+        ('energy', '0002_delete_evchargingsession'),
     ]
 
     operations = [

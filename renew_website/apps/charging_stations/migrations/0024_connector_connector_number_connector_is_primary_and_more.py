@@ -7,7 +7,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("charging_stations", "0002_alter_station_ocpp_identity_and_more"),
+        ("charging_stations", "0023_connector_connector_type_connector_current_power_kw_and_more"),
     ]
 
     operations = [
