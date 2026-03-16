@@ -62,10 +62,7 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     # Local apps
     'renew_website.apps.accounts',
-<<<<<<< Updated upstream
-=======
     'renew_website.apps.admin',
->>>>>>> Stashed changes
     'renew_website.apps.charging_stations',
     'renew_website.apps.public',
     'renew_website.apps.api',

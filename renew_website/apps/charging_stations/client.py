@@ -18,27 +18,6 @@ from ocpp.v16 import call, call_result
 from datetime import datetime
 
 # ------------------------
-# Helper function to create OCPP messages
-# ------------------------
-def create_boot_notification(station_id):
-    msg = call.BootNotificationPayload(
-        charge_point_model="AVT-Express",
-        charge_point_vendor="AVT-Company",
-        charge_point_serial_number="avt.001.13.1",
-        charge_box_serial_number="avt.001.13.1.01",
-        firmware_version="0.9.87",
-        iccid="",
-        imsi="",
-        meter_type="AVT NQC-ACDC",
-        meter_serial_number="avt.001.13.1.01"
-    )
-    return msg.to_json()  # serialize to JSON string
-
-def create_heartbeat():
-    msg = call.HeartbeatPayload()
-    return msg.to_json()
-
-# ------------------------
 # WebSocket client per station
 # ------------------------
 async def run_client_for_station(station_id):
@@ -61,7 +40,17 @@ async def run_client_for_station(station_id):
             print(f"Connected to station ID: {station_id}")
 
             # Send BootNotification
-            boot_msg = create_boot_notification(station_id)
+            boot_msg = call.BootNotificationPayload(
+                charge_point_model="AVT-Express",
+                charge_point_vendor="AVT-Company",
+                charge_point_serial_number="avt.001.13.1",
+                charge_box_serial_number="avt.001.13.1.01",
+                firmware_version="0.9.87",
+                iccid="",
+                imsi="",
+                meter_type="AVT NQC-ACDC",
+                meter_serial_number="avt.001.13.1.01",
+            ).to_json()
             await ws.send(boot_msg)
             print(f"Sent BootNotification for station ID: {station_id}")
 
@@ -72,7 +61,7 @@ async def run_client_for_station(station_id):
             # Send Heartbeat periodically and listen for responses
             heartbeat_count = 0
             while True:
-                heartbeat_msg = create_heartbeat()
+                heartbeat_msg = call.HeartbeatPayload().to_json()
                 await ws.send(heartbeat_msg)
                 print(f"Sent Heartbeat #{heartbeat_count} for station ID: {station_id}")
                 

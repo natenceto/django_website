@@ -13,8 +13,7 @@ from django.forms import ModelForm
 from django import forms
 import json
 
-from ..charging_stations.models import Station
-from ..api.energy.models import Inverter, InverterReading, EVChargingSession
+from ..accounts.models import UserProfile
 
 
 class AdvancedAdminMixin:
@@ -70,96 +69,12 @@ class CustomUserAdmin(UserAdmin):
 
 # ===== CHARGING STATIONS =====
 
-@admin.register(Station)
-class StationAdmin(admin.ModelAdmin):
-    """Professional charging station admin."""
-    list_display = ('address', 'status', 'connector_type', 'power_output', 'last_seen')
-    list_filter = ('status', 'connector_type')
-    search_fields = ('address', 'email')
-    readonly_fields = ('last_seen',)
-    
-    fieldsets = (
-        ('Location Information', {
-            'fields': ('address', 'latitude', 'longitude')
-        }),
-        ('Charger Info', {
-            'fields': ('model', 'connector_type', 'power_output')
-        }),
-        ('Operations', {
-            'fields': ('status', 'last_seen')
-        }),
-        ('Owner Info', {
-            'fields': ('email',)
-        }),
-    )
+# StationAdmin removed due to duplication in charging_stations/admin.py
 
 
 # ===== ENERGY MANAGEMENT =====
 
-@admin.register(Inverter)
-class InverterAdmin(AdvancedAdminMixin, admin.ModelAdmin):
-    """Inverter management admin."""
-    list_display = ('device_sn', 'device_id', 'device_type', 'station_id', 'is_active', 'last_reading')
-    list_filter = ('device_type', 'is_active', 'created_at')
-    search_fields = ('device_sn', 'device_id', 'station_id')
-    readonly_fields = ('created_at', 'updated_at')
-    
-    fieldsets = (
-        ('Device Information', {
-            'fields': ('device_sn', 'device_id', 'device_type', 'product_id')
-        }),
-        ('Station Details', {
-            'fields': ('station_id', 'is_active')
-        }),
-        ('Metadata', {
-            'fields': ('created_at', 'updated_at'),
-            'classes': ('collapse',)
-        }),
-    )
-    
-    def last_reading(self, obj):
-        """Display last reading time."""
-        last_reading = obj.inverterreading_set.order_by('-timestamp').first()
-        return last_reading.timestamp.strftime('%Y-%m-%d %H:%M') if last_reading else 'No data'
-    last_reading.short_description = 'Last Reading'
-
-
-@admin.register(InverterReading)
-class InverterReadingAdmin(AdvancedAdminMixin, admin.ModelAdmin):
-    """Inverter readings admin with data management."""
-    list_display = ('inverter', 'generation_power', 'battery_soc', 'grid_power', 'timestamp', 'connect_status')
-    list_filter = ('connect_status', 'timestamp')
-    search_fields = ('inverter__device_sn',)
-    readonly_fields = ('timestamp', 'collection_time')
-    
-    fieldsets = (
-        ('Reading Information', {
-            'fields': ('inverter', 'timestamp', 'collection_time')
-        }),
-        ('Power Data', {
-            'fields': ('generation_power', 'battery_soc', 'grid_power')
-        }),
-        ('Status', {
-            'fields': ('connect_status', 'station_data')
-        }),
-    )
-    
-    select_related_fields = ['inverter']
-    
-    actions = ['bulk_delete_old_readings', 'export_readings_csv']
-    
-    def bulk_delete_old_readings(self, request, queryset):
-        """Bulk delete old readings with confirmation."""
-        count = queryset.count()
-        self.message_user(request, f'Deleted {count} old readings.')
-        queryset.delete()
-    bulk_delete_old_readings.short_description = 'Delete selected readings'
-    
-    def export_readings_csv(self, request, queryset):
-        """Export readings to CSV."""
-        # Implementation for CSV export
-        self.message_user(request, f'Exported {queryset.count()} readings to CSV.')
-    export_readings_csv.short_description = 'Export to CSV'
+# Inverter/Reading Admin removed due to duplication in api/energy/admin.py
 
 
 # ===== ADMIN CUSTOMIZATION =====

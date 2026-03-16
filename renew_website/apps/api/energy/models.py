@@ -65,20 +65,6 @@ class GridPricing(models.Model):
         return f"Grid pricing {self.price_per_kwh}/kWh"
 
 
-<<<<<<< Updated upstream
-class WeatherForecast(models.Model):
-    """Weather data for solar generation prediction."""
-    timestamp = models.DateTimeField()
-    cloud_cover = models.FloatField(null=True, help_text="Cloud coverage percentage")
-    solar_irradiance = models.FloatField(null=True, help_text="Solar irradiance in W/m²")
-    temperature = models.FloatField(null=True, help_text="Temperature in Celsius")
-    
-    class Meta:
-        ordering = ['-timestamp']
-
-    def __str__(self):
-        return f"Weather at {self.timestamp}"
-=======
 class WorkMode(models.Model):
     """Energy management work modes configuration."""
     
@@ -136,4 +122,3 @@ class WorkMode(models.Model):
                 control_mode='manual',
                 is_active=True
             )
->>>>>>> Stashed changes

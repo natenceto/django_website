@@ -9,8 +9,8 @@ from django.utils import timezone
 from datetime import timedelta
 import json
 
-from ..charging_stations.models import Station
-from ..api.energy.models import Inverter, InverterReading, EVChargingSession
+from ..charging_stations.models import Station, Transaction
+from ..api.energy.models import Inverter, InverterReading
 from ..accounts.models import UserProfile
 
 
@@ -128,7 +128,7 @@ def data_management(request):
     data_stats = {
         'inverter_readings': InverterReading.objects.count(),
         'stations': Station.objects.count(),
-        'charging_sessions': EVChargingSession.objects.count(),
+        'charging_sessions': Transaction.objects.count(),
         'oldest_reading': InverterReading.objects.aggregate(
             oldest=Min('timestamp')
         )['oldest'],

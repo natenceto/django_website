@@ -57,13 +57,8 @@ echo "Press Ctrl+C to stop the server"
 echo ""
 
 # Start uvicorn with WebSocket configuration
-<<<<<<< Updated upstream
-uvicorn renew_website.asgi:application \
-    --host 0.0.0.0 \
-=======
 $PYTHON_EXEC -m uvicorn renew_website.asgi:application \
-    --host localhost \
->>>>>>> Stashed changes
+    --host 0.0.0.0 \
     --port 8000 \
     --reload \
     --ws-ping-interval 60 \
