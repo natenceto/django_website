@@ -3,6 +3,7 @@
 {% block title %} RENEW | Contacts {% endblock%}
 
 {% block content %}
+<<<<<<< Updated upstream
 <address>
     <h1 class="h3 mb-2 text-gray-800"> Контакти </h1>
 Институт по информационни и комуникационни технологии – БАН<br>
@@ -11,3 +12,83 @@
 Сайт на проекта: <a href="https://www.iict.bas.bg/projects/2025/RENEW/index.html" target="_blank">RENEW</a><br>
 </address>
 {% endblock%}
+=======
+<div class="container my-5">
+
+    <!-- Header -->
+    <div class="text-center mb-5">
+        <h1 class="fw-bold text-gray-900 mb-2">Contacts</h1>
+        <p class="lead text-muted">Get in touch with the RENEW project team</p>
+    </div>
+
+    <!-- Contact Card -->
+    <div class="card shadow-sm rounded-lg p-5 mb-5">
+
+        <!-- Institute -->
+        <div class="mb-4 d-flex align-items-start">
+            <div class="me-3 flex-shrink-0" style="width: 40px; text-align:center;">
+                <i class="fas fa-university text-primary fa-lg"></i>
+            </div>
+            <div>
+                <h5 class="fw-bold mb-0">Institute of Information and Communication Technologies – BAS</h5>
+            </div>
+        </div>
+
+        <!-- Project Coordinator -->
+        <div class="mb-3 d-flex align-items-start">
+            <div class="me-3 flex-shrink-0" style="width: 40px; text-align:center;">
+                <i class="fas fa-user text-success fa-lg"></i>
+            </div>
+            <div>
+                Project Coordinator: Assoc. Prof. Dr. Denis Chikurtev<br>
+                <a href="mailto:denis.chikurtev@iict.bas.bg" 
+                   onclick="window.open(this.href, 'emailPopup', 'width=500,height=400'); return false;"
+                   class="text-decoration-none">
+                   denis.chikurtev@iict.bas.bg
+                </a>
+            </div>
+        </div>
+
+        <!-- Platform Developer -->
+        <div class="mb-3 d-flex align-items-start">
+            <div class="me-3 flex-shrink-0" style="width: 40px; text-align:center;">
+                <i class="fas fa-laptop-code text-warning fa-lg"></i>
+            </div>
+            <div>
+                Developer: Natali Hristova<br>
+                <a href="mailto:natalie.hristova@iict.bas.bg" 
+                   onclick="window.open(this.href, 'emailPopup', 'width=500,height=400'); return false;"
+                   class="text-decoration-none">
+                   natalie.hristova@iict.bas.bg
+                </a>
+            </div>
+        </div>
+
+        <!-- Location -->
+        <div class="mb-3 d-flex align-items-start">
+            <div class="me-3 flex-shrink-0" style="width: 40px; text-align:center;">
+                <i class="fas fa-map-marker-alt text-danger fa-lg"></i>
+            </div>
+            <div>
+                Visit us at: Block 2, BAS IV km., 2 Acad. Georgi Bonchev St., 1113 Sofia, Bulgaria
+            </div>
+        </div>
+
+        <!-- Project Website -->
+        <div class="mb-3 d-flex align-items-start">
+            <div class="me-3 flex-shrink-0" style="width: 40px; text-align:center;">
+                <i class="fas fa-globe text-info fa-lg"></i>
+            </div>
+            <div>
+                Project Website: 
+                <a href="https://www.iict.bas.bg/projects/2025/RENEW/index.html" target="_blank" class="text-decoration-none">
+                    RENEW
+                </a>
+            </div>
+        </div>
+
+    </div>
+
+</div>
+{% endblock %}
+>>>>>>> Stashed changes

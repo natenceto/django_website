@@ -65,6 +65,7 @@ class GridPricing(models.Model):
         return f"Grid pricing {self.price_per_kwh}/kWh"
 
 
+<<<<<<< Updated upstream
 class WeatherForecast(models.Model):
     """Weather data for solar generation prediction."""
     timestamp = models.DateTimeField()
@@ -77,3 +78,62 @@ class WeatherForecast(models.Model):
 
     def __str__(self):
         return f"Weather at {self.timestamp}"
+=======
+class WorkMode(models.Model):
+    """Energy management work modes configuration."""
+    
+    WORK_MODE_CHOICES = [
+        ('selling_first', 'Selling First'),
+        ('zero_export_load', 'Zero Export to Load'),
+        ('zero_export_ct', 'Zero Export to CT'),
+    ]
+    
+    CONTROL_MODE_CHOICES = [
+        ('automatic', 'Automatic'),
+        ('manual', 'Manual'),
+    ]
+    
+    mode = models.CharField(
+        max_length=20, 
+        choices=WORK_MODE_CHOICES,
+        help_text="Current work mode"
+    )
+    control_mode = models.CharField(
+        max_length=10,
+        choices=CONTROL_MODE_CHOICES,
+        default='manual',
+        help_text="Control mode (automatic or manual)"
+    )
+    is_active = models.BooleanField(
+        default=True,
+        help_text="Whether this work mode configuration is active"
+    )
+    algorithm_selected_mode = models.CharField(
+        max_length=20,
+        choices=WORK_MODE_CHOICES,
+        blank=True,
+        null=True,
+        help_text="Mode selected by algorithm when in automatic mode"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        ordering = ['-updated_at']
+    
+    def __str__(self):
+        return f"{self.get_mode_display()} ({self.get_control_mode_display()})"
+    
+    @classmethod
+    def get_current_config(cls):
+        """Get the current active work mode configuration."""
+        try:
+            return cls.objects.filter(is_active=True).latest('updated_at')
+        except cls.DoesNotExist:
+            # Create default configuration if none exists
+            return cls.objects.create(
+                mode='selling_first',
+                control_mode='manual',
+                is_active=True
+            )
+>>>>>>> Stashed changes

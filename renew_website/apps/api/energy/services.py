@@ -55,8 +55,23 @@ class InverterDataService:
             if inverter_sns:
                 try:
                     device_data = self.client.get_device_latest(inverter_sns)
+<<<<<<< Updated upstream
+=======
+                    
+>>>>>>> Stashed changes
                     # Process the response to get individual generation data
-                    for item in device_data.get('data', []):
+                    # Check for deviceDataList (common in newer API versions) or data -> deviceList
+                    items = []
+                    if "deviceDataList" in device_data:
+                        items = device_data["deviceDataList"]
+                    elif "data" in device_data:
+                        data = device_data["data"]
+                        if isinstance(data, list):
+                            items = data
+                        elif isinstance(data, dict):
+                            items = data.get("deviceList", [])
+                            
+                    for item in items:
                         device_sn = item.get('deviceSn')
                         if device_sn in inverter_sns:
                             individual_inverter_data[device_sn] = item
@@ -89,6 +104,7 @@ class InverterDataService:
             }
         )
         
+<<<<<<< Updated upstream
         # Use individual inverter data if available, otherwise fall back to station data
         if individual_data:
             # Extract individual inverter generation data
@@ -102,11 +118,60 @@ class InverterDataService:
             )
         else:
             # Fall back to station data (divided among inverters)
+=======
+        # Extract generation power from individual device data
+        generation_power = 0
+        battery_soc = None
+        
+        if individual_data and 'dataList' in individual_data:
+            
+            # Look for solar generation power in dataList - try multiple fields
+            for item in individual_data['dataList']:
+                key = item.get('key')
+                value = item.get('value', 0)
+                
+                # Check for SOC while we're iterating
+                if key == 'SOC' or key == 'BatterySOC' or key == 'BMSSOC':
+                    try:
+                        soc_val = float(value)
+                        if soc_val > 0:
+                            battery_soc = soc_val
+                    except (ValueError, TypeError):
+                        pass
+
+                # Try different generation power fields
+                if key == 'TotalSolarPower':
+                    generation_power = float(value)
+                    break
+                elif key == 'TotalInverterOutputPower':
+                    power = float(value)
+                    if power > 0:  # Only positive values are generation
+                        generation_power = power
+                        break
+                elif key == 'DCPowerPV1' or key == 'DCPowerPV2':
+                    # Sum DC power from PV panels
+                    generation_power += float(value)
+                elif key == 'InverterOutputPowerL1' or key == 'InverterOutputPowerL2' or key == 'InverterOutputPowerL3':
+                    # Sum AC output power from each phase
+                    power = float(value)
+                    if power > 0:
+                        generation_power += power
+        else:
+            # Fall back to station data
+>>>>>>> Stashed changes
             station_generation = station_data.get('generationPower', 0)
             total_inverters = len([d for d in station_data.get('stationList', [{}])[0].get('deviceListItems', []) 
                                   if d.get('deviceType') == 'INVERTER']) if station_data.get('stationList') else 1
             generation_power = station_generation / total_inverters if total_inverters > 0 else 0
         
+<<<<<<< Updated upstream
+=======
+        if battery_soc is None:
+            battery_soc = station_data.get('batterySOC')
+            
+        logger.info(f"Got data for {device_data['deviceSn']}: {generation_power}W, SOC {battery_soc}%")
+        
+>>>>>>> Stashed changes
         # Store individual inverter data
         reading = InverterReading.objects.create(
             inverter=inverter,

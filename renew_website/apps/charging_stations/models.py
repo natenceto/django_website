@@ -52,9 +52,37 @@ class Station(models.Model):
         """Return a shortened version of the address for display"""
         if not self.address:
             return "No address"
+<<<<<<< Updated upstream
         # Take first 30 chars and add ellipsis if needed
         return (self.address[:30] + '...') if len(self.address) > 30 else self.address
     
+=======
+        return (self.address[:30] + "...") if len(self.address) > 30 else self.address
+
+    def get_main_connector(self):
+        """Get the primary connector for this station"""
+        return self.connectors.filter(is_primary=True).first() or self.connectors.first()
+
+    def get_connector_count(self):
+        """Get the number of connectors for this station"""
+        return self.connectors.count()
+
+    @property
+    def is_online(self):
+        """Check if station is currently online based on last_seen"""
+        from django.utils import timezone
+        if self.last_seen:
+            # Consider online if seen in the last 5 minutes
+            return (timezone.now() - self.last_seen).total_seconds() < 300
+        return False
+
+    @property
+    def serial_number(self):
+        """Get serial number from primary connector"""
+        connector = self.get_main_connector()
+        return connector.vendor_connector_id if connector else None
+
+>>>>>>> Stashed changes
     def status_badge(self):
         """Return HTML for status badge"""
         if not self.last_seen:
@@ -92,7 +120,26 @@ class Station(models.Model):
 
 class Connector(models.Model):
     station = models.ForeignKey(Station, on_delete=models.CASCADE, related_name="connectors")
+<<<<<<< Updated upstream
     connector_id = models.IntegerField(help_text="Physical connector number at this station (e.g., 1, 2, 3)")
+=======
+    connector_id = models.IntegerField(
+        help_text="Physical connector number at this station as defined by the charge point (OCPP connectorId)."
+    )
+    
+    # Human-readable connector number (1-based for display)
+    connector_number = models.IntegerField(
+        default=1,
+        help_text="Human-readable connector number (1-based: 1, 2, 3...)"
+    )
+
+    # Primary connector flag (for single-connector stations)
+    is_primary = models.BooleanField(
+        default=False,
+        help_text="This is the primary connector for the station"
+    )
+
+>>>>>>> Stashed changes
     vendor_connector_id = models.CharField(
         max_length=50,
         blank=True,
@@ -119,6 +166,7 @@ class Connector(models.Model):
         ('inoperative', 'Inoperative'),  # Cannot charge (maintenance/disabled)
     ]
     availability = models.CharField(max_length=20, choices=AVAILABILITY_CHOICES, default="operative")
+<<<<<<< Updated upstream
     
     # Power and Electrical Specifications
     max_power_kw = models.DecimalField(
@@ -164,6 +212,42 @@ class Connector(models.Model):
         help_text="Total energy delivered through this connector (kWh)"
     )
 
+=======
+
+    # Power/electrical
+    max_power_kw = models.DecimalField(max_digits=6, decimal_places=2, default=Decimal("22.0"), help_text="Maximum power this connector can deliver (kW)")
+    max_current_a = models.DecimalField(max_digits=6, decimal_places=2, default=Decimal("32.0"), help_text="Maximum current this connector can draw (A)")
+    voltage_v = models.IntegerField(default=230, help_text="Voltage this connector operates at (V)")
+
+    # Phase configuration
+    PHASE_CHOICES = [
+        ('1', 'Single Phase'),
+        ('3', 'Three Phase'),
+    ]
+    phases = models.CharField(max_length=1, choices=PHASE_CHOICES, default='1')
+
+    # Connector type (physical plug type)
+    CONNECTOR_TYPE_CHOICES = [
+        ("type2", "Type 2"),
+        ("ccs", "CCS"),
+        ("chademo", "CHAdeMO"),
+        ("type1", "Type 1"),
+        ("tesla", "Tesla"),
+        ("schuko", "Schuko"),
+    ]
+    connector_type = models.CharField(
+        max_length=20,
+        choices=CONNECTOR_TYPE_CHOICES,
+        default="type2",
+        help_text="Physical connector type"
+    )
+
+    # Smart charging
+    supports_smart_charging = models.BooleanField(default=True, help_text="Connector supports smart charging/load balancing")
+    current_power_kw = models.DecimalField(max_digits=6, decimal_places=2, null=True, blank=True)
+    energy_delivered_kwh = models.DecimalField(max_digits=10, decimal_places=4, default=Decimal("0.0"))
+
+>>>>>>> Stashed changes
     class Meta:
         unique_together = ['station', 'connector_id']
         ordering = ['station', 'connector_id']

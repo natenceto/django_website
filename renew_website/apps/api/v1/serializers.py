@@ -36,7 +36,12 @@ class StationListSerializer(serializers.ModelSerializer):
         return obj.connectors.count()
     
     def get_is_online(self, obj):
-        from renew_website.apps.charging_stations.ocpp.registry import is_station_active
+        try:
+            from renew_website.apps.charging_stations.registry import is_station_active
+        except ImportError:
+            # Fallback if the module does not exist
+            def is_station_active(station_id):
+                return False
         return is_station_active(obj.id)
 
 
@@ -55,7 +60,7 @@ class StationDetailSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'last_seen']
     
     def get_is_online(self, obj):
-        from renew_website.apps.charging_stations.ocpp.registry import is_station_active
+        from renew_website.apps.charging_stations.registry import is_station_active
         return is_station_active(obj.id)
 
 

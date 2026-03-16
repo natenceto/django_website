@@ -31,6 +31,7 @@ class DeyeCloudClient:
         token = client.get_token()
         devices = client.get_device_list()
     """
+<<<<<<< Updated upstream
     
     TOKEN_CACHE_KEY = "deye_access_token"
     TOKEN_CACHE_TIMEOUT = 7000  # Token valid for ~2 hours, cache for less
@@ -55,6 +56,30 @@ class DeyeCloudClient:
         self.datacenter = datacenter or getattr(settings, 'DEYE_DATACENTER', 'eu')
         self.company_id = company_id or getattr(settings, 'DEYE_COMPANY_ID', '0')
         
+=======
+
+    DEFAULT_TIMEOUT = 30
+    SUCCESS_CODES = {"0", "1000000", "1106000"}  # 1106000 is "order sent successfully" in workMode updates
+
+    def __init__(
+        self,
+        *,
+        app_id: Optional[str] = None,
+        app_secret: Optional[str] = None,
+        email: Optional[str] = None,
+        password: Optional[str] = None,
+        datacenter: Optional[str] = None,
+        company_id: Optional[str] = None,
+        session: Optional[requests.Session] = None,
+    ):
+        self.app_id = app_id or getattr(settings, "DEYE_APP_ID", None)
+        self.app_secret = app_secret or getattr(settings, "DEYE_APP_SECRET", None)
+        self.email = email or getattr(settings, "DEYE_EMAIL", None)
+        self.password = password or getattr(settings, "DEYE_PASSWORD", None)
+        self.datacenter = (datacenter or getattr(settings, "DEYE_DATACENTER", "eu") or "eu").lower()
+        self.company_id = company_id if company_id is not None else getattr(settings, "DEYE_COMPANY_ID", "0")
+
+>>>>>>> Stashed changes
         if not all([self.app_id, self.app_secret, self.email, self.password]):
             raise ValueError(
                 "DeyeCloud credentials not configured. "
@@ -307,6 +332,7 @@ class DeyeCloudClient:
             "size": size
         }
         if device_type:
+<<<<<<< Updated upstream
             data["deviceType"] = device_type
         return self._make_request("POST", endpoint, data=data)
     
@@ -359,6 +385,30 @@ class DeyeCloudClient:
         """
         endpoint = "/station/history"
         data = {
+=======
+            body["deviceType"] = device_type
+        return self._request("POST", "/station/listWithDevice", json=body)
+
+    def station_latest(self, station_id: int) -> Dict[str, Any]:
+        return self._request("POST", "/station/latest", json={"stationId": str(station_id)})
+
+    def station_devices(self, *, station_id: int, page: int = 1, size: int = 20) -> Dict[str, Any]:
+        return self._request(
+            "POST",
+            "/station/device",
+            json={"stationId": int(station_id), "page": page, "size": size},
+        )
+
+    def station_history(
+        self,
+        *,
+        station_id: int,
+        granularity: int,
+        start_at: str,
+        end_at: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        body: Dict[str, Any] = {
+>>>>>>> Stashed changes
             "stationId": int(station_id),
             "granularity": granularity,
             "startAt": start_at,
@@ -367,10 +417,158 @@ class DeyeCloudClient:
             data["endAt"] = end_at
         return self._make_request("POST", endpoint, data=data)
 
+<<<<<<< Updated upstream
 
 class DeyeCloudError(Exception):
     """Base exception for DeyeCloud errors."""
     pass
+=======
+    # -----------------------
+    # Work Mode & Dynamic Control
+    # -----------------------
+
+    def set_dynamic_control(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Send a custom dynamic control strategy.
+        """
+        return self._request(
+            "POST",
+            "/strategy/dynamicControl",
+            json=payload,
+        )
+
+    def set_dynamic_control_fully_charge(
+        self,
+        *,
+        device_sn: str,
+        target_soc: float = 90,
+        power: float = 4000,
+        work_mode: str = "ZERO_EXPORT_TO_CT"
+    ) -> Dict[str, Any]:
+        """
+        Set operation mode as Fully Charge via dynamic control.
+        """
+        api_mode = WORK_MODE_MAP.get(work_mode, work_mode)
+        payload = {
+            "deviceSn": device_sn,
+            "gridChargeAction": "on",
+            "touAction": "on",
+            "touDays": ["SUNDAY", "MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY"],
+            "workMode": api_mode,
+            "timeUseSettingItems": [
+                {"enableGeneration": True, "enableGridCharge": True, "soc": target_soc, "power": power, "time": "00:10"},
+                {"enableGeneration": True, "enableGridCharge": True, "soc": target_soc, "power": power, "time": "02:10"},
+                {"enableGeneration": True, "enableGridCharge": True, "soc": target_soc, "power": power, "time": "04:10"},
+                {"enableGeneration": True, "enableGridCharge": True, "soc": target_soc, "power": power, "time": "15:10"},
+                {"enableGeneration": True, "enableGridCharge": True, "soc": target_soc, "power": power, "time": "20:10"},
+                {"enableGeneration": True, "enableGridCharge": True, "soc": target_soc, "power": power, "time": "23:10"}
+            ]
+        }
+        return self.set_dynamic_control(payload)
+
+    def set_dynamic_control_fully_feeding_grid(
+        self,
+        *,
+        device_sn: str,
+        rated_power: float = 2000,
+        power: float = 2000,
+        target_soc: float = 15,
+        work_mode: str = "SELLING_FIRST"
+    ) -> Dict[str, Any]:
+        """
+        Fully Feeding Grid via dynamic control.
+        """
+        api_mode = WORK_MODE_MAP.get(work_mode, work_mode)
+        payload = {
+            "deviceSn": device_sn,
+            "maxSellPower": rated_power,
+            "maxSolarPower": rated_power,
+            "solarSellAction": "on",
+            "touAction": "on",
+            "touDays": ["SUNDAY", "MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY"],
+            "workMode": api_mode,
+            "timeUseSettingItems": [
+                {"enableGeneration": True, "enableGridCharge": True, "power": power, "soc": target_soc, "time": "10:30"},
+                {"enableGeneration": True, "enableGridCharge": True, "power": power, "soc": target_soc, "time": "23:30"},
+                {"enableGeneration": True, "enableGridCharge": True, "power": power, "soc": target_soc, "time": "04:30"},
+                {"enableGeneration": True, "enableGridCharge": True, "power": power, "soc": target_soc, "time": "05:30"},
+                {"enableGeneration": True, "enableGridCharge": True, "power": 2000, "soc": 15, "time": "06:30"},
+                {"enableGeneration": True, "enableGridCharge": True, "power": 2000, "soc": 15, "time": "07:30"}
+            ]
+        }
+        return self.set_dynamic_control(payload)
+
+    def set_dynamic_control_idle(
+        self,
+        *,
+        device_sn: str,
+        target_soc: float = 70,
+        power: float = 10000,
+        work_mode: str = "SELLING_FIRST"
+    ) -> Dict[str, Any]:
+        """
+        Idle mode via dynamic control.
+        """
+        api_mode = WORK_MODE_MAP.get(work_mode, work_mode)
+        payload = {
+            "deviceSn": device_sn,
+            "solarSellAction": "on",
+            "touAction": "on",
+            "touDays": ["SUNDAY", "MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY"],
+            "workMode": api_mode,
+            "timeUseSettingItems": [
+                {"enableGeneration": True, "enableGridCharge": True, "power": power, "soc": target_soc, "time": "02:30"},
+                {"enableGeneration": True, "enableGridCharge": True, "power": power, "soc": target_soc, "time": "06:30"},
+                {"enableGeneration": True, "enableGridCharge": True, "power": power, "soc": target_soc, "time": "20:30"},
+                {"enableGeneration": True, "enableGridCharge": True, "power": power, "soc": target_soc, "time": "21:30"},
+                {"enableGeneration": True, "enableGridCharge": True, "power": power, "soc": target_soc, "time": "22:30"},
+                {"enableGeneration": True, "enableGridCharge": True, "power": power, "soc": target_soc, "time": "23:30"}
+            ]
+        }
+        return self.set_dynamic_control(payload)
+
+    def set_dynamic_control_self_consumption(
+        self,
+        *,
+        device_sn: str,
+        target_soc: float = 15,
+        power: float = 10000,
+        work_mode: str = "ZERO_EXPORT_TO_CT"
+    ) -> Dict[str, Any]:
+        """
+        Self-consumption via dynamic control.
+        """
+        api_mode = WORK_MODE_MAP.get(work_mode, work_mode)
+        payload = {
+            "deviceSn": device_sn,
+            "solarSellAction": "on",
+            "touAction": "on",
+            "touDays": ["SUNDAY", "MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY"],
+            "workMode": api_mode,
+            "timeUseSettingItems": [
+                {"enableGeneration": True, "enableGridCharge": True, "power": power, "soc": target_soc, "time": "02:30"},
+                {"enableGeneration": True, "enableGridCharge": True, "power": power, "soc": target_soc, "time": "06:30"},
+                {"enableGeneration": True, "enableGridCharge": True, "power": power, "soc": target_soc, "time": "20:30"},
+                {"enableGeneration": True, "enableGridCharge": True, "power": power, "soc": target_soc, "time": "21:30"},
+                {"enableGeneration": True, "enableGridCharge": True, "power": power, "soc": target_soc, "time": "22:30"},
+                {"enableGeneration": True, "enableGridCharge": True, "power": power, "soc": target_soc, "time": "23:30"}
+            ]
+        }
+        return self.set_dynamic_control(payload)
+
+    def set_work_mode(
+        self,
+        *,
+        device_sn: str,
+        mode: str,
+        poll_order: bool = True,
+        poll_timeout_seconds: int = 30,
+        poll_interval_seconds: float = 1.0,
+    ) -> OrderStatus:
+        api_mode = WORK_MODE_MAP.get(mode, mode)
+        if api_mode not in WORK_MODE_MAP.values():
+            raise ValueError(f"Invalid work mode '{mode}'. Allowed: {list(WORK_MODE_MAP.keys())}")
+>>>>>>> Stashed changes
 
 
 class DeyeCloudAPIError(DeyeCloudError):
@@ -417,6 +615,7 @@ DEMO_STATIONS_DATA = {
     }
 }
 
+<<<<<<< Updated upstream
 DEMO_DEVICE_DATA = {
     "data": [
         {
@@ -444,6 +643,129 @@ DEMO_DEVICE_DATA = {
             "temperature": 35.2,
             "voltage": 230.0,
             "current": 13.0
+=======
+            status = data.get("status") or data.get("orderStatus") or data.get("state")
+            analysis = data.get("analysisResult") or data.get("analysis") or None
+
+            if status is None:
+                return OrderStatus(order_id=order_id, raw=last)
+
+            status_str = str(status).upper()
+            if status_str in {"SUCCESS", "SUCCEED", "DONE", "FINISH", "FINISHED", "COMPLETED"}:
+                return OrderStatus(order_id=order_id, status=status_str, analysis_result=analysis, raw=last)
+            if status_str in {"FAIL", "FAILED", "ERROR", "REJECT", "REJECTED"}:
+                return OrderStatus(order_id=order_id, status=status_str, analysis_result=analysis, raw=last)
+
+            time.sleep(max(0.1, float(interval_seconds)))
+
+        return OrderStatus(order_id=order_id, status="TIMEOUT", raw=last)
+
+    def get_work_mode(self, device_sn: str) -> Dict[str, Any]:
+        """
+        Get work mode from device using device/history with correct measure point names.
+        
+        Deye API is case-sensitive for measurePoints.
+        Attempts to read workMode using /device/history endpoint.
+        """
+        from datetime import datetime, timedelta
+        
+        mode_raw = None
+        source = None
+        
+        # Try to get work mode from device/history with correct date format
+        try:
+            today = datetime.now()
+            start_at = today.strftime("%Y-%m-%d")
+            
+            # Try different possible workMode parameter names (case-sensitive!)
+            work_mode_names = ["workMode", "SystemWorkMode", "WorkMode", "sys/workMode", "System/WorkMode"]
+            
+            for mode_name in work_mode_names:
+                try:
+                    history = self.device_history(
+                        device_sn=device_sn,
+                        granularity=1,
+                        start_at=start_at,
+                        measure_points=[mode_name]
+                    )
+                    
+                    data = history.get("data") or history
+                    values = data.get("values") or data.get("dataList") or []
+                    
+                    if isinstance(values, list) and values:
+                        # Get the latest value
+                        latest_value = values[-1] if values else None
+                        if isinstance(latest_value, dict):
+                            mode_raw = latest_value.get(mode_name) or latest_value.get("value")
+                            if mode_raw:
+                                source = f"device_history ({mode_name})"
+                                logger.debug(f"Found workMode via device_history: {mode_raw}")
+                                break
+                except Exception as e:
+                    # Try next parameter name
+                    logger.debug(f"device_history with '{mode_name}' failed: {e}")
+                    continue
+            
+            if mode_raw:
+                pass
+        except Exception as e:
+            logger.debug(f"device_history approach failed: {e}")
+        
+        # Fallback: Try device/latest endpoint
+        if not mode_raw:
+            try:
+                latest = self.device_latest(device_sn)
+                data = latest.get("data") or latest
+                devices = data.get("deviceList") or data.get("deviceDataList") or []
+
+                if isinstance(devices, list) and devices:
+                    d0 = devices[0]
+                    if isinstance(d0, dict):
+                        # Try different case variations on top level
+                        mode_raw = (d0.get("workMode") or d0.get("WorkMode") or 
+                                   d0.get("sys/workMode") or d0.get("SystemWorkMode"))
+                        
+                        # If not found at top level, check inside dataList (common for some firmwares)
+                        if not mode_raw and "dataList" in d0:
+                            for item in d0["dataList"]:
+                                if isinstance(item, dict):
+                                    key = item.get("key", "")
+                                    # Check for typical work mode keys
+                                    if key in ["WorkMode", "sys/workMode", "SystemWorkMode", "System/WorkMode"]:
+                                        mode_raw = item.get("value")
+                                        if mode_raw:
+                                            source = f"device_latest_dataList ({key})"
+                                            logger.debug(f"Found workMode in device_latest dataList: {mode_raw}")
+                                            break
+
+                        if mode_raw:
+                            if not source:
+                                source = "device_latest"
+                            logger.debug(f"Found workMode in device_latest: {mode_raw}")
+            except Exception as e:
+                logger.debug(f"device_latest failed for work mode: {e}")
+        
+        # Normalize the work mode value
+        normalized = None
+        if isinstance(mode_raw, str):
+            # Create reverse mapping from API values to internal names
+            api_to_internal = {v: k for k, v in WORK_MODE_MAP.items()}
+            normalized = api_to_internal.get(mode_raw)
+            
+            # If direct mapping failed, try case-insensitive matching
+            if not normalized:
+                mode_upper = mode_raw.upper()
+                for api_val, internal_val in api_to_internal.items():
+                    if api_val.upper() == mode_upper:
+                        normalized = internal_val
+                        break
+        
+        return {
+            "device_sn": device_sn,
+            "mode": normalized or "unknown",
+            "source": source or "unavailable",
+            "raw_mode": mode_raw,
+>>>>>>> Stashed changes
         }
     ]
 }

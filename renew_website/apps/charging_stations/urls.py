@@ -10,4 +10,9 @@ urlpatterns = [
     path("stations/", login_required(admin_required(views.stations)), name="stations"),
     path("statistics/", login_required(admin_required(views.statistics)), name="statistics"),
     path("tables/", login_required(admin_required(views.tables)), name="tables"),
+
+    # SoC API endpoints
+    path('api/station/<int:station_id>/soc/current/', login_required(views.get_current_soc), name='get_current_soc'),
+    path('api/station/<int:station_id>/soc/history/', login_required(views.get_soc_history), name='get_soc_history'),
+    path('api/station/<int:station_id>/soc/config/', login_required(views.update_station_soc_config), name='update_station_soc_config'),
 ]

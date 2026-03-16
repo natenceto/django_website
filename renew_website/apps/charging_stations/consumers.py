@@ -104,6 +104,7 @@ class ChargePoint(OCPPChargePoint):
         # Connection tracking
         self.last_seen = timezone.now()
         self.heartbeat_interval = 60
+<<<<<<< Updated upstream
         self._connection_verified = False
         self._heartbeat_task = None
         self._connection_retries = 0
@@ -112,6 +113,12 @@ class ChargePoint(OCPPChargePoint):
     
     async def route_message(self, raw_msg):
         """Override to handle malformed messages from simulator"""
+=======
+
+
+    async def route_message(self, raw_msg: str):
+        self.last_seen = timezone.now()
+>>>>>>> Stashed changes
         try:
             # Update liveness on any inbound message
             self.last_seen = datetime.now().astimezone()
@@ -203,9 +210,76 @@ class ChargePoint(OCPPChargePoint):
             print(f"Connection verification failed: {e}")
             return False
 
+<<<<<<< Updated upstream
     async def _connection_watchdog(self):
         """Monitor the connection and attempt recovery if needed."""
         while True:
+=======
+
+    # -------------------------
+    # OCPP 1.6J handlers
+    # -------------------------
+    @on(Action.BootNotification)
+    async def on_boot_notification(self, charge_point_vendor: str, charge_point_model: str, **kwargs):
+        station_id = self.station_id
+        station_logger = get_station_logger(station_id)
+
+        station_logger.info("=== OCPP 1.6 BootNotification ===")
+        station_logger.info(f"Station ID: {station_id}")
+        station_logger.info(f"Vendor: {charge_point_vendor}")
+        station_logger.info(f"Model: {charge_point_model}")
+
+        firmware_version = kwargs.get("firmware_version") or kwargs.get("firmwareVersion")
+        if firmware_version:
+            station_logger.info(f"Firmware: {firmware_version}")
+
+        self.heartbeat_interval = int(getattr(self, "default_heartbeat_interval", 60))
+        station_logger.info(f"Heartbeat interval: {self.heartbeat_interval}s")
+
+        try:
+            asyncio.create_task(self._update_station_status_async("active", "boot"))
+            asyncio.create_task(self._post_boot_setup())
+            asyncio.create_task(self.update_station_model(station_id, charge_point_model, charge_point_vendor))
+        except Exception:
+            ocpp_logger.exception("BootNotification background task error")
+
+        current_time = (
+            timezone.now()
+            .astimezone(py_datetime.timezone.utc)
+            .replace(microsecond=0)
+            .isoformat()
+            .replace("+00:00", "Z")
+        )
+
+        return call_result.BootNotificationPayload(
+            status=RegistrationStatus.accepted,
+            current_time=current_time,
+            interval=self.heartbeat_interval,
+        )
+
+    @on(Action.Authorize)
+    async def on_authorize(self, id_tag: str, **kwargs):
+        id_tag = (id_tag or "")[:20]
+
+        try:
+            is_valid = await database_sync_to_async(
+                lambda: UserRFID.objects.filter(
+                    tag=id_tag,
+                    stations__id=self.station_id,
+                    is_active=True,
+                ).exists()
+            )()
+        except Exception:
+            ocpp_logger.exception("Error checking RFID")
+            is_valid = False
+
+        if is_valid:
+            status = AuthorizationStatus.accepted.value
+        else:
+            status = AuthorizationStatus.invalid.value
+
+        if is_valid and getattr(self, "consumer", None):
+>>>>>>> Stashed changes
             try:
                 if not hasattr(self, 'last_seen') or (timezone.now() - self.last_seen).total_seconds() > self.heartbeat_interval * 2:
                     print("No recent activity, checking connection...")

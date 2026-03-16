@@ -103,7 +103,7 @@ Queue:   Redis (Celery)
 ### Модулна структура
 
 ```
-django_website_copy/
+django_website/
 ├── apps/
 │   ├── charging_stations/     # OCPP и станции
 │   │   ├── models.py          # Station, Transaction, ChargingSession

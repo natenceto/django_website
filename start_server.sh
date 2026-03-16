@@ -15,12 +15,15 @@ if [ ! -f ".env" ]; then
 fi
 
 # Activate virtual environment
+PYTHON_EXEC="python"
 if [ -d "venv" ]; then
     echo "Activating venv virtual environment..."
     source venv/bin/activate
+    PYTHON_EXEC="./venv/bin/python"
 elif [ -d ".venv" ]; then
     echo "Activating .venv virtual environment..."
     source .venv/bin/activate
+    PYTHON_EXEC="./.venv/bin/python"
 else
     echo "No virtual environment found!"
     echo "Create one with: python -m venv .venv"
@@ -33,17 +36,17 @@ export PYTHONPATH=$PYTHONPATH:$(pwd)
 
 # Check if required packages are installed
 echo "Checking dependencies..."
-python -c "import django, channels, ocpp" 2>/dev/null || {
+$PYTHON_EXEC -c "import django, channels, ocpp" 2>/dev/null || {
     echo "Missing required packages!"
-    echo "Install with: pip install -r requirements/dev.txt"
+    echo "Install with: $PYTHON_EXEC -m pip install -r requirements/dev.txt"
     exit 1
 }
 
 # Run database migrations if needed
 echo "Checking database migrations..."
-python manage.py migrate --check 2>/dev/null || {
+$PYTHON_EXEC manage.py migrate --check 2>/dev/null || {
     echo "Running database migrations..."
-    python manage.py migrate
+    $PYTHON_EXEC manage.py migrate
 }
 
 # Start the ASGI server
@@ -54,8 +57,13 @@ echo "Press Ctrl+C to stop the server"
 echo ""
 
 # Start uvicorn with WebSocket configuration
+<<<<<<< Updated upstream
 uvicorn renew_website.asgi:application \
     --host 0.0.0.0 \
+=======
+$PYTHON_EXEC -m uvicorn renew_website.asgi:application \
+    --host localhost \
+>>>>>>> Stashed changes
     --port 8000 \
     --reload \
     --ws-ping-interval 60 \

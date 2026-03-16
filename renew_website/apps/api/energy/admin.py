@@ -2,7 +2,7 @@
 Django admin configuration for energy management models.
 """
 from django.contrib import admin
-from .models import Inverter, InverterReading, GridPricing, WeatherForecast
+from .models import Inverter, InverterReading, GridPricing
 
 
 @admin.register(Inverter)
@@ -34,10 +34,3 @@ class GridPricingAdmin(admin.ModelAdmin):
     list_display = ['start_time', 'end_time', 'price_per_kwh', 'is_peak']
     list_filter = ['is_peak']
     ordering = ['start_time']
-
-
-@admin.register(WeatherForecast)
-class WeatherForecastAdmin(admin.ModelAdmin):
-    list_display = ['timestamp', 'cloud_cover', 'solar_irradiance', 'temperature']
-    list_filter = ['timestamp']
-    ordering = ['-timestamp']

@@ -14,6 +14,11 @@ from pathlib import Path
 
 import environ
 import os
+import warnings
+
+# Suppress "StreamingHttpResponse must consume synchronous iterators" warning 
+# caused by WhiteNoise/FileResponse in ASGI mode.
+warnings.filterwarnings("ignore", message="StreamingHttpResponse must consume synchronous iterators")
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -57,6 +62,10 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     # Local apps
     'renew_website.apps.accounts',
+<<<<<<< Updated upstream
+=======
+    'renew_website.apps.admin',
+>>>>>>> Stashed changes
     'renew_website.apps.charging_stations',
     'renew_website.apps.public',
     'renew_website.apps.api',

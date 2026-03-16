@@ -22,6 +22,8 @@ from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 urlpatterns = [
     path("", include("renew_website.apps.public.urls")),
     path("admin/", admin.site.urls),
+    # Portal admin (Professional Dashboard)
+    path("portal/", include("renew_website.apps.admin.urls")),
     path("accounts/", include("renew_website.apps.accounts.urls")),
     path("charging_stations/", include("renew_website.apps.charging_stations.urls")),
     path("deye/", include("renew_website.apps.api.deye.urls")),
