@@ -1,4 +1,4 @@
 # DeyeCloud API Integration
-from .client import DeyeCloudClient
+from .cloud_client import DeyeCloudClient
 
 __all__ = ['DeyeCloudClient']

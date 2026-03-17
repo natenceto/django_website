@@ -7,6 +7,8 @@ os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'renew_website.settings')
 from django.core.asgi import get_asgi_application
 django_asgi_app = get_asgi_application()
 
+import threading
+
 # Reset all station statuses to inactive on server startup
 # This ensures stale "active" statuses from previous sessions are cleared
 def reset_station_statuses():
@@ -21,7 +23,10 @@ def reset_station_statuses():
     except Exception as e:
         print(f"Warning: Could not reset station statuses on startup: {e}")
 
-reset_station_statuses()
+# Run in a separate thread to avoid "SynchronousOnlyOperation" when running under ASGI
+startup_thread = threading.Thread(target=reset_station_statuses)
+startup_thread.start()
+startup_thread.join()
 
 # Now it's safe to import Django app modules (after Django is initialized)
 from channels.routing import ProtocolTypeRouter, URLRouter

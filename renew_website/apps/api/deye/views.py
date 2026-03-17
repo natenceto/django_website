@@ -9,7 +9,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 import logging
 
-from .client import DeyeCloudClient, DeyeCloudError
+from .cloud_client import DeyeCloudClient, DeyeCloudError
 
 logger = logging.getLogger(__name__)
 

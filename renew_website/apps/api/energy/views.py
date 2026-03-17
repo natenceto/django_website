@@ -19,162 +19,14 @@ from .serializers import (
     ChargingRecommendationResponseSerializer,
     WorkModeSerializer
 )
-from renew_website.apps.api.deye.client import DeyeCloudClient, DeyeCloudError, WORK_MODE_MAP
+from renew_website.apps.api.deye.cloud_client import DeyeCloudClient, DeyeCloudError, WORK_MODE_MAP
+from renew_website.apps.api.deye.manager import DeyeManager
 from .utils import run_work_mode_algorithm
 
 logger = logging.getLogger(__name__)
 
 # Global cache for websocket performance
 _ws_performance_stats = {}
-
-# -----------------------
-# Deye helpers
-# -----------------------
-
-def _extract_station_list(stations_payload: dict) -> list:
-    """
-    Your real /station/listWithDevice response shows stationList at root:
-      {'code': '1000000', ..., 'stationList': [...]}
-    Some wrappers put it under data:
-      {'code':..., 'data': {'stationList': [...]}}
-    Support both.
-    """
-    if not isinstance(stations_payload, dict):
-        return []
-    if isinstance(stations_payload.get("stationList"), list):
-        return stations_payload.get("stationList") or []
-    data = stations_payload.get("data") or {}
-    if isinstance(data.get("stationList"), list):
-        return data.get("stationList") or []
-    return []
-
-
-def get_master_inverter() -> dict | None:
-    """
-    Returns:
-      {'device_sn': str, 'device_id': any, 'station_id': any}
-    """
-    try:
-        client = DeyeCloudClient()
-        
-        # Use listWithDevice and filter deviceType=INVERTER (as per your client implementation).
-        stations_payload = client.get_station_list(page=1, size=20, device_type="INVERTER")
-
-        station_list = _extract_station_list(stations_payload)
-        if not station_list:
-            logger.warning("No stations returned from Deye Cloud")
-            return None
-
-        # Prefer a connected inverter; Deye response in your logs does not include isMaster.
-        for st in station_list:
-            station_id = st.get("id")
-            devices = st.get("deviceListItems") or []
-            
-            # Pick first connected inverter
-            for i, device in enumerate(devices):
-                sn = device.get("deviceSn")
-                cs = device.get("connectStatus")
-                
-                if device.get("deviceType") == "INVERTER" and cs == 1 and sn:
-                    logger.debug("Using connected inverter as master: %s", sn)
-                    return {
-                        "device_sn": sn,
-                        "device_id": device.get("deviceId"),
-                        "station_id": station_id,
-                    }
-
-        # Fallback: first inverter regardless of connectStatus
-        for st in station_list:
-            station_id = st.get("id")
-            devices = st.get("deviceListItems") or []
-            for device in devices:
-                sn = device.get("deviceSn")
-                if device.get("deviceType") == "INVERTER" and sn:
-                    logger.debug("Using fallback master inverter: %s", sn)
-                    return {
-                        "device_sn": sn,
-                        "device_id": device.get("deviceId"),
-                        "station_id": station_id,
-                    }
-
-        logger.warning("No inverter found in any station")
-        return None
-
-    except Exception as e:
-        logger.error("Failed to get master inverter: %s", e, exc_info=True)
-        return None
-
-
-def sync_work_mode_to_deye(work_mode: str) -> bool:
-    """
-    Writes one of the 3 official modes to Deye:
-      selling_first | zero_export_load | zero_export_ct
-    """
-    if work_mode not in WORK_MODE_MAP:
-        logger.error("Invalid work mode for Deye sync: %s", work_mode)
-        return False
-
-    master = get_master_inverter()
-    if not master:
-        logger.warning("No master inverter found for work mode sync")
-        return False
-
-    try:
-        client = DeyeCloudClient()
-        order_status = client.set_work_mode(device_sn=master["device_sn"], mode=work_mode, poll_order=True)
-
-        # Success criteria: not FAIL/FAILED/ERROR/REJECT..., TIMEOUT treated as "sent but not confirmed"
-        if (order_status.status or "").upper() in {"FAIL", "FAILED", "ERROR", "REJECT", "REJECTED"}:
-            logger.error(
-                "Deye work mode sync failed: device=%s mode=%s order=%s status=%s",
-                master["device_sn"], work_mode, order_status.order_id, order_status.status
-            )
-            return False
-
-        logger.info(
-            "Synced work mode %s to inverter %s (order=%s status=%s)",
-            work_mode, master["device_sn"], order_status.order_id, order_status.status
-        )
-        return True
-
-    except DeyeCloudError as e:
-        logger.error("Deye Cloud API error syncing work mode: %s", e, exc_info=True)
-        return False
-    except Exception as e:
-        logger.error("Failed to sync work mode to Deye Cloud: %s", e, exc_info=True)
-        return False
-
-
-def get_deye_work_mode() -> dict | None:
-    """
-    Best-effort read. In practice, Deye v1 often cannot expose the sys/workMode via device/latest.
-    This must never throw 400 logic upstream.
-    """
-    master = get_master_inverter()
-    if not master:
-        logger.warning("No master inverter found to get work mode")
-        return None
-
-    try:
-        client = DeyeCloudClient()
-
-        # IMPORTANT: your client defines keyword-only arg: get_work_mode(self, *, device_sn: str)
-        result = client.get_work_mode(device_sn=master["device_sn"])
-
-        if result.get("mode") == "unknown":
-            logger.info(
-                "Work mode unknown for device %s (source=%s raw=%s)",
-                master["device_sn"], result.get("source"), result.get("raw_mode")
-            )
-        return result
-
-    except DeyeCloudError as e:
-        logger.error("Deye Cloud API error getting work mode: %s", e, exc_info=True)
-        return None
-    except Exception as e:
-        logger.error("Failed to get work mode from Deye Cloud: %s", e, exc_info=True)
-        return None
-
 
 # -----------------------
 # Views
@@ -319,9 +171,20 @@ def dashboard_data(request):
             # station_latest API returns minimal data (mostly powers), not daily energy
             # To get DailyActiveProduction we need device_latest for the inverter(s)
             
-            master = get_master_inverter()
-            if master:
-                device_data = service.client.get_device_latest(master["device_sn"])
+            manager = DeyeManager()
+            active = manager.get_active_inverter()
+            
+            if active:
+                # Try to get data via Manager (abstracts local/cloud)
+                # But we need Cloud-like structure for the code below or we refactor extraction
+                # For now, let's just get the SN and use cloud client if we need cloud-specific data structure
+                # OR use manager.get_status() and adapt.
+                
+                # Using Cloud Client directly for backward compat with parsing logic below
+                # unless we want to move parsing to Manager too (which is cleaner but big change).
+                # I will keep using service.client (which is Cloud) but use SN from manager.
+                
+                device_data = service.client.get_device_latest(active["device_sn"])
                 logger.debug(f"Device data for energy stats: {device_data}")
                 
                 daily_energy = 0.0
@@ -351,9 +214,9 @@ def dashboard_data(request):
                     elif key == 'TotalActiveProduction':
                         total_energy = float(item.get('value', 0))
                 
-                # logger.debug(f"Energy from Deye API (device {master['device_sn']}) - Daily: {daily_energy} kWh, Total: {total_energy} kWh")
+                # logger.debug(f"Energy from Deye API (device {active['device_sn']}) - Daily: {daily_energy} kWh, Total: {total_energy} kWh")
             else:
-                logger.warning("No master inverter found to fetch energy stats")
+                logger.warning("No active inverter found by Manager to fetch energy stats")
                 daily_energy = 0.0
                 total_energy = 0.0
 
@@ -444,7 +307,9 @@ def work_mode_config(request):
         serializer = WorkModeSerializer(config)
         response_data = serializer.data
 
-        deye_mode = get_deye_work_mode()
+        manager = DeyeManager()
+        deye_mode = manager.get_work_mode()
+        
         if deye_mode and deye_mode.get("mode") in WORK_MODE_MAP:
             # Deye-known mode overrides local
             if config.mode != deye_mode["mode"]:
@@ -456,7 +321,7 @@ def work_mode_config(request):
                 "current_mode": deye_mode["mode"],
                 "device_sn": deye_mode.get("device_sn"),
                 "last_sync": timezone.now().isoformat(),
-                "authoritative": "deye_cloud",
+                "authoritative": "deye_cloud" if deye_mode.get("source") == "cloud" else "local_inverter",
                 "source": deye_mode.get("source", "unknown"),
             }
         else:
@@ -473,8 +338,10 @@ def work_mode_config(request):
 
     # POST
     try:
+        manager = DeyeManager()
+
         if request.data.get("action") == "read_current_mode":
-            deye_mode = get_deye_work_mode()
+            deye_mode = manager.get_work_mode()
             config = WorkMode.get_current_config()
 
             # If Deye returns a known mode, align local DB. If unknown, keep DB as-is.
@@ -512,21 +379,23 @@ def work_mode_config(request):
             is_active=True,
         )
 
-        sync_success = sync_work_mode_to_deye(config.mode)
+        sync_success = manager.set_work_mode(config.mode)
 
         if config.control_mode == "automatic":
             algorithm_selected = run_work_mode_algorithm()
             if algorithm_selected in WORK_MODE_MAP:
                 config.algorithm_selected_mode = algorithm_selected
                 config.save(update_fields=["algorithm_selected_mode"])
-                sync_success = sync_work_mode_to_deye(algorithm_selected)
+                
+                # Try setting algorithm mode
+                sync_success = manager.set_work_mode(algorithm_selected)
 
         serializer = WorkModeSerializer(config)
         response_data = serializer.data
         response_data["deye_sync"] = {
             "synced": bool(sync_success),
             "timestamp": timezone.now().isoformat(),
-            "note": "Attempted to sync to Deye Cloud",
+            "note": "Attempted to sync to Deye via Manager",
         }
         return Response(response_data, status=200)
 
@@ -636,7 +505,8 @@ def run_algorithm(request):
         config.algorithm_selected_mode = algorithm_selected
         config.save(update_fields=["algorithm_selected_mode"])
 
-        sync_success = sync_work_mode_to_deye(algorithm_selected)
+        manager = DeyeManager()
+        sync_success = manager.set_work_mode(algorithm_selected)
 
         return Response(
             {

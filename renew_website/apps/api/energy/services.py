@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from django.utils import timezone
 from django.db import transaction
 
-from renew_website.apps.api.deye.client import DeyeCloudClient, DeyeCloudError
+from renew_website.apps.api.deye.cloud_client import DeyeCloudClient, DeyeCloudError
 from .models import Inverter, InverterReading
 
 logger = logging.getLogger(__name__)
@@ -26,62 +26,82 @@ class InverterDataService:
         """
         try:
             # Get station latest data (station-level metrics)
-            station_data = self.client.get_station_latest(self.station_id)
+            station_data = self.client.station_latest(self.station_id)
             
             # Get station with devices to find inverters
-            stations_with_devices = self.client.get_stations_with_devices()
+            # Refactored: get_station_list returns list of stations directly now
+            stations_list = self.client.get_station_list(page=1, size=20)
             
             # Find our station
             station = None
-            for s in stations_with_devices.get('stationList', []):
-                if s['id'] == self.station_id:
+            for s in stations_list:
+                if str(s.get('id')) == str(self.station_id):
                     station = s
                     break
             
             if not station:
-                logger.error(f"Station {self.station_id} not found")
+                logger.error(f"Station {self.station_id} not found in account")
                 return
             
             # Get inverter device SNs
             inverter_sns = []
-            inverters_data = []
-            for device in station.get('deviceListItems', []):
-                if device['deviceType'] == 'INVERTER':
-                    inverter_sns.append(device['deviceSn'])
-                    inverters_data.append(device)
+            
+            # Extract devices from the station object returned by get_station_list
+            devices = station.get('deviceListItems') or []
+            for device in devices:
+                if device.get('deviceType') == 'INVERTER':
+                    inverter_sns.append(device.get('deviceSn'))
+                    # inverters_data.append(device) # Fetching latest data below
             
             # Get individual inverter data using device/latest endpoint
             individual_inverter_data = {}
             if inverter_sns:
                 try:
+                    # Pass list of SNs
                     device_data = self.client.get_device_latest(inverter_sns)
-                    # Process the response to get individual generation data
-                    # Check for deviceDataList (common in newer API versions) or data -> deviceList
+                    
+                    # Refactored data extraction based on actual Deye Cloud structure
                     items = []
-                    if "deviceDataList" in device_data:
-                        items = device_data["deviceDataList"]
-                    elif "data" in device_data:
-                        data = device_data["data"]
-                        if isinstance(data, list):
-                            items = data
-                        elif isinstance(data, dict):
-                            items = data.get("deviceList", [])
-                            
+                    # 1. Direct deviceDataList
+                    if isinstance(device_data, dict):
+                        if "deviceDataList" in device_data:
+                            items = device_data["deviceDataList"]
+                        # 2. Wrapped data -> deviceList or deviceDataList
+                        elif "data" in device_data:
+                            data_part = device_data["data"]
+                            if isinstance(data_part, list):
+                                items = data_part
+                            elif isinstance(data_part, dict):
+                                items = data_part.get("deviceList") or data_part.get("deviceDataList") or []
+                        # 3. Direct deviceList
+                        elif "deviceList" in device_data:
+                            items = device_data["deviceList"]
+
                     for item in items:
+                        if not item: continue
                         device_sn = item.get('deviceSn')
-                        if device_sn in inverter_sns:
+                        if device_sn:
                             individual_inverter_data[device_sn] = item
-                except DeyeCloudError as e:
+                            
+                except Exception as e:
                     logger.warning(f"Failed to get individual inverter data: {e}")
             
             # Store readings for each inverter
             with transaction.atomic():
-                for inverter_data in inverters_data:
-                    device_sn = inverter_data['deviceSn']
+                for device_sn in inverter_sns:
+                    # Find device info in initial station list
+                    inverter_device_info = {}
+                    for d in devices:
+                         if d.get('deviceSn') == device_sn:
+                             inverter_device_info = d
+                             break
+                    
+                    if not inverter_device_info: continue
+
                     individual_data = individual_inverter_data.get(device_sn, {})
-                    self._store_inverter_reading(inverter_data, station_data, individual_data)
+                    self._store_inverter_reading(inverter_device_info, station_data, individual_data)
             
-            logger.info(f"Collected data for {len(inverters_data)} inverters")
+            logger.info(f"Collected data for {len(inverter_sns)} inverters")
             
         except DeyeCloudError as e:
             logger.error(f"Failed to collect inverter data: {e}")
@@ -93,56 +113,54 @@ class InverterDataService:
         inverter, created = Inverter.objects.get_or_create(
             device_sn=device_data['deviceSn'],
             defaults={
-                'device_id': device_data['deviceId'],
-                'device_type': device_data['deviceType'],
-                'product_id': device_data['productId'],
-                'station_id': device_data['stationId'],
+                'device_id': str(device_data.get('deviceId', '')),
+                'device_type': device_data.get('deviceType', 'INVERTER'),
+                'product_id': device_data.get('productId', ''),
+                'station_id': str(device_data.get('stationId', self.station_id)),
             }
         )
         
         # Extract generation power from individual device data
-        generation_power = 0
-        battery_soc = None
-        
-        if individual_data and 'dataList' in individual_data:
-            
-            # Look for solar generation power in dataList - try multiple fields
-            for item in individual_data['dataList']:
-                key = item.get('key')
-                value = item.get('value', 0)
-                
-                # Check for SOC while we're iterating
-                if key == 'SOC' or key == 'BatterySOC' or key == 'BMSSOC':
-                    try:
-                        soc_val = float(value)
-                        if soc_val > 0:
-                            battery_soc = soc_val
-                    except (ValueError, TypeError):
-                        pass
+        generation_power = 0.0
+        battery_soc = 0.0
+        grid_power = 0.0
 
-                # Try different generation power fields
-                if key == 'TotalSolarPower':
-                    generation_power = float(value)
-                    break
-                elif key == 'TotalInverterOutputPower':
-                    power = float(value)
-                    if power > 0:  # Only positive values are generation
-                        generation_power = power
-                        break
-                elif key == 'DCPowerPV1' or key == 'DCPowerPV2':
-                    # Sum DC power from PV panels
-                    generation_power += float(value)
-                elif key == 'InverterOutputPowerL1' or key == 'InverterOutputPowerL2' or key == 'InverterOutputPowerL3':
-                    # Sum AC output power from each phase
-                    power = float(value)
-                    if power > 0:
-                        generation_power += power
-        else:
-            # Fall back to station data
-            station_generation = station_data.get('generationPower', 0)
-            total_inverters = len([d for d in station_data.get('stationList', [{}])[0].get('deviceListItems', []) 
-                                  if d.get('deviceType') == 'INVERTER']) if station_data.get('stationList') else 1
-            generation_power = station_generation / total_inverters if total_inverters > 0 else 0
+        if individual_data:
+            # Try to grab metrics from dataList if present
+            data_list = individual_data.get('dataList', [])
+            for item in data_list:
+                key = item.get('key')
+                # Deye API returns string values sometimes
+                try:
+                    val = float(item.get('value', 0) or 0)
+                except (ValueError, TypeError):
+                    val = 0.0
+                
+                if key in ['TotalSolarPower', 'ActivePower', 'Pac', 'GenerationPower']:
+                     generation_power = val
+                
+                if key in ['BatterySOC', 'SOC', 'BMSSOC']:
+                     battery_soc = val
+                
+                if key in ['GridActivePower', 'TotalGridPower', 'GridPower']:
+                     grid_power = val
+            
+            # If standard keys exist at root (override dataList if present and valid)
+            if individual_data.get('generationPower'): generation_power = float(individual_data['generationPower'])
+            if individual_data.get('batterySOC'): battery_soc = float(individual_data['batterySOC'])
+            if individual_data.get('gridPower'): grid_power = float(individual_data['gridPower'])
+
+        # Create Reading
+        InverterReading.objects.create(
+            inverter=inverter,
+            generation_power=generation_power,
+            battery_soc=battery_soc,
+            grid_power=grid_power,
+            connect_status=device_data.get('connectStatus', 0),
+            station_data=individual_data,
+            timestamp=timezone.now(),
+            collection_time=timezone.now()
+        )
         
 
         if battery_soc is None:

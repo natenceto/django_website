@@ -36,3 +36,9 @@ django-cors-headers==4.6.0
 # HTTP Client
 requests>=2.31.0
 user-agents>=2.2.0
+
+#Deye-controller lib
+deye-controller==0.2.3
+pyserial-3.5
+pysolarmanv5-3.0.6
+umodbus-1.0.4
