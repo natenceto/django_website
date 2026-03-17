@@ -7,6 +7,10 @@ import socket
 
 logger = logging.getLogger(__name__)
 
+class DeyeManagerError(Exception):
+    """Base exception for Deye Manager errors."""
+    pass
+
 # Basic mapping for Deye Hybrid Inverters (SG04LP3 etc.)
 LOCAL_MODE_MAP = {
     "selling_first": 2,
@@ -146,8 +150,7 @@ class DeyeManager:
         try:
             active = self.get_active_inverter()
             if not active:
-                logger.error("Cannot set work mode: No active inverter found")
-                return False
+                raise DeyeManagerError("Cannot set work mode: No active inverter found")
                 
             sn = active.get("device_sn")
             source = active.get("source")
@@ -171,88 +174,96 @@ class DeyeManager:
             return order.is_success
         except Exception as e:
             logger.error(f"Error setting work mode: {e}")
-            return False
+            raise DeyeManagerError(f"Failed to set work mode: {e}")
+
+    def get_latest_data(self, device_sn=None):
+        """
+        Get normalized latest data for the inverter (Cloud or Local).
+        Returns a dict with standard fields (daily_energy, power, etc.).
+        """
+        # 1. Resolve target
+        source = None
+        if not device_sn:
+            active = self.get_active_inverter()
+            if not active:
+                raise DeyeManagerError("No active inverter found")
+            device_sn = active["device_sn"]
+            source = active["source"]
+        else:
+            # Check if this SN is our local master
+            if self.local and str(self.master_sn) == str(device_sn) and self._is_local_available():
+                source = "local"
+            else:
+                source = "cloud"
+
+        # 2. Fetch & Normalize
+        if source == "local":
+            try:
+                raw_data = self.local.fetch_all_metrics()
+                raw_data['device_sn'] = device_sn
+                raw_data['source'] = 'local'
+                
+                serializer = DeyeLocalSerializer(instance=raw_data)
+                return serializer.data
+            except Exception as e:
+                logger.warning(f"Local fetch failed for {device_sn}: {e}. Fallback to cloud.")
+                source = "cloud"
+
+        if source == "cloud":
+            try:
+                raw_response = self.cloud.get_device_latest(device_sn)
+                data_obj = self._unwrap_cloud_response(raw_response)
+                # Keep device_sn if missing in data
+                if 'device_sn' not in data_obj:
+                    data_obj['device_sn'] = device_sn
+
+                serializer = DeyeCloudSerializer(instance=data_obj)
+                result = serializer.data
+                result['source'] = 'cloud'
+                return result
+            except Exception as e:
+                raise DeyeManagerError(f"Cloud fetch failed: {e}")
+
+        return {}
+
+    def _unwrap_cloud_response(self, response):
+        """
+        Helper to find the dict containing 'dataList' from various Cloud response formats.
+        """
+        if not isinstance(response, dict):
+            return {}
+
+        # 1. Direct deviceDataList (common in device/latest)
+        if "deviceDataList" in response:
+            items = response["deviceDataList"]
+            if items and isinstance(items, list): return items[0]
+
+        # 2. Wrapped in data -> deviceList/deviceDataList
+        if "data" in response and isinstance(response["data"], dict):
+            nested = response["data"]
+            if "deviceList" in nested:
+                items = nested["deviceList"]
+                if items and isinstance(items, list): return items[0]
+            if "deviceDataList" in nested:
+                items = nested["deviceDataList"]
+                if items and isinstance(items, list): return items[0]
+
+        # 3. Direct deviceList (station/details sometimes)
+        if "deviceList" in response:
+            items = response["deviceList"]
+            if items and isinstance(items, list): return items[0]
+            
+        # 4. Maybe it's already the item?
+        if "dataList" in response:
+            return response
+
+        return {}
 
     def get_status(self):
         """
-        Get aggregated normalized status from active inverter.
-        Returns a dict matching BaseInverterSerializer fields.
+        Legacy/Alias for get_latest_data regarding active inverter.
         """
-        active = self.get_active_inverter()
-        if not active:
-            return {}
-            
-        sn = active.get("device_sn")
-        source = active.get("source")
-        
-        raw_data = {}
-        serializer = None
-        
-        try:
-            if source == "local" and self.local:
-                try:
-                    raw_data = self.local.fetch_all_metrics()
-                    # Add context for serializer
-                    raw_data['device_sn'] = sn
-                    
-                    serializer = DeyeLocalSerializer(instance=raw_data)
-                except Exception as e:
-                    logger.error(f"Local fetch failed: {e}")
-                    return {}
-
-            else: # Cloud
-                try:
-                    # Cloud client returns {'deviceList': [...]} or nested structure
-                    # We need to extract the specific device data for the serializer
-                    raw_response = self.cloud.get_device_latest(sn)
-                    
-                    # Deye Cloud structure normalization for serializer
-                    # If response is wrapped in 'data', unwrap it
-                    current_data = raw_response
-                    if isinstance(current_data, dict):
-                        if 'data' in current_data and isinstance(current_data['data'], dict):
-                            current_data = current_data['data']
-
-                        # Handle list wrappers
-                        if 'deviceList' in current_data:
-                            dev_list = current_data['deviceList']
-                            if isinstance(dev_list, list) and len(dev_list) > 0:
-                                raw_data = dev_list[0]
-                            else:
-                                raw_data = {} # Empty or malformed
-                        elif 'deviceDataList' in current_data: 
-                            dev_list = current_data['deviceDataList'] 
-                            if isinstance(dev_list, list) and len(dev_list) > 0:
-                                raw_data = dev_list[0]
-                            else:
-                                raw_data = {}
-                        else:
-                            raw_data = current_data 
-                    else:
-                        raw_data = {} # Unexpected format
-                        
-                    serializer = DeyeCloudSerializer(instance=raw_data)
-
-                except Exception as e:
-                    logger.error(f"Cloud fetch logic failed: {e}")
-                    return {}
-
-            if serializer:
-                # We use serializer to project/transform raw data to normalized format
-                # We assume raw_data is a dict (instance)
-                try:
-                    result = serializer.data
-                    result['source'] = source
-                    return result
-                except Exception as e:
-                    logger.warning(f"Serialization failed for {source}: {e}")
-                    return {"error": "serialization_failed", "raw": raw_data}
-            
-            return {}
-
-        except Exception as e:
-            logger.error(f"Error getting status: {e}")
-            return {}
+        return self.get_latest_data()
 
     def get_work_mode(self):
         """

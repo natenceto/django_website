@@ -50,6 +50,11 @@
     </div>
 </div>
 
+<!-- Weather Status Row -->
+<div class="row" id="weather-cards">
+    <!-- Weather Widget will be injected here via JS -->
+</div>
+
 <!-- Energy Status Cards Row -->
 <div class="row" id="energy-cards">
     <!-- Solar Generation Card -->
@@ -191,11 +196,15 @@
 
 {% block extra_js %}
 <script src="{% static 'js/api-client.js' %}"></script>
+<script src="{% static 'js/weather.js' %}"></script>
 <script>
 let chart = null;
 
 async function loadDashboardData() {
     try {
+        // Load weather in parallel
+        loadWeatherWidget('weather-cards');
+
         const data = await window.EVPlatformAPI.getDashboardData();
         
         // Update metrics
@@ -352,8 +361,15 @@ function scheduleCharging() {
 
 async function collectData() {
     try {
-        await window.EVPlatformAPI.collectEnergyData();
-        loadDashboardData(); // Refresh the dashboard
+        // Parallel data collection: Inverters + Weather (Force Refresh)
+        showNotification('Refreshing Inverter and Weather data...', 'info');
+        
+        await Promise.all([
+            window.EVPlatformAPI.collectEnergyData(),
+            window.EVPlatformAPI.fetchWeather()
+        ]);
+
+        loadDashboardData(); // Refresh the UI
         showNotification('Data collection completed successfully!', 'success');
     } catch (error) {
         console.error('Failed to collect data:', error);
@@ -379,7 +395,22 @@ function getCookie(name) {
 // Load data on page load
 document.addEventListener('DOMContentLoaded', loadDashboardData);
 
-// Auto-refresh every 5 minutes
-setInterval(loadDashboardData, 5 * 60 * 1000);
+// Auto-refresh every 3 minutes (180000 ms)
+const REFRESH_INTERVAL = 3 * 60 * 1000;
+
+setInterval(async () => {
+    try {
+        console.log('Automated refresh: Updating weather and energy stats...');
+        // We do shallow update for UI (loadDashboardData) which fetches latest from DB
+        // But for "live" feel we might want to trigger collection too, 
+        // however triggering collection every 3 minutes might hit API limits or be slow.
+        // Best approach: Just refresh UI. The background service (celery/cron) should handle collection.
+        // Since we don't have background workers yet, we will trigger collection here.
+        
+        await collectData(); 
+    } catch (e) {
+        console.error("Auto-refresh failed", e);
+    }
+}, REFRESH_INTERVAL);
 </script>
 {% endblock %}

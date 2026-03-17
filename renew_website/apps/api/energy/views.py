@@ -20,7 +20,7 @@ from .serializers import (
     WorkModeSerializer
 )
 from renew_website.apps.api.deye.cloud_client import DeyeCloudClient, DeyeCloudError, WORK_MODE_MAP
-from renew_website.apps.api.deye.manager import DeyeManager
+from renew_website.apps.api.deye.manager import DeyeManager, DeyeManagerError
 from .utils import run_work_mode_algorithm
 
 logger = logging.getLogger(__name__)
@@ -168,60 +168,19 @@ def dashboard_data(request):
 
         # Get today's energy from Deye API directly (more accurate)
         try:
-            # station_latest API returns minimal data (mostly powers), not daily energy
-            # To get DailyActiveProduction we need device_latest for the inverter(s)
-            
+            # Use Manager to get normalized data from best source (Cloud or Local)
             manager = DeyeManager()
-            active = manager.get_active_inverter()
             
-            if active:
-                # Try to get data via Manager (abstracts local/cloud)
-                # But we need Cloud-like structure for the code below or we refactor extraction
-                # For now, let's just get the SN and use cloud client if we need cloud-specific data structure
-                # OR use manager.get_status() and adapt.
-                
-                # Using Cloud Client directly for backward compat with parsing logic below
-                # unless we want to move parsing to Manager too (which is cleaner but big change).
-                # I will keep using service.client (which is Cloud) but use SN from manager.
-                
-                device_data = service.client.get_device_latest(active["device_sn"])
-                logger.debug(f"Device data for energy stats: {device_data}")
-                
-                daily_energy = 0.0
-                total_energy = 0.0
-                
-                # Extract from device data
-                # Structure: {'data': {'deviceList': [{'code':..., 'dataList': [...]}]}} OR {'code':..., 'deviceDataList': [...]}
-                # The client.device_latest returns the raw response.
-                
-                data_list = []
-                # Handle different response structures
-                if isinstance(device_data, dict):
-                    # Check for deviceDataList (common in some API versions)
-                    if 'deviceDataList' in device_data:
-                        first_dev = device_data['deviceDataList'][0] if device_data['deviceDataList'] else {}
-                        data_list = first_dev.get('dataList', [])
-                    # Check for data -> deviceList
-                    elif 'data' in device_data and 'deviceList' in device_data['data']:
-                        devs = device_data['data']['deviceList']
-                        if devs:
-                            data_list = devs[0].get('dataList', [])
+            # get_latest_data returns a dictionary serialized by DeyeCloudSerializer/DeyeLocalSerializer
+            normalized_data = manager.get_latest_data()
+            
+            daily_energy = normalized_data.get('daily_energy', 0.0)
+            total_energy = normalized_data.get('total_energy', 0.0)
+            
+            logger.debug(f"Energy stats from Manager ({normalized_data.get('source', 'unknown')}): Daily={daily_energy}, Total={total_energy}")
 
-                for item in data_list:
-                    key = item.get('key')
-                    if key == 'DailyActiveProduction':
-                        daily_energy = float(item.get('value', 0))
-                    elif key == 'TotalActiveProduction':
-                        total_energy = float(item.get('value', 0))
-                
-                # logger.debug(f"Energy from Deye API (device {active['device_sn']}) - Daily: {daily_energy} kWh, Total: {total_energy} kWh")
-            else:
-                logger.warning("No active inverter found by Manager to fetch energy stats")
-                daily_energy = 0.0
-                total_energy = 0.0
-
-        except Exception as e:
-            logger.warning(f"Failed to get energy from Deye API: {e}")
+        except (DeyeManagerError, Exception) as e:
+            logger.warning(f"Failed to get energy from Deye Manager: {e}")
             # Fallback to database calculation using individual inverter readings
             today = timezone.now().date()
             today_readings = InverterReading.objects.filter(

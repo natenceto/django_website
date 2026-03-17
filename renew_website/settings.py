@@ -69,6 +69,7 @@ INSTALLED_APPS = [
     'renew_website.apps.api.v1',
     'renew_website.apps.api.deye',
     'renew_website.apps.api.energy',
+    'renew_website.apps.api.weather',
         # Third-party apps
     'channels',
     'rest_framework',

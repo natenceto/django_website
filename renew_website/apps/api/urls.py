@@ -22,6 +22,9 @@ urlpatterns = [
     
     # Energy Management & EV Charging
     path('energy/', include('renew_website.apps.api.energy.urls')),
+
+    # Weather Forecasting
+    path('weather/', include('renew_website.apps.api.weather.urls')),
     
     # API Documentation (OpenAPI/Swagger)
     path('schema/', SpectacularAPIView.as_view(), name='schema'),

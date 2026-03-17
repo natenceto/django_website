@@ -41,4 +41,4 @@ user-agents>=2.2.0
 deye-controller==0.2.3
 pyserial-3.5
 pysolarmanv5-3.0.6
-umodbus-1.0.4
+umodbus-1.0.4requests==2.31.0
