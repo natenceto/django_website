@@ -11,6 +11,10 @@ electric vehicles, using reNEWable energy sources
 - Station owner registration and management  
 - Adding and managing charging stations  
 - Viewing detailed station information  
+- Weather Integration:
+  - Real-time weather and solar irradiance monitoring (Open-Meteo)
+  - Automatic updates every 3 minutes
+  - Dynamic dashboard widget for conditions in Sofia, BG
 - User roles and permissions:  
   - Administrator: Full control over the platform  
   - Station Owner: Manage their own stations  

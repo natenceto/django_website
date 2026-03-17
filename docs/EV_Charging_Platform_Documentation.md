@@ -27,6 +27,7 @@ EV Charging Platform е интегрирана система за управл�
 
 - **OCPP 1.6** протокол за комуникация със станции
 - **DeyeCloud API** интеграция за соларни инвертори
+- **Open-Meteo API** за прогнози и слънчева радиация
 - **Real-time monitoring** и управление
 - **Smart charging** оптимизация
 - **Billing система** с ценообразуване
@@ -37,6 +38,7 @@ EV Charging Platform е интегрирана система за управл�
 |----------------|---------|
 | **Протокол** | OCPP 1.6 (JSON over WebSocket) |
 | **Енергия** | DeyeCloud инвертор интеграция |
+| **Време** | Open-Meteo прогнози и irradiance |
 | **База данни** | PostgreSQL + Redis |
 | **Frontend** | Django Templates + Bootstrap |
 | **API** | Django REST Framework |
@@ -93,10 +95,10 @@ Queue:   Redis (Celery)
 ┌─────────────────────────────────────────────────────────────┐
 │                 EXTERNAL INTEGRATIONS                       │
 ├─────────────────────────────────────────────────────────────┤
-│  DeyeCloud API        │  Payment Gateway   │  Energy Grid     │
-│  - Inverter Data      │  - Stripe/PayPal   │  - Smart Grid    │
-│  - Solar Monitoring   │  - Mobile Payments │  - V2G           │
-│  - Battery Status     │  - Subscriptions   │  - Load Balancing│
+│  DeyeCloud API        │  Payment Gateway   │  Open-Meteo         │
+│  - Inverter Data      │  - Stripe/PayPal   │  - Irradiance (GHI) │
+│  - Solar Monitoring   │  - Mobile Payments │  - Weather Conditions│
+│  - Battery Status     │  - Subscriptions   │  - Wind Speed        │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -119,6 +121,12 @@ django_website/
 │   │   ├── services.py        # DeyeCloud интеграция
 │   │   ├── views.py           # Energy API endpoints
 │   │   └── templates/energy/   # Energy dashboard
+│   │
+│   ├── api/weather/           # Weather Service
+│   │   ├── models.py          # WeatherLog model
+│   │   ├── services.py        # Open-Meteo client
+│   │   ├── views.py           # Weather API endpoints
+│   │   └── static/js/weather.js # Frontend widget
 │   │
 │   ├── api/deye/              # DeyeCloud клиент
 │   │   ├── client.py          # API клиент
