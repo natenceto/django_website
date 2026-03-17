@@ -245,3 +245,47 @@ class UserRFIDAdmin(admin.ModelAdmin):
         css = {
             'all': ('admin/css/userrfid_admin.css',)
         }
+
+from .models import PricingPlan, StationPricing, ChargingSession, PaymentMethod, Invoice
+from django.contrib.auth import get_user_model
+
+@admin.register(PricingPlan)
+class PricingPlanAdmin(admin.ModelAdmin):
+    list_display = ['name', 'price_per_kwh', 'currency', 'is_active']
+    list_filter = ['currency', 'is_active']
+    search_fields = ['name']
+
+@admin.register(StationPricing)
+class StationPricingAdmin(admin.ModelAdmin):
+    list_display = ['station', 'pricing_plan', 'is_default']
+    list_filter = ['is_default']
+    autocomplete_fields = ['station', 'pricing_plan']
+
+@admin.register(ChargingSession)
+class ChargingSessionAdmin(admin.ModelAdmin):
+    list_display = ['id', 'user_info', 'total_cost', 'currency', 'created_at']
+    list_filter = ['currency', 'created_at']
+    
+    def user_info(self, obj):
+        if obj.user_id:
+            try:
+                User = get_user_model()
+                user = User.objects.using('default').get(pk=obj.user_id)
+                return f"{user.username} ({obj.user_id})"
+            except Exception:
+                return f"User ID {obj.user_id}"
+        return "-"
+    user_info.short_description = "User"
+
+@admin.register(PaymentMethod)
+class PaymentMethodAdmin(admin.ModelAdmin):
+    list_display = ['id', 'type', 'print_user', 'is_default']
+    
+    def print_user(self, obj):
+         return f"User ID {obj.user_id}"
+    print_user.short_description = "User"
+
+@admin.register(Invoice)
+class InvoiceAdmin(admin.ModelAdmin):
+    list_display = ['invoice_number', 'user_id', 'total', 'status', 'issue_date']
+    list_filter = ['status']

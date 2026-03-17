@@ -76,6 +76,9 @@ INSTALLED_APPS = [
     'django_filters',
     'drf_spectacular',
     'corsheaders',
+    # Celery
+    'django_celery_beat',
+    'django_celery_results',
 ]
 
 # Channel Layers Configuration
@@ -148,14 +151,20 @@ WSGI_APPLICATION = 'renew_website.wsgi.application'
 
 DATABASES = {
     'default': {
+        'ENGINE': 'django.db.backends.sqlite3',
+        'NAME': BASE_DIR / 'db.sqlite3',
+    },
+    'postgres_db': {
         'ENGINE': 'django.db.backends.postgresql',
-        'NAME': env('POSTGRES_DB'),
-        'USER': env('POSTGRES_USER'),
-        'PASSWORD': env('POSTGRES_PASSWORD'),
-        'HOST': env('POSTGRES_HOST'),
-        'PORT': env('POSTGRES_PORT'),
+        'NAME': env('POSTGRES_DB', default='renew_db'),
+        'USER': env('POSTGRES_USER', default='renew_user'),
+        'PASSWORD': env('POSTGRES_PASSWORD', default='changeme'),
+        'HOST': env('POSTGRES_HOST', default='db'),
+        'PORT': env('POSTGRES_PORT', default='5432'),
     }
 }
+
+DATABASE_ROUTERS = ['renew_website.routers.DatabaseRouter']
 
 
 # Password validation
@@ -371,3 +380,20 @@ DEYE_LOCAL_IP = env('DEYE_LOCAL_IP', default='192.168.1.121')
 
 # Режим на свързване: 'cloud' (през интернет), 'local' (през мрежата) или 'auto'
 DEYE_CONNECTION_MODE = env('DEYE_CONNECTION_MODE', default='auto')
+# =============================================================================
+# Celery Configuration
+# =============================================================================
+CELERY_BROKER_URL = env('CELERY_BROKER_URL', default='redis://redis:6379/0')
+CELERY_RESULT_BACKEND = env('CELERY_RESULT_BACKEND', default='django-db')
+CELERY_ACCEPT_CONTENT = ['application/json']
+CELERY_TASK_SERIALIZER = 'json'
+CELERY_RESULT_SERIALIZER = 'json'
+CELERY_TIMEZONE = TIME_ZONE
+
+# Celery Beat Schedule
+CELERY_BEAT_SCHEDULE = {
+    'sample_task': {
+        'task': 'renew_website.tasks.sample_task',
+        'schedule': 30.0,
+    },
+}

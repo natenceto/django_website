@@ -1,12 +1,14 @@
 # Django EV Charging Platform - Production Requirements
 Django==5.2
-psycopg==3.2.10
+psycopg==3.2.10 # PostgreSQL adapter for Python
 python-dotenv==1.1.1
 
 # ASGI & WebSocket
 channels==4.3.1
 channels-redis==4.2.1
+daphne>=4.1.0
 uvicorn==0.37.0
+gunicorn>=21.2.0
 websockets==13.1
 
 # OCPP Protocol
@@ -37,8 +39,14 @@ django-cors-headers==4.6.0
 requests>=2.31.0
 user-agents>=2.2.0
 
-#Deye-controller lib
+# Deye-controller lib
 deye-controller==0.2.3
-pyserial-3.5
-pysolarmanv5-3.0.6
-umodbus-1.0.4requests==2.31.0
+pyserial==3.5
+pysolarmanv5==3.0.6
+umodbus==1.0.4
+
+# Task Queue & Background Jobs (Celery)
+celery>=5.3.6
+django-celery-beat>=2.5.0
+django-celery-results>=2.5.0
+hiredis>=2.3.2

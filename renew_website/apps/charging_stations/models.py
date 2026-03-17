@@ -379,9 +379,13 @@ class ChargingSession(models.Model):
     )
     
     # User association
-    user = models.ForeignKey(
-        'auth.User', on_delete=models.SET_NULL, null=True, blank=True,
-        related_name='charging_sessions'
+    # user = models.ForeignKey(
+    #     'auth.User', on_delete=models.SET_NULL, null=True, blank=True,
+    #     related_name='charging_sessions'
+    # )
+    user_id = models.IntegerField(
+        null=True, blank=True,
+        help_text="Reference to auth.User ID (SQLite)"
     )
     
     # Pricing used
@@ -464,9 +468,10 @@ class ChargingSession(models.Model):
 
 class PaymentMethod(models.Model):
     """User payment methods for charging sessions."""
-    user = models.ForeignKey(
-        'auth.User', on_delete=models.CASCADE, related_name='payment_methods'
-    )
+    # user = models.ForeignKey(
+    #     'auth.User', on_delete=models.CASCADE, related_name='payment_methods'
+    # )
+    user_id = models.IntegerField(null=True, blank=True, db_index=True, help_text="Reference to auth.User ID (SQLite)")
     
     TYPE_CHOICES = [
         ('card', 'Credit/Debit Card'),
@@ -499,14 +504,15 @@ class PaymentMethod(models.Model):
     def __str__(self):
         if self.type == 'card':
             return f"{self.card_brand} ****{self.card_last_four}"
-        return f"{self.type} - {self.user.username}"
+        return f"{self.type} - User {self.user_id}"
 
 
 class Invoice(models.Model):
     """Invoices for charging sessions."""
-    user = models.ForeignKey(
-        'auth.User', on_delete=models.CASCADE, related_name='invoices'
-    )
+    # user = models.ForeignKey(
+    #     'auth.User', on_delete=models.CASCADE, related_name='invoices'
+    # )
+    user_id = models.IntegerField(null=True, blank=True, db_index=True, help_text="Reference to auth.User ID (SQLite)")
     
     # Invoice details
     invoice_number = models.CharField(max_length=50, unique=True)

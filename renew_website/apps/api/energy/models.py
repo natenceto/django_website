@@ -12,7 +12,13 @@ class Inverter(models.Model):
     device_id = models.IntegerField()
     device_type = models.CharField(max_length=50)
     product_id = models.CharField(max_length=50)
-    station_id = models.IntegerField()
+    # station_id = models.IntegerField()
+    station = models.ForeignKey(
+        'charging_stations.Station', 
+        on_delete=models.CASCADE, 
+        related_name='inverters',
+        null=True, blank=True
+    )
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

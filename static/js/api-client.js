@@ -318,21 +318,42 @@ function updateEnergyUI(data, containerId) {
 }
 
 function showNotification(message, type = 'info') {
+    // Ensure notification container exists
+    let container = document.getElementById('notification-container');
+    if (!container) {
+        container = document.createElement('div');
+        container.id = 'notification-container';
+        container.style.cssText = 'position: fixed; top: 20px; right: 20px; z-index: 9999; display: flex; flex-direction: column; gap: 10px; pointer-events: none;';
+        document.body.appendChild(container);
+    }
+
     // Create notification element
     const notification = document.createElement('div');
-    notification.className = `alert alert-${type} alert-dismissible fade show position-fixed`;
-    notification.style.cssText = 'top: 20px; right: 20px; z-index: 9999; min-width: 300px;';
+    notification.className = `alert alert-${type} alert-dismissible fade show shadow`;
+    notification.style.cssText = 'min-width: 300px; pointer-events: auto; margin-bottom: 0;';
     notification.innerHTML = `
-        ${message}
-        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        <div class="d-flex align-items-center justify-content-between">
+            <span>${message}</span>
+            <button type="button" class="btn-close" data-bs-dismiss="alert" style="position: relative; padding: 0.5rem;"></button>
+        </div>
     `;
     
-    document.body.appendChild(notification);
+    // Add to container
+    container.appendChild(notification);
     
     // Auto remove after 5 seconds
     setTimeout(() => {
+        // Check if still in DOM
         if (notification.parentNode) {
-            notification.parentNode.removeChild(notification);
+            // Fade out effect manually if bootstrap js doesn't handle it well or trigger remove
+            notification.classList.remove('show');
+            setTimeout(() => {
+                if (notification.parentNode) notification.parentNode.removeChild(notification);
+                // Remove container if empty
+                if (container.children.length === 0 && container.parentNode) {
+                   // container.parentNode.removeChild(container); // distinct usage might prefer keeping it
+                }
+            }, 150);
         }
     }, 5000);
 }
