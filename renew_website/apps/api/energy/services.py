@@ -116,7 +116,8 @@ class InverterDataService:
                 'device_id': str(device_data.get('deviceId', '')),
                 'device_type': device_data.get('deviceType', 'INVERTER'),
                 'product_id': device_data.get('productId', ''),
-                'station_id': str(device_data.get('stationId', self.station_id)),
+                # Cannot set station_id directly as it's a FK to local Station model
+                # 'station_id': str(device_data.get('stationId', self.station_id)),
             }
         )
         

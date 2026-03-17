@@ -142,19 +142,8 @@ WSGI_APPLICATION = 'renew_website.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
-# DATABASES = {
-#     'default': {
-#         'ENGINE': 'django.db.backends.sqlite3',
-#         'NAME': os.path.join(BASE_DIR, "db.sqlite3"),
-#     }
-# }
-
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
-    },
-    'postgres_db': {
         'ENGINE': 'django.db.backends.postgresql',
         'NAME': env('POSTGRES_DB', default='renew_db'),
         'USER': env('POSTGRES_USER', default='renew_user'),
@@ -164,7 +153,7 @@ DATABASES = {
     }
 }
 
-DATABASE_ROUTERS = ['renew_website.routers.DatabaseRouter']
+# DATABASE_ROUTERS = ['renew_website.routers.DatabaseRouter']
 
 
 # Password validation
@@ -384,7 +373,7 @@ DEYE_CONNECTION_MODE = env('DEYE_CONNECTION_MODE', default='auto')
 # Celery Configuration
 # =============================================================================
 CELERY_BROKER_URL = env('CELERY_BROKER_URL', default='redis://redis:6379/0')
-CELERY_RESULT_BACKEND = env('CELERY_RESULT_BACKEND', default='django-db')
+CELERY_RESULT_BACKEND = env('CELERY_RESULT_BACKEND', default='redis://redis:6379/0')
 CELERY_ACCEPT_CONTENT = ['application/json']
 CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'

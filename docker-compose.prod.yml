@@ -1,11 +1,8 @@
-# Docker Compose for EV Charging Platform - Production
-version: '3.8'
-
 services:
   # PostgreSQL Database
   db:
     image: postgres:15-alpine
-    container_name: ev_charging_db_prod
+    container_name: renew_db_prod
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
@@ -19,10 +16,10 @@ services:
       timeout: 5s
       retries: 5
 
-  # Redis for Channel Layer
+  # Redis for Channel Layer & Celery
   redis:
     image: redis:7-alpine
-    container_name: ev_charging_redis_prod
+    container_name: renew_redis_prod
     volumes:
       - redis_data:/data
     restart: unless-stopped
@@ -32,12 +29,16 @@ services:
       timeout: 5s
       retries: 5
 
-  # Django Application
+  # Django Application - Gunicorn Uvicorn
   web:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: ev_charging_web_prod
+    container_name: renew_web_prod
+    command: gunicorn renew_website.asgi:application -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000
+    volumes:
+      - static_volume:/app/staticfiles
+      - media_volume:/app/media
     environment:
       - DEBUG=False
       - SECRET_KEY=${SECRET_KEY}
@@ -49,38 +50,69 @@ services:
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
       - POSTGRES_HOST=db
       - POSTGRES_PORT=5432
-      - REDIS_URL=redis://redis:6379/0
-    volumes:
-      - static_volume:/app/staticfiles
-      - logs_volume:/app/logs
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    restart: unless-stopped
     depends_on:
       db:
         condition: service_healthy
       redis:
         condition: service_healthy
+
+  # Celery Worker
+  celery:
+    build: .
+    container_name: renew_celery_worker_prod
+    command: celery -A renew_website worker --loglevel=info
+    environment:
+      - DEBUG=False
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_HOST=db
+      - POSTGRES_PORT=5432
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
     restart: unless-stopped
-    command: >
-      sh -c "python manage.py migrate --noinput &&
-             uvicorn renew_website.asgi:application --host 0.0.0.0 --port 8000 --workers 4"
+    depends_on:
+      - db
+      - redis
+
+  # Celery Beat
+  celery-beat:
+    build: .
+    container_name: renew_celery_beat_prod
+    command: celery -A renew_website beat --loglevel=info
+    environment:
+      - DEBUG=False
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_HOST=db
+      - POSTGRES_PORT=5432
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    restart: unless-stopped
+    depends_on:
+      - db
+      - redis
 
   # Nginx Reverse Proxy
   nginx:
-    image: nginx:alpine
-    container_name: ev_charging_nginx
+    image: nginx:1.25-alpine
+    container_name: renew_nginx_prod
     ports:
       - "80:80"
-      - "443:443"
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/conf.d:/etc/nginx/conf.d:ro
-      - static_volume:/app/staticfiles:ro
-      - ./nginx/ssl:/etc/nginx/ssl:ro
+      - static_volume:/app/staticfiles
+      - media_volume:/app/media
     depends_on:
       - web
-    restart: unless-stopped
 
 volumes:
   postgres_data:
   redis_data:
   static_volume:
-  logs_volume:
+  media_volume:

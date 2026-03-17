@@ -23,10 +23,16 @@ RUN pip install --upgrade pip && pip install -r requirements.txt
 # Copy project files
 COPY . .
 
+# Copy entrypoint script
+COPY ./entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
+
 # Create non-root user for security
 RUN useradd -m -u 1000 appuser && \
     chown -R appuser:appuser /app
 USER appuser
+
+ENTRYPOINT ["/app/entrypoint.sh"]
 
 # Create necessary directories
 RUN mkdir -p /app/logs /app/staticfiles
