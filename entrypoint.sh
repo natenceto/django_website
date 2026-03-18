@@ -29,13 +29,30 @@ until postgres_ready; do
 done
 echo "PostgreSQL is up - continuing"
 
-# Apply database migrations
-echo "Applying database migrations..."
-python manage.py migrate
+# Determine whether startup initialization should run for this process.
+is_web_command=0
+case "$1" in
+    uvicorn|gunicorn|daphne)
+        is_web_command=1
+        ;;
+esac
 
-# Collect static files
-echo "Collecting static files..."
-python manage.py collectstatic --noinput
+RUN_DB_MIGRATIONS="${RUN_DB_MIGRATIONS:-$is_web_command}"
+RUN_COLLECTSTATIC="${RUN_COLLECTSTATIC:-$is_web_command}"
+
+if [ "$RUN_DB_MIGRATIONS" = "1" ]; then
+    echo "Applying database migrations..."
+    python manage.py migrate
+else
+    echo "Skipping database migrations (RUN_DB_MIGRATIONS=$RUN_DB_MIGRATIONS)"
+fi
+
+if [ "$RUN_COLLECTSTATIC" = "1" ]; then
+    echo "Collecting static files..."
+    python manage.py collectstatic --noinput
+else
+    echo "Skipping static collection (RUN_COLLECTSTATIC=$RUN_COLLECTSTATIC)"
+fi
 
 # Start the application
 echo "Starting application with command: $@"

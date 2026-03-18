@@ -18,8 +18,10 @@ from django.contrib import admin
 from django.urls import path, include
 from django.views.generic import TemplateView
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
+from .views import health_check
 
 urlpatterns = [
+    path("health/", health_check, name="health_check"),
     path("", include("renew_website.apps.public.urls")),
     path("admin/", admin.site.urls),
     # Portal admin (Professional Dashboard)
