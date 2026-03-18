@@ -45,4 +45,4 @@ htmlcov/
 dmypy.json
 
 # pytest
-.pytest_cache/
+.pytest_cache/celerybeat-schedule
