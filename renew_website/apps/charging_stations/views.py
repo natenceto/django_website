@@ -153,15 +153,20 @@ def stations(request: HttpRequest) -> HttpResponse:
                         
                         # Get requested power from UI, or use station's max power as default
                         requested_power = request.POST.get("power")
-                        if requested_power:
+                        power_limit = None
+                        if requested_power and requested_power.lower() == 'auto':
+                            print(f"Station {station_id}: Requested 'Auto' power - leaving it to EV to negotiate")
+                            power_limit = None # No TxProfile will be created in consumer.py
+                        elif requested_power:
                             power_limit = int(requested_power)
                         else:
                             # Default to station's maximum power output
                             station = Station.objects.get(id=station_id)
                             power_limit = station.power_output
-                        
+
                         # Send RemoteStartTransaction command
-                        print(f"Sending RemoteStartTransaction to station {station_id}: connector={connector.connector_id}, id_tag={valid_rfid.tag}, power={power_limit}kW")
+                        power_msg = f"{power_limit}kW" if power_limit else "Auto (unlimited)"
+                        print(f"Sending RemoteStartTransaction to station {station_id}: connector={connector.connector_id}, id_tag={valid_rfid.tag}, power={power_msg}")
                         
                         try:
                             # Send the command with proper response handling
@@ -176,7 +181,8 @@ def stations(request: HttpRequest) -> HttpResponse:
                             
                             # Check response status
                             if hasattr(response, 'status') and response.status == "Accepted":
-                                results.append(f"Station {station_id}: Charging session started ({power_limit} kW)")
+                                power_str = f"{power_limit} kW" if power_limit else "Auto"
+                                results.append(f"Station {station_id}: Charging session started ({power_str})")
                                 success_count += 1
                             else:
                                 status_msg = getattr(response, 'status', 'Unknown')

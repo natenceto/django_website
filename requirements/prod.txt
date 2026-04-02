@@ -50,3 +50,6 @@ celery>=5.3.6
 django-celery-beat>=2.5.0
 django-celery-results>=2.5.0
 hiredis>=2.3.2
+
+# Modbus
+pymodbus==3.12.1

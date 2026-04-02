@@ -23,6 +23,9 @@ class Station(models.Model):
     ]
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='inactive')
 
+    # operations
+    ocpp_identity = models.CharField(max_length=255, blank=True, null=True, help_text="OCPP Identity (ChargeBox Identity)")
+
     # Owner Info
     email = models.EmailField()
 

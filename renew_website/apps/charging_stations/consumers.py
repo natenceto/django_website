@@ -95,7 +95,7 @@ def track_ws_performance(station_id: str, message_size: int, direction: str):
 
 def _save_ws_metric_to_db(station_id: Union[int, str], stats: Dict[str, Any]):
     """Save WebSocket performance metric to database (async-friendly)."""
-    from renew_website.apps.charging_stations.models import WebSocketPerformanceMetric, Station
+    return
     
     try:
         station_id_int = int(station_id)
@@ -164,28 +164,7 @@ def unregister_station(station_id: Union[int, str]) -> None:
 
 def _finalize_ws_metric(station_id: Union[int, str]):
     """Finalize WebSocket metric when connection ends."""
-    try:
-        stats = _ws_performance_stats.get(station_id)
-        if not stats:
-            return
-        
-        now = timezone.now()
-        _save_ws_metric_to_db(station_id, stats)  # Final save
-        
-        # Mark metric as disconnected in DB
-        from renew_website.apps.charging_stations.models import WebSocketPerformanceMetric
-        metric = _ws_metric_db_cache.get(station_id)
-        if metric:
-            metric.is_active = False
-            metric.connection_end = now
-            metric.update_metrics()
-            _ws_metric_db_cache.pop(station_id, None)
-        
-        # Clean up in-memory stats
-        _ws_performance_stats.pop(station_id, None)
-        
-    except Exception as e:
-        ocpp_logger.warning(f"Error finalizing WS metric for station {station_id}: {e}")
+    return
 
 
 # -------------------------

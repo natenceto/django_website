@@ -7,13 +7,14 @@ This module handles real-time power management for EV charging stations includin
 - Energy measurement and billing
 - Safety monitoring and protection
 """
-
 import asyncio
 import logging
 from datetime import datetime, timedelta
 from django.utils import timezone
 from channels.db import database_sync_to_async
 from .models import Station, Connector, Transaction
+from apps.api.deye.manager import DeyeManager
+from .modbus_client import EVSEModbusClient
 
 logger = logging.getLogger('charging_stations')
 
@@ -339,3 +340,64 @@ def get_connected_stations():
     """Get list of all connected station IDs."""
     from .consumers import ACTIVE_STATIONS
     return list(ACTIVE_STATIONS.keys())
+
+class EnergyBalancer:
+    def __init__(self):
+        self.deye = DeyeManager()
+        # Списък с IP адреси на станциите за Modbus
+        self.evse_ips = ["192.168.88.10", "192.168.88.11"] 
+
+    def run_cycle(self):
+        """Един цикъл на балансиране. Извиква се от management командата."""
+        # Тъй като PowerManager използва async, трябва да стартираме цикъла правилно
+        asyncio.run(self._balance())
+
+    async def _balance(self):
+        try:
+            # 1. Данни от Инвертора
+            inv_data = self.deye.get_latest_data()
+            if not inv_data:
+                logger.error("Неуспешно четене на данни от инвертора.")
+                return
+
+            pv_power = inv_data.get('generation_power', 0)
+            load_power = inv_data.get('load_power', 0)
+            bat_soc = inv_data.get('battery_soc', 0)
+
+            logger.info(f"EMS Status: PV:{pv_power}W, Load:{load_power}W, Bat:{bat_soc}%")
+
+            # 2. Логика на приоритетите
+            # ПРИОРИТЕТ 1: Load (Сграда) - Инверторът го прави автоматично в Zero Export.
+
+            # ПРИОРИТЕТ 2: Зарядни станции
+            # Изчисляваме свободна мощност. 
+            # Пример: ако инверторът е 12kW, а сградата дърпа 2kW, остават 10kW за колите.
+            max_inv_limit = 12000 # 12kW
+            available_for_ev = max_inv_limit - load_power
+
+            if bat_soc < 20:
+                # Ако батерията е критично ниска, режем колите на минимум (6А ~ 1.4kW)
+                limit_kw = 1.4
+            elif bat_soc > 90:
+                # Ако батерията е пълна, даваме пълна мощност на колите от излишъка
+                limit_kw = available_for_ev / 1000
+            else:
+                # Балансиран режим
+                limit_kw = min(available_for_ev / 1000, 7.4) # Лимит до 7.4kW на кола
+
+            # 3. Прилагане на лимитите към всички активни станции
+            stations = await database_sync_to_async(list)(Station.objects.all())
+            for station in stations:
+                # Четем Car SoC през Modbus (ако е налично)
+                evse_modbus = EVSEModbusClient(station.ip_address) # Увери се, че имаш IP в модела
+                car_soc = evse_modbus.get_car_soc()
+                
+                if car_soc and car_soc > 95:
+                    # Колата е пълна, спираме я
+                    await PowerManager.stop_charging(station.id, 1)
+                else:
+                    # Задаваме изчисления лимит през OCPP
+                    await PowerManager.set_charging_power(station.id, 1, limit_kw)
+
+        except Exception as e:
+            logger.error(f"Грешка в балансиращия цикъл: {e}")

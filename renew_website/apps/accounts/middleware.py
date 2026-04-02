@@ -77,7 +77,7 @@ class SessionTrackingMiddleware:
         mock_locations = {
             '127.0.0.1': 'Localhost',
             '::1': 'Localhost',
-            '192.168.1.1': 'Local Network',
+            '192.168.88.1': 'Local Network',
             '10.0.0.1': 'Office Network',
         }
         
