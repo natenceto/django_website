@@ -7,7 +7,7 @@ from deye_controller.utils import group_registers, monkey_patch
 
 logger = logging.getLogger(__name__)
 
-# Прилагаме пача за deye-controller
+# Apply the patch за deye-controller
 monkey_patch()
 
 class DeyeLocalClient:
@@ -25,17 +25,17 @@ class DeyeLocalClient:
         ]
 
     def fetch_all_metrics(self) -> Dict[str, Any]:
-        """Чете данните директно. Опитваме без изричен connect/disconnect."""
+        """Fetch data directly. We attempt this without explicit connect/disconnect."""
         sol = None
         try:
-            # Инициализацията в много версии автоматично отваря сокета
+            # Initialization in many versions automatically opens the socket
             sol = PySolarmanV5(self.ip, self.sn, port=self.port, socket_timeout=5)
             
             groups = group_registers(self.selected_registers)
             results = {}
 
             for group in groups:
-                # Библиотеката сама управлява състоянието на връзката тук
+                # The library manages the connection state automatically here
                 sol.read_holding_registers(group)
                 for reg in group:
                     key = reg.description.lower().replace(" ", "_")
@@ -43,10 +43,10 @@ class DeyeLocalClient:
 
             return results
         except Exception as e:
-            logger.error(f"Локално четене грешка (IP: {self.ip}): {e}")
+            logger.error(f"Local read error (IP: {self.ip}): {e}")
             return {}
         finally:
-            # Опитваме да затворим сокета чрез вътрешния метод, ако съществува
+            # Attempt to close the socket via internal method if it exists
             if sol:
                 try:
                     if hasattr(sol, 'disconnect'):
@@ -60,7 +60,7 @@ class DeyeLocalClient:
         sol = None
         try:
             sol = PySolarmanV5(self.ip, self.sn, port=self.port, socket_timeout=5)
-            logger.info(f"Local write: Режим {mode_id} на {self.ip}")
+            logger.info(f"Local write: Mode {mode_id} на {self.ip}")
             
             sol.write_holding_register(131, int(mode_id))
             time.sleep(1.5)
@@ -68,12 +68,42 @@ class DeyeLocalClient:
             check = sol.read_holding_registers(131, 1)
             return check and check[0] == mode_id
         except Exception as e:
-            logger.error(f"Локален запис грешка: {e}")
+            logger.error(f"Local write error: {e}")
             return False
         finally:
             if sol:
                 try:
                     sol.sock.close()
+                except:
+                    pass
+
+    def write_multiple_registers(self, commands: Dict[int, int]) -> bool:
+        """Writes to multiple holding registers sequentially."""
+        sol = None
+        success = True
+        try:
+            sol = PySolarmanV5(self.ip, self.sn, port=self.port, socket_timeout=5)
+            logger.info(f"Local multiple write started on {self.ip}: {commands}")
+            
+            for reg, val in commands.items():
+                try:
+                    sol.write_holding_register(reg, int(val))
+                    time.sleep(0.5) # Pause between commands to prevent overloading the inverter
+                except Exception as ex:
+                    logger.error(f"Error writing to register {reg} with value {val}: {ex}")
+                    success = False
+            
+            return success
+        except Exception as e:
+            logger.error(f"Failed local multiple write: {e}")
+            return False
+        finally:
+            if sol:
+                try:
+                    if hasattr(sol, 'disconnect'):
+                        sol.disconnect()
+                    elif hasattr(sol, 'sock'):
+                        sol.sock.close()
                 except:
                     pass
 
@@ -84,7 +114,7 @@ class DeyeLocalClient:
             res = sol.read_holding_registers(131, 1)
             return res[0] if res else -1
         except Exception as e:
-            logger.error(f"Локално четене режим грешка: {e}")
+            logger.error(f"Local read mode error: {e}")
             return -1
         finally:
             if sol:

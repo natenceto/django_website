@@ -49,6 +49,7 @@ umodbus==1.0.4
 celery>=5.3.6
 django-celery-beat>=2.5.0
 django-celery-results>=2.5.0
+flower==2.0.1
 hiredis>=2.3.2
 
 # Modbus

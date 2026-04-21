@@ -54,6 +54,11 @@ else
     echo "Skipping static collection (RUN_COLLECTSTATIC=$RUN_COLLECTSTATIC)"
 fi
 
+if [ "$is_web_command" = "1" ] || [ "$RUN_DB_MIGRATIONS" = "1" ]; then
+    # Run the superuser script
+    python setup_superuser.py
+fi
+
 # Start the application
 echo "Starting application with command: $@"
 exec "$@"

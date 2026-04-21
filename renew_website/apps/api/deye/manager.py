@@ -109,7 +109,7 @@ class DeyeManager:
             raise DeyeManagerError(f"Cloud fetch failed: {e}")
 
     def set_work_mode(self, mode_key: str) -> bool:
-        """Задава режим на работа."""
+        """Задава базов режим на работа чрез стар мапинг."""
         active = self.get_active_inverter()
         if not active: return False
         
@@ -123,6 +123,21 @@ class DeyeManager:
         
         order = self.cloud.set_work_mode(device_sn=sn, mode=mode_key)
         return order.is_success
+        
+    def apply_modbus_commands(self, commands: dict) -> bool:
+        """Директен запис на Modbus команди (dict of register: value). Предимно за Local."""
+        if not commands:
+            return True
+            
+        active = self.get_active_inverter()
+        if not active: return False
+        
+        if active["source"] == "local" and self.local:
+            return self.local.write_multiple_registers(commands)
+        else:
+            # TODO: Запис към Solarman Cloud за мнозинство регистри, ако е възможно през Cloud API.
+            logger.warning(f"Apply modbus command {commands} not fully supported via Cloud yet.")
+            return False
 
     def _unwrap_cloud_response(self, response):
         """Извлича чистия обект с данни от API отговора."""

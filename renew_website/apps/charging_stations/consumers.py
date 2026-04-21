@@ -1166,51 +1166,52 @@ class ChargePointConsumer(AsyncWebsocketConsumer):
         self._is_closing = False
 
         station_logger = get_station_logger(self.station_id)
+
+        # Лог за опит за свързване
         try:
-            station_logger.info(
-                "WS connect: station=%s ocpp_identity=%s client=%s subprotocols=%s headers_host=%s",
-                self.station_id,
-                self.ocpp_identity,
-                self.scope.get("client"),
-                self.scope.get("subprotocols"),
-                dict(self.scope.get("headers") or []).get(b"host"),
-            )
+            station_logger.info("WS attempt: station=%s", self.station_id)
         except Exception:
             pass
 
+        # Избор на протокол
+        offered = self.scope.get("subprotocols") or []
+        chosen_subprotocol = None
+        if "ocpp1.6" in offered:
+            chosen_subprotocol = "ocpp1.6"
+        elif "OCPP1.6" in offered:
+            chosen_subprotocol = "OCPP1.6"
+
+        # Приемане на връзката
+        try:
+            if chosen_subprotocol:
+                await self.accept(subprotocol=chosen_subprotocol)
+            else:
+                await self.accept()
+            
+            station_logger.info("WS accepted: chosen_subprotocol=%s", chosen_subprotocol)
+        except Exception as e:
+            # ТУК ВНИМАВАЙ ЗА ИНДЕНТАЦИЯТА - трябва да е точно под 'try'
+            station_logger.error("Accept failed: %s", str(e))
+            return
+
+        # Обновяване на базата
         if self.ocpp_identity:
             try:
                 await database_sync_to_async(
                     lambda: Station.objects.filter(id=self.station_id).update(ocpp_identity=str(self.ocpp_identity))
                 )()
             except Exception:
-                ocpp_logger.exception("Failed updating Station.ocpp_identity")
-
-        try:
-            offered = self.scope.get("subprotocols") or []
-            chosen = None
-            if "ocpp1.6" in offered:
-                chosen = "ocpp1.6"
-            elif "OCPP1.6" in offered:
-                chosen = "OCPP1.6"
-
-            if chosen:
-                await self.accept(subprotocol=chosen)
-            else:
-                await self.accept()
-
-            try:
-                station_logger.info(
-                    "WS accepted: station=%s chosen_subprotocol=%s",
-                    self.station_id,
-                    self.scope.get("subprotocol"),
-                )
-            except Exception:
                 pass
 
+        # Стартиране на OCPP
+        try:
             self.ws_wrapper = WebSocketWrapper(self)
             self.cp = ChargePoint(self.station_id, self.ws_wrapper, self)
             self.cp_task = asyncio.create_task(self.cp.start())
+        except Exception as e:
+            station_logger.error("CP task failed: %s", str(e))
+            await self.close()
+
 
             def _log_cp_done(task: asyncio.Task) -> None:
                 try:
@@ -1242,6 +1243,7 @@ class ChargePointConsumer(AsyncWebsocketConsumer):
         except Exception:
             ocpp_logger.exception("Error during station initialization")
             await self.close(code=1011)
+
 
     async def disconnect(self, close_code):
         try:

@@ -381,9 +381,18 @@ CELERY_RESULT_SERIALIZER = 'json'
 CELERY_TIMEZONE = TIME_ZONE
 
 # Celery Beat Schedule
+from celery.schedules import crontab
 CELERY_BEAT_SCHEDULE = {
     'sample_task': {
         'task': 'renew_website.tasks.sample_task',
         'schedule': 30.0,
     },
+    'fetch-weather-every-15-minutes': {
+        'task': 'renew_website.apps.api.weather.tasks.fetch_weather_task',
+        'schedule': crontab(minute='*/15'),
+    },
+    'fetch-inverter-every-5-minutes': {
+        'task': 'renew_website.apps.api.deye.tasks.fetch_inverter_telemetry',
+        'schedule': crontab(minute='*/5'),
+    }
 }

@@ -6,7 +6,7 @@ from rest_framework import serializers
 
 class BaseInverterSerializer(serializers.Serializer):
     """
-    Общ договор за данни между Backend и Frontend.
+    Общ за данни между Backend и Frontend.
     """
     device_sn = serializers.CharField()
     source = serializers.CharField(required=False)
