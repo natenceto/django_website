@@ -48,7 +48,7 @@ def get_safe_battery_discharge_limit(state: SystemState) -> float:
         return 0.0
         
     # 2. Define minimum allowed SOC based on weather
-    min_allowed_soc = 20.0  # Sunny baseline (can go low)
+    min_allowed_soc = 25.0  # Sunny baseline (can go low)
     if not is_sun_reliable(state):
         min_allowed_soc = 35.0  # Protect heavily if weather is bad
         
