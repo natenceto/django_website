@@ -164,17 +164,25 @@ def set_charging_power_limit(station_id, max_power_watts):
     поради липса на PV енергия или ограничаване от батерията.
     """
     try:
-        # Тук изпращате OCPP команда `SetChargingProfile` или HTTP заявка към станцията.
-        # Например: client.set_power_limit(station_id, max_power_watts)
+        from renew_website.apps.charging_stations.power_management import PowerManager
+        import asyncio
         
         logger.info(f"Команда за ограничаване на мощност към станция {station_id}: {max_power_watts}W")
         
-        # Индикираме в UI, че станцията е в режим "Eco" (лимитирана мощност)
+        power_kw = max_power_watts / 1000.0
+        
+        # We assume connector_id = 1 for now (or loop through them if multiple)
+        # PowerManager.set_charging_power expects kW
+        from asgiref.sync import async_to_sync
+        
+        async_to_sync(PowerManager.set_charging_power)(station_id, 1, power_kw)
+        
+        # Индикираме в UI, че станцията е в режим "Eco/Auto" (лимитирана мощност)
         send_to_ui({
             "type": "station_status",
             "station_id": int(str(station_id)),
             "status": "Eco",
-            "reason": f"Limited to {max_power_watts}W",
+            "reason": f"Auto limit: {power_kw:.2f}kW",
             "timestamp": timezone.now().isoformat()
         })
         
