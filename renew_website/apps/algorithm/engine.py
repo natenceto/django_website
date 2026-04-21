@@ -48,24 +48,36 @@ class DecisionEngine:
         available_eco_power_kw = net_pv_surplus_kw + allowed_battery_discharge_kw
 
         if state.active_ev_sessions == 0:
-            # Nobody is charging. Deye will automatically push `net_pv_surplus_kw` to batteries 
-            # or clip it (Zero Export). EV limit is irrelevant, but we set it to 0.
             return {
-                "mode": SystemWorkMode.ECO_CHARGE, # Default fallback
+                "mode": SystemWorkMode.DYNAMIC_ECO_SOLAR_ONLY, # Default fallback
                 "ev_power_limit_kw": 0.0
             }
 
-        # If the user has manually pushed a "Fast Charge" button on the site
-        # (Assuming we might pass this via state in the future, let's keep logic ready)
-        # return {"mode": SystemWorkMode.FAST_CHARGE, "ev_power_limit_kw": 22.0 * state.active_ev_sessions}
-
-        # Standard Smart Charging
-        # We give the EVs exactly the allowed pool. 
-        # If available_eco_power_kw is 0 (it's raining, night, battery low), stations pause.
+        # --- Dynamic Mode Selection ---
+        # We want to fast charge EVs (especially up to 80%) as fast as possible 
+        # relying purely on Renewables (PV + Battery) IF weather is good.
         
-        # Determine strictness of mode for database logging
-        mode = SystemWorkMode.SMART_CHARGE if allowed_battery_discharge_kw > 0 else SystemWorkMode.ECO_CHARGE
-
+        # Determine battery buffer state explicitly
+        is_weather_good = is_sun_reliable(state)
+        # Assuming battery > 60% means it's safe to use for aggressive EV charging
+        is_battery_optimally_full = state.battery_soc > 60.0
+        
+        mode = SystemWorkMode.DYNAMIC_ECO_SOLAR_ONLY
+        
+        if is_weather_good and is_battery_optimally_full:
+            # We have good weather and full-enough batteries -> Max Renewable Power to the EV
+            mode = SystemWorkMode.DYNAMIC_MAX_RENEWABLE
+        elif is_weather_good and not is_battery_optimally_full:
+            # We have good weather, but battery is not full enough -> Don't drain it via limit
+            # Limit strictly to PV surplus to protect battery filling up
+            allowed_battery_discharge_kw = 0.0
+            available_eco_power_kw = net_pv_surplus_kw
+            mode = SystemWorkMode.DYNAMIC_ECO_SOLAR_ONLY
+        elif not is_weather_good and state.battery_soc > 20.0:
+            # Bad weather, but we still have a bit of buffer
+            # Keep battery discharge at whatever `get_safe_battery_discharge_limit` said
+            mode = SystemWorkMode.DYNAMIC_ECO_SOLAR_ONLY
+            
         return {
             "mode": mode,
             "ev_power_limit_kw": available_eco_power_kw

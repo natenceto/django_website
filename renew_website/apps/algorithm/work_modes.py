@@ -3,28 +3,23 @@ from django.utils.translation import gettext_lazy as _
 
 class SystemWorkMode(models.TextChoices):
 
-    # --- 1. Dynamic Local Balancing (Zero Export To Load) ---
-    # These modes rely on the Deye inverter automatically handling PV/Battery flow. 
-    # The algorithm controls exactly how much load the EV chargers represent.
-
-    # Solar ONLY for EVs. Assumes: Priority 1: Building, Priority 2: Battery (until a certain %), Priority 3: EVs.
-    # Algorithm calculates (PV - Building_Load), and restricts EV. Battery does not discharge to EV.
-    ECO_CHARGE = 'ECO_CHARGE', _('Eco Charge (Solar Only)')
+    # --- 1. Dynamic Local Balancing ---
     
-    # Solar + Small Battery Buffer. Priority 1: Building, Priority 2: EVs, Priority 3: Batteries.
-    # EV chargers dynamically get (PV + Allowed_Battery_Discharge - Building_Load). Smooths out clouds.
-    SMART_CHARGE = 'SMART_CHARGE', _('Smart Charge (Solar + Minimal Battery)')
+    # Режим "Само Слънце" - Използва се когато батерията не е достатъчно пълна.
+    # Всичката излишна слънчева енергия отива за колата, но батерията не се разрежда към нея.
+    DYNAMIC_ECO_SOLAR_ONLY = 'DYNAMIC_ECO_SOLAR_ONLY', _('Динамичен: Само Слънце (Предпазване на батерията)')
     
-    # Maximum requested power. EV chargers unrestricted up to max site limit. 
-    # Deye fulfills it automatically from PV -> Battery -> Grid.
-    FAST_CHARGE = 'FAST_CHARGE', _('Fast Charge (Grid + PV + Battery)')
+    # Режим "Максимално Бързо Възобновяемо Зареждане" - Използва се когато времето е хубаво и батерията е над 50/60%.
+    # Колата максимално бързо се зарежда до 80%, използвайки целия излишък от Слънцето + подкрепа от Батерията. Без Мрежа!
+    DYNAMIC_MAX_RENEWABLE = 'DYNAMIC_MAX_RENEWABLE', _('Динамичен: Бързо ЕКО (Слънце + Батерия)')
     
-    # --- 2. Macro Hardware Overrides (EEPROM Writes) ---
-    # Only use these modes for critical environment changes.
-
-    # EVs are completely paused or limited to minimum to reserve power. 
-    # Inverter is forced to charge batteries via Grid Charge Enable (Night Tariff / Expecting Storm).
-    PROTECT_BATTERY = 'PROTECT_BATTERY', _('Protect Battery (Grid Charge Enabled)')
+    # --- 2. Grid & Override Modes ---
     
-    # Grid is down. Island mode. EV chargers are restricted/paused automatically.
-    EMERGENCY_BACKUP = 'EMERGENCY_BACKUP', _('Emergency Backup (Off-Grid)')
+    # Максимална мощност отвсякъде (Слънце + Батерия + Мрежа)
+    FAST_CHARGE_GRID = 'FAST_CHARGE_GRID', _('Смесено: Бързо зареждане с Мрежа')
+    
+    # Запазване на батерията през нощната тарифа (Използваме мрежа за колата или спираме колата)
+    PROTECT_BATTERY = 'PROTECT_BATTERY', _('Защита Батерия (Нощна тарифа)')
+    
+    # При прекъсване на мрежата
+    EMERGENCY_BACKUP = 'EMERGENCY_BACKUP', _('Авариен Островен Режим')
