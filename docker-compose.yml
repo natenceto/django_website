@@ -1,5 +1,4 @@
 services:
-  # Base Database Service
   db:
     image: postgres:15-alpine
     container_name: renew_db
@@ -10,14 +9,15 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
-      - "${POSTGRES_PORT:-5433}:5432"
+      - "5433:5432"
+    networks:
+      - renew_net
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-renew_user} -d ${POSTGRES_DB:-renew_db}"]
       interval: 10s
       timeout: 5s
       retries: 5
 
-  # Redis for Cache & Celery Broker
   redis:
     image: redis:7-alpine
     container_name: renew_redis
@@ -25,32 +25,32 @@ services:
       - "6379:6379"
     volumes:
       - redis_data:/data
+    networks:
+      - renew_net
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
 
-  # Django Application (ASGI/Uvicorn)
   web:
     build: .
     container_name: renew_web
-    command: uvicorn renew_website.asgi:application --host 0.0.0.0 --port 8000 --ws-ping-interval 60 --reload
+    # Махаме --reload за по-голяма стабилност на сокетите, ако не си в чист dev режим
+    command: uvicorn renew_website.asgi:application --host 0.0.0.0 --port 8000 --ws-ping-interval 60
     volumes:
       - .:/app
       - static_volume:/app/staticfiles
-    ports:
-      - "8000:8000"
-    healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8000/health/ || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 15s
+    # Махаме ports 8000:8000, за да минава всичко само през Nginx (сигурност)
+    expose:
+      - "8000"
+    networks:
+      - renew_net
     environment:
       - DEBUG=1
       - SECRET_KEY=${SECRET_KEY:-dev-secret-key}
-      - ALLOWED_HOSTS=localhost,127.0.0.1,web,192.168.122.246,*
+      # ДОБАВИ РЕАЛНОТО IP ТУК:
+      - ALLOWED_HOSTS=localhost,127.0.0.1,web,192.168.88.247,192.168.122.246
       - POSTGRES_DB=${POSTGRES_DB:-renew_db}
       - POSTGRES_USER=${POSTGRES_USER:-renew_user}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-changeme}
@@ -58,59 +58,44 @@ services:
       - POSTGRES_PORT=5432
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
-      - RUN_DB_MIGRATIONS=1
-      - RUN_COLLECTSTATIC=1
     depends_on:
       db:
         condition: service_healthy
       redis:
         condition: service_healthy
 
-  # Celery Worker
   celery:
     build: .
     container_name: renew_celery_worker
     command: celery -A renew_website worker --loglevel=info
     volumes:
       - .:/app
+    networks:
+      - renew_net
     environment:
-      - DEBUG=1
-      - POSTGRES_DB=${POSTGRES_DB:-renew_db}
-      - POSTGRES_USER=${POSTGRES_USER:-renew_user}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-changeme}
       - POSTGRES_HOST=db
-      - POSTGRES_PORT=5432
       - CELERY_BROKER_URL=redis://redis:6379/0
-      - CELERY_RESULT_BACKEND=redis://redis:6379/0
-      - RUN_DB_MIGRATIONS=0
-      - RUN_COLLECTSTATIC=0
     depends_on:
-      - db
-      - redis
       - web
 
-  # Celery Beat (Periodic Tasks)
-  celery-beat:
-    build: .
-    container_name: renew_celery_beat
-    command: celery -A renew_website beat --loglevel=info
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: renew_nginx
+    ports:
+      - "80:80"
+      - "443:443"
     volumes:
-      - .:/app
-    environment:
-      - DEBUG=1
-      - POSTGRES_DB=${POSTGRES_DB:-renew_db}
-      - POSTGRES_USER=${POSTGRES_USER:-renew_user}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-changeme}
-      - POSTGRES_HOST=db
-      - POSTGRES_PORT=5432
-      - CELERY_BROKER_URL=redis://redis:6379/0
-      - CELERY_RESULT_BACKEND=redis://redis:6379/0
-      - RUN_DB_MIGRATIONS=0
-      - RUN_COLLECTSTATIC=0
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+      - static_volume:/app/staticfiles
+    networks:
+      - renew_net
     depends_on:
-      - db
-      - redis
       - web
+
+networks:
+  renew_net:
+    driver: bridge
 
 volumes:
   postgres_data:
