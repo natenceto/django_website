@@ -148,7 +148,7 @@ class AuthorizationManager:
             # Check for existing active transaction
             existing_transaction = Transaction.objects.filter(
                 id_tag=tag_id,
-                stop_timestamp__isnull=True
+                stopped_at__isnull=True
             ).first()
             
             if existing_transaction:
@@ -234,9 +234,9 @@ class AuthorizationManager:
                     'station_address': tx.connector.station.address,
                     'connector_id': tx.connector.connector_id,
                     'start_time': tx.start_timestamp.isoformat() if tx.start_timestamp else None,
-                    'stop_time': tx.stop_timestamp.isoformat() if tx.stop_timestamp else None,
+                    'stop_time': tx.stopped_at.isoformat() if tx.stopped_at else None,
                     'energy_kwh': float(tx.energy_kwh) if tx.energy_kwh else 0.0,
-                    'status': 'Active' if not tx.stop_timestamp else 'Completed'
+                    'status': 'Active' if not tx.stopped_at else 'Completed'
                 })
             
             return result

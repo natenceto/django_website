@@ -60,7 +60,7 @@ class PowerManager:
                     return consumer.cp
                 return None
             
-            chargepoint = get_chargepoint(station.serial_number)
+            chargepoint = get_chargepoint(station.id)
             
             if chargepoint:
                 # Use OCPP SetChargingProfile command
@@ -115,14 +115,14 @@ class PowerManager:
                     return consumer.cp
                 return None
             
-            chargepoint = get_chargepoint(station.serial_number)
+            chargepoint = get_chargepoint(station.id)
             
             if chargepoint:
                 # Find active transaction for this connector
                 transaction = await Transaction.objects.filter(
                     connector__station_id=station_id,
                     connector__connector_id=connector_id,
-                    stop_timestamp__isnull=True
+                    stopped_at__isnull=True
                 ).afirst()
                 
                 if transaction:
@@ -148,7 +148,7 @@ class PowerManager:
             # Get all active transactions for the station
             active_transactions = await Transaction.objects.filter(
                 connector__station_id=station_id,
-                stop_timestamp__isnull=True
+                stopped_at__isnull=True
             ).select_related('connector')
             
             total_power = 0
@@ -158,9 +158,16 @@ class PowerManager:
                 # Get latest meter value for this transaction
                 latest_meter = await transaction.meter_values.order_by('-timestamp').afirst()
                 if latest_meter:
-                    # Calculate power from meter values (simplified)
-                    # In real implementation, this would use proper power calculation
-                    power_kw = latest_meter.value / 1000  # Convert Wh to kWh for display
+                    # Calculate power from meter values based on delta energy and time
+                    # More precise implementation needed for real instant power drawing, but fallback to requested:
+                    power_kw = float(transaction.requested_power_kw) if transaction.requested_power_kw else (latest_meter.value / 1000)
+                    
+                    if transaction.meter_stop and transaction.meter_start and transaction.stopped_at and transaction.started_at:
+                        duration_hours = (transaction.stopped_at - transaction.started_at).total_seconds() / 3600
+                        if duration_hours > 0:
+                            energy_wh = transaction.meter_stop - transaction.meter_start
+                            power_kw = (energy_wh / 1000) / duration_hours
+                    
                     total_power += power_kw
                     
                     usage_data.append({
@@ -230,7 +237,7 @@ class PowerManager:
                     return consumer.cp
                 return None
             
-            chargepoint = get_chargepoint(station.serial_number)
+            chargepoint = get_chargepoint(station.id)
             
             if chargepoint:
                 if connector_id:
@@ -265,7 +272,7 @@ class SmartCharging:
             # Get all active transactions for the station
             active_transactions = await Transaction.objects.filter(
                 connector__station_id=station_id,
-                stop_timestamp__isnull=True
+                stopped_at__isnull=True
             ).select_related('connector')
             
             if not active_transactions:
