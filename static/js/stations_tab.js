@@ -184,6 +184,27 @@ document.addEventListener("DOMContentLoaded", function () {
     }
   }
   
+  function updateStationStatusBadge(stationId, status) {
+    const statusCell = document.getElementById(`status-${stationId}`);
+    if (statusCell) {
+      let statusClass = "badge-secondary";
+      let statusText = status;
+      
+      if (status === "active") {
+        statusClass = "badge-success";
+        statusText = "Active";
+      } else if (status === "inactive") {
+        statusClass = "badge-secondary";
+        statusText = "Inactive";
+      } else if (status === "maintenance") {
+        statusClass = "badge-warning";
+        statusText = "Maintenance";
+      }
+      
+      statusCell.innerHTML = `<span class="badge ${statusClass}">${statusText}</span>`;
+    }
+  }
+  
   function updateDashboardCard(elementId, value, animate = true) {
     const element = document.getElementById(elementId);
     if (element) {
@@ -214,7 +235,14 @@ document.addEventListener("DOMContentLoaded", function () {
     statusSocket.onclose = function(e) {
       console.log('Disconnected from station status updates');
       updateConnectionStatus(false);
-      setTimeout(connectStatusWebSocket, 3000);
+      // Prevent multiple reconnection attempts
+      if (!statusSocket.reconnectAttempt) {
+        statusSocket.reconnectAttempt = true;
+        setTimeout(() => {
+          statusSocket.reconnectAttempt = false;
+          connectStatusWebSocket();
+        }, 5000);
+      }
     };
 
     statusSocket.onerror = function(error) {
@@ -229,6 +257,39 @@ document.addEventListener("DOMContentLoaded", function () {
         
         // Handle different message types
         const messageType = data.type || '';
+        
+        // Handle status snapshot (initial station status)
+        if (messageType === 'status_snapshot' && data.stations) {
+          console.log('Received status snapshot:', data);
+          data.stations.forEach(station => {
+            updateStationStatusBadge(station.station_id, station.status);
+          });
+          
+          // Update dashboard counters
+          const totalStations = document.getElementById('metric-total');
+          const onlineStations = document.getElementById('metric-online');
+          const availableStations = document.getElementById('metric-available');
+          
+          if (totalStations) totalStations.textContent = data.stations.length;
+          if (onlineStations) {
+            const onlineCount = data.stations.filter(s => s.online).length;
+            onlineStations.textContent = onlineCount;
+            dashboardMetrics.onlineStations = onlineCount;
+          }
+          if (availableStations) {
+            const availableCount = data.stations.filter(s => s.status === 'active').length;
+            availableStations.textContent = availableCount;
+          }
+          
+          // Update last update time
+          const lastUpdate = document.getElementById('last-update');
+          if (lastUpdate) {
+            const now = new Date();
+            lastUpdate.textContent = now.toLocaleTimeString();
+          }
+          
+          return;
+        }
         
         // Update last update timestamp
         const lastUpdate = document.getElementById('last-update');
@@ -320,8 +381,10 @@ document.addEventListener("DOMContentLoaded", function () {
         }
         
         // Handle station status update (connect/disconnect)
-        if (messageType === 'station_status_update' || messageType === 'status_update') {
+        if (messageType === 'station_status_update' || messageType === 'status_update' || messageType === 'station_status') {
+          console.log('Processing station_status:', data);
           const statusCell = document.getElementById(`status-${data.station_id}`);
+          console.log('Status cell found:', statusCell);
           if (statusCell) {
             const wasActive = statusCell.innerHTML.includes('Active');
             let statusClass = "badge-secondary";

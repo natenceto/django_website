@@ -87,10 +87,10 @@ def track_ws_performance(station_id: str, message_size: int, direction: str):
     
     if should_save:
         try:
-            _save_ws_metric_to_db(station_id, stats)
+            _save_ws_metric_to_db(self.station_id, stats)
             stats['db_save_count'] += 1
         except Exception as e:
-            get_station_logger(station_id).warning(f"Failed to save WebSocket metric to DB: {e}")
+            get_station_logger(self.station_id).warning(f"Failed to save WebSocket metric to DB: {e}")
 
 
 def _save_ws_metric_to_db(station_id: Union[int, str], stats: Dict[str, Any]):
@@ -195,9 +195,7 @@ class WebSocketWrapper:
         return await self.queue.get()
 
     async def feed(self, message: str) -> None:
-        if message.strip().lower() == "ping":
-            await self.send("pong")
-            return
+        # Премахваме бързата ping/pong обработка
         await self.queue.put(message)
 
 
@@ -358,19 +356,19 @@ class ChargePoint(OCPPChargePoint):
     @on(Action.BootNotification)
     async def on_boot_notification(self, charge_point_vendor: str, charge_point_model: str, **kwargs):
         station_id = self.station_id
-        station_logger = get_station_logger(station_id)
+        station_logger = get_station_logger(self.station_id)
 
-        station_logger.info("=== OCPP 1.6 BootNotification ===")
-        station_logger.info(f"Station ID: {station_id}")
-        station_logger.info(f"Vendor: {charge_point_vendor}")
-        station_logger.info(f"Model: {charge_point_model}")
+        get_station_logger(self.station_id).info("=== OCPP 1.6 BootNotification ===")
+        get_station_logger(self.station_id).info(f"Station ID: {station_id}")
+        get_station_logger(self.station_id).info(f"Vendor: {charge_point_vendor}")
+        get_station_logger(self.station_id).info(f"Model: {charge_point_model}")
 
         firmware_version = kwargs.get("firmware_version") or kwargs.get("firmwareVersion")
         if firmware_version:
-            station_logger.info(f"Firmware: {firmware_version}")
+            get_station_logger(self.station_id).info(f"Firmware: {firmware_version}")
 
         self.heartbeat_interval = int(getattr(self, "default_heartbeat_interval", 60))
-        station_logger.info(f"Heartbeat interval: {self.heartbeat_interval}s")
+        get_station_logger(self.station_id).info(f"Heartbeat interval: {self.heartbeat_interval}s")
 
         try:
             asyncio.create_task(self._update_station_status_async("active", "boot"))
@@ -426,7 +424,7 @@ class ChargePoint(OCPPChargePoint):
     async def on_status_notification(self, connector_id: int, error_code: str, status: str, **kwargs):
         self.last_seen = timezone.now()
         station_id = self.station_id
-        station_logger = get_station_logger(station_id)
+        station_logger = get_station_logger(self.station_id)
 
         def normalize_status(s: str) -> str:
             s_lower = (s or "").strip().lower()
@@ -445,7 +443,7 @@ class ChargePoint(OCPPChargePoint):
 
         normalized = normalize_status(status)
 
-        station_logger.info(
+        get_station_logger(self.station_id).info(
             f"StatusNotification: station={station_id} connectorId={connector_id} status={status} -> {normalized} errorCode={error_code}"
         )
 
@@ -512,7 +510,7 @@ class ChargePoint(OCPPChargePoint):
 
                     finalized = await reconcile_tx()
                     if finalized:
-                        station_logger.warning(f"Reconciled transaction {finalized} due to connector status {status}")
+                        get_station_logger(self.station_id).warning(f"Reconciled transaction {finalized} due to connector status {status}")
 
                 asyncio.create_task(self._update_station_status_async("active", "status"))
 
@@ -529,7 +527,7 @@ class ChargePoint(OCPPChargePoint):
     async def on_heartbeat(self):
         self.last_seen = timezone.now()
         station_id = self.station_id
-        station_logger = get_station_logger(station_id)
+        station_logger = get_station_logger(self.station_id)
 
         LOG_THROTTLE = 60
         DB_UPDATE_THROTTLE = 15
@@ -539,7 +537,7 @@ class ChargePoint(OCPPChargePoint):
 
         last_log = _last_heartbeat_log.get(station_id)
         if not last_log or (now_ts - last_log).total_seconds() >= LOG_THROTTLE:
-            station_logger.info("Heartbeat received")
+            get_station_logger(self.station_id).info("Heartbeat received")
             _last_heartbeat_log[station_id] = now_ts
 
         last_db = _last_heartbeat_db_update.get(station_id)
@@ -558,7 +556,7 @@ class ChargePoint(OCPPChargePoint):
             window["window_start"] = now_ts
 
         if window["count"] > RAPID_COUNT_LIMIT:
-            station_logger.warning(f"Rapid heartbeats detected ({window['count']} in {LOG_THROTTLE}s)")
+            get_station_logger(self.station_id).warning(f"Rapid heartbeats detected ({window['count']} in {LOG_THROTTLE}s)")
 
         current_time = (
             now_ts.astimezone(py_datetime.timezone.utc)
@@ -825,7 +823,7 @@ class ChargePoint(OCPPChargePoint):
         ocpp_logger.info(f"DiagnosticsStatusNotification: station={self.station_id} status={status}")
         return call_result.DiagnosticsStatusNotificationPayload()
 
-    @on("SecurityEventNotification")
+    @on(Action.SecurityEventNotification)
     async def on_security_event_notification(self, type: str, timestamp: str, **kwargs):
         try:
             get_station_logger(self.station_id).info(
@@ -1169,7 +1167,7 @@ class ChargePointConsumer(AsyncWebsocketConsumer):
 
         # Лог за опит за свързване
         try:
-            station_logger.info("WS attempt: station=%s", self.station_id)
+            get_station_logger(self.station_id).info("WS attempt: station=%s", self.station_id)
         except Exception:
             pass
 
@@ -1188,10 +1186,10 @@ class ChargePointConsumer(AsyncWebsocketConsumer):
             else:
                 await self.accept()
             
-            station_logger.info("WS accepted: chosen_subprotocol=%s", chosen_subprotocol)
+            get_station_logger(self.station_id).info("WS accepted: chosen_subprotocol=%s", chosen_subprotocol)
         except Exception as e:
             # ТУК ВНИМАВАЙ ЗА ИНДЕНТАЦИЯТА - трябва да е точно под 'try'
-            station_logger.error("Accept failed: %s", str(e))
+            get_station_logger(self.station_id).error("Accept failed: %s", str(e))
             return
 
         # Обновяване на базата
@@ -1209,11 +1207,8 @@ class ChargePointConsumer(AsyncWebsocketConsumer):
             self.cp = ChargePoint(self.station_id, self.ws_wrapper, self)
             self.cp_task = asyncio.create_task(self.cp.start())
             
-            # Изпрати статус ъпдейт до UI, че станцията е свързана
-            await self.broadcast_station_status(self.station_id, "active", "station_connected")
-            
         except Exception as e:
-            station_logger.error("CP task failed: %s", str(e))
+            logger.error("CP task failed: %s", str(e))
             await self.close()
 
 
@@ -1264,12 +1259,20 @@ class ChargePointConsumer(AsyncWebsocketConsumer):
 
         try:
             await self.update_station_status(self.station_id, "inactive", "disconnect")
+        except Exception:
+            ocpp_logger.exception("Error updating station status on disconnect")
+        
+        try:
             await database_sync_to_async(
                 lambda: Connector.objects.filter(station_id=self.station_id).update(status="offline")
             )()
+        except Exception:
+            ocpp_logger.exception("Error updating connector status on disconnect")
+        
+        try:
             await self.broadcast_all_connectors_offline()
         except Exception:
-            ocpp_logger.exception("Error updating statuses on disconnect")
+            ocpp_logger.exception("Error broadcasting connectors offline")
 
         self._is_closing = True
         self._connected = False
@@ -1328,6 +1331,7 @@ class ChargePointConsumer(AsyncWebsocketConsumer):
     # UI broadcast helpers (single schema)
     # -------------------------
     async def _ui_send(self, data: Dict[str, Any]) -> None:
+        logger.info(f"Sending UI message: {data}")
         await self.channel_layer.group_send(
             UI_STATUS_GROUP,
             {"type": "broadcast", "data": data},
@@ -1550,11 +1554,19 @@ class StationStatusConsumer(AsyncWebsocketConsumer):
 
         out = []
         for st in stations:
-            online = (st.id in active_keys)
+            # Use database status to determine online status
+            # If station status is 'active', consider it online
+            online = (st.status == 'active')
+            if not online and st.id in active_keys:
+                # Fallback to ACTIVE_STATIONS if database says inactive but station is connected
+                online = True
+            
+            # Use status from database
+            status = st.status if st.status else ("active" if online else "inactive")
             out.append({
                 "station_id": st.id,
                 "online": online,
-                "status": "active" if online else "inactive",
+                "status": status,
             })
 
         return {

@@ -35,7 +35,7 @@ services:
   web:
     build: .
     container_name: renew_web
-    command: uvicorn renew_website.asgi:application --host 0.0.0.0 --port 8000 --ws-ping-interval 60 --reload
+    command: uvicorn renew_website.asgi:application --host 0.0.0.0 --port 8000 --reload
     volumes:
       - .:/app
       - static_volume:/app/staticfiles
@@ -60,6 +60,7 @@ services:
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
       - RUN_DB_MIGRATIONS=1
       - RUN_COLLECTSTATIC=1
+      - DEYE_CONNECTION_MODE=auto
     depends_on:
       db:
         condition: service_healthy

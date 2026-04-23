@@ -47,16 +47,8 @@ def stations(request: HttpRequest) -> HttpResponse:
         'energy_today_kwh': energy_today_kwh,
     }
     
-    # Override status based on actual WebSocket connections
-    for station in stations_list:
-        # Check if station is actually connected via WebSocket
-        station_id_str = str(station.id)
-        station_id_int = station.id
-        is_connected = station_id_str in ACTIVE_STATIONS or station_id_int in ACTIVE_STATIONS
-        
-        if not is_connected:
-            # Station is not connected - show as inactive regardless of DB status
-            station.status = 'inactive'
+    # Keep original status from database - don't override based on WebSocket connections
+# The WebSocket will update the status in real-time via JavaScript
 
     # Определяме текущия активен таб според query параметър
     active_tab = request.GET.get("tab", "add")
