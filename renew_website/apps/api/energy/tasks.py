@@ -48,8 +48,9 @@ def run_energy_management_algorithm():
         latest_weather = WeatherLog.objects.order_by('-timestamp').first()
         cloud_cover = float(latest_weather.cloud_cover) if latest_weather else 0.0
         is_raining = False
-        weather_cond = latest_weather.condition.lower() if latest_weather else "clear"
-        if "rain" in weather_cond or "drizzle" in weather_cond or "storm" in weather_cond:
+        weather_cond = "clear" # DUMMY condition, since it was removed
+        precipitation = float(latest_weather.precipitation_mm) if latest_weather else 0.0
+        if precipitation > 0:
             is_raining = True
 
         # Проверка за нощна тарифа (приблизително 22:00 до 06:00)

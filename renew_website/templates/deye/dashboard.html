@@ -187,7 +187,9 @@
                 <h6 class="m-0 font-weight-bold text-primary">24-Hour Generation Chart</h6>
             </div>
             <div class="card-body">
-                <canvas id="generation-chart" width="400" height="100"></canvas>
+                <div class="chart-area" style="position: relative; height: 300px; width: 100%;">
+                    <canvas id="generation-chart"></canvas>
+                </div>
             </div>
         </div>
     </div>
@@ -221,7 +223,7 @@ async function loadDashboardData() {
         updateInverterList(data.current.readings);
         
         // Update chart
-        updateChart(data.current.readings);
+        await updateChart();
         
     } catch (error) {
         console.error('Failed to load dashboard data:', error);
@@ -273,78 +275,115 @@ function updateInverterList(readings) {
     });
 }
 
-function updateChart(readings) {
-    const canvas = document.getElementById('generation-chart');
-    const ctx = canvas.getContext('2d');
-    
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    
-    if (readings.length === 0) return;
-    
-    ctx.strokeStyle = '#4e73df';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    
-    readings.forEach((reading, index) => {
-        const x = (index / (readings.length - 1)) * canvas.width;
-        const y = canvas.height - (reading.generation_power || 0) / 10;
+async function updateChart() {
+    try {
+        const response = await fetch('/api/energy/chart-data/?range=24h');
+        const data = await response.json();
         
-        if (index === 0) {
-            ctx.moveTo(x, y);
-        } else {
-            ctx.lineTo(x, y);
+        const ctx = document.getElementById('generation-chart');
+        if (window.generationChart) {
+            window.generationChart.destroy();
         }
-    });
-    
-    ctx.stroke();
+        
+        window.generationChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: data.labels,
+                datasets: [{
+                    label: 'Генерация (kW)',
+                    data: data.datasets.pv_generation,
+                    backgroundColor: "rgba(78, 115, 223, 0.05)",
+                    borderColor: "rgba(78, 115, 223, 1)",
+                    pointRadius: 1,
+                    pointBackgroundColor: "rgba(78, 115, 223, 1)",
+                    pointBorderColor: "rgba(78, 115, 223, 1)",
+                    pointHoverRadius: 3,
+                    pointHoverBackgroundColor: "rgba(78, 115, 223, 1)",
+                    pointHoverBorderColor: "rgba(78, 115, 223, 1)",
+                    pointHitRadius: 10,
+                    pointBorderWidth: 2,
+                    fill: true,
+                    tension: 0.3
+                }]
+            },
+            options: {
+                maintainAspectRatio: false,
+                responsive: true,
+                interaction: {
+                    mode: 'index',
+                    intersect: false,
+                },
+                plugins: {
+                    legend: { display: false }
+                },
+                scales: {
+                    x: {
+                        grid: { display: false, drawBorder: false },
+                        ticks: { maxTicksLimit: 12, autoSkip: true }
+                    },
+                    y: {
+                        beginAtZero: true,
+                        title: { display: true, text: 'Мощност (kW)' },
+                        grid: { color: "rgb(234, 236, 244)", drawBorder: false, borderDash: [2] }
+                    }
+                }
+            }
+        });
+        
+    } catch (error) {
+        console.error('Failed to load chart data:', error);
+    }
 }
 
 async function getChargingRecommendation() {
     const content = document.getElementById('charging-content');
     
     // Show loading
-    content.innerHTML = '<p>Analyzing current conditions...</p>';
+    content.innerHTML = '<div class="text-center py-4"><div class="spinner-border text-primary" role="status"></div><p class="mt-2 text-muted">Анализиране на системата...</p></div>';
     
     try {
-        const data = await window.EVPlatformAPI.getChargingRecommendation(
-            'demo_vehicle', 80, 30, 7200
-        );
+        const data = await window.EVPlatformAPI.getChargingRecommendation();
         
-        if (data.should_charge) {
-            content.innerHTML = `
-                <div class="alert alert-success">
-                    <h6 class="alert-heading"><i class="fas fa-check-circle"></i> Optimal charging conditions!</h6>
-                    <hr>
-                    <p class="mb-2"><strong>Available solar power:</strong> ${data.available_solar_watts} W</p>
-                    <p class="mb-2"><strong>Recommended charging power:</strong> ${data.charging_power_watts} W</p>
-                    <p class="mb-2"><strong>Estimated charging time:</strong> ${data.estimated_time_hours.toFixed(1)} hours</p>
-                    <p class="mb-0"><strong>Current battery SOC:</strong> ${data.battery_soc.toFixed(1)}%</p>
-                    <hr>
-                    <button class="btn btn-success" onclick="startCharging()">
-                        <i class="fas fa-play"></i> Start Smart Charging
-                    </button>
+        let sc1 = data.scenario_1_ev;
+        let sc2 = data.scenario_2_ev;
+        let p_mode = sc1.mode; // Algorithm selected mode
+        
+        content.innerHTML = `
+            <div class="alert alert-info">
+                <p class="mb-0"><i class="fas fa-info-circle"></i> <strong>Информация:</strong> ${data.context}</p>
+            </div>
+            
+            <div class="row">
+                <div class="col-md-6 mb-3">
+                    <div class="card border-left-success h-100">
+                        <div class="card-body py-2">
+                            <h6 class="font-weight-bold text-success mb-1">Сценарий 1 (Един автомобил - 11kW)</h6>
+                            <p class="small mb-1 text-gray-800">${sc1.advice}</p>
+                            <p class="mb-0 small"><strong>Отпусната мощност:</strong> ${sc1.power_allowed} kW</p>
+                        </div>
+                    </div>
                 </div>
-            `;
-        } else {
-            content.innerHTML = `
-                <div class="alert alert-warning">
-                    <h6 class="alert-heading"><i class="fas fa-exclamation-triangle"></i> Insufficient solar generation</h6>
-                    <hr>
-                    <p class="mb-2"><strong>Available solar power:</strong> ${data.available_solar_watts} W</p>
-                    <p class="mb-2"><strong>Current battery SOC:</strong> ${data.battery_soc.toFixed(1)}%</p>
-                    <p class="mb-0"><strong>Recommendation:</strong> Wait for better conditions or use grid power</p>
-                    <hr>
-                    <button class="btn btn-warning" onclick="scheduleCharging()">
-                        <i class="fas fa-clock"></i> Schedule for Later
-                    </button>
+                <div class="col-md-6 mb-3">
+                    <div class="card border-left-primary h-100">
+                        <div class="card-body py-2">
+                            <h6 class="font-weight-bold text-primary mb-1">Сценарий 2 (Два автомобила - 22kW)</h6>
+                            <p class="small mb-1 text-gray-800">${sc2.advice}</p>
+                            <p class="mb-0 small"><strong>Отпусната мощност:</strong> ${sc2.power_allowed} kW</p>
+                        </div>
+                    </div>
                 </div>
-            `;
-        }
+            </div>
+            
+            <div class="alert alert-secondary mt-2 mb-0">
+                <i class="fas fa-microchip"></i> <strong>Препоръчан базов режим на инвертора:</strong> 
+                <span class="badge badge-dark p-2">${p_mode}</span>
+            </div>
+        `;
         
     } catch (error) {
         content.innerHTML = `
             <div class="alert alert-danger">
-                <i class="fas fa-exclamation-circle"></i> Failed to get recommendation. Please try again.
+                <i class="fas fa-exclamation-circle"></i> Грешка при получаването на препоръка от алгоритъма. API-то не отговори.
             </div>
         `;
         console.error('Charging recommendation error:', error);

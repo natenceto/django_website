@@ -20,4 +20,8 @@ urlpatterns = [
     # Data management
     path('data/collect/', views.collect_data, name='collect-data'),
     path('dashboard/api/', views.dashboard_data, name='dashboard'),
+    
+    # Real-time charts
+    path('chart-data/', views.chart_data, name='chart-data'),
+    path('chart-data/export/', views.export_chart_csv, name='chart-data-export'),
 ]

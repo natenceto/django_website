@@ -82,17 +82,11 @@ class EVPlatformAPI {
     }
 
     /**
-     * Взима препоръка за зареждане
+     * Взима препоръка за зареждане на база на реалните условия
      */
-    async getChargingRecommendation(vehicleId, targetSoc, currentSoc, maxPower) {
+    async getChargingRecommendation() {
         return this.request('/energy/charging/recommendation/', {
-            method: 'POST',
-            body: JSON.stringify({
-                vehicle_id: vehicleId,
-                target_soc: targetSoc,
-                current_soc: currentSoc,
-                max_power: maxPower
-            })
+            method: 'GET'
         });
     }
 

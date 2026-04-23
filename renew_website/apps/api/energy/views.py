@@ -87,43 +87,106 @@ def inverter_history(request, device_sn):
         )
 
 
-@api_view(['POST'])
+@api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def charging_recommendation(request):
     """
-    Get EV charging recommendation based on current conditions.
-    
-    Request body:
-    {
-        "vehicle_id": "vehicle_001",
-        "target_soc": 80,
-        "current_soc": 30,
-        "max_power": 7200
-    }
+    Get EV charging recommendation based on real-time conditions (mocked 1 and 2 EV scenarios).
     """
+    from django.utils import timezone
+    from renew_website.apps.api.energy.models import InverterReading
+    from renew_website.apps.api.weather.models import WeatherLog
+    from renew_website.apps.algorithm.conditions import SystemState
+    from renew_website.apps.algorithm.engine import DecisionEngine
+    from renew_website.apps.algorithm.work_modes import SystemWorkMode
+
     try:
-        vehicle_id = request.data.get('vehicle_id')
-        target_soc = int(request.data.get('target_soc'))
-        current_soc = int(request.data.get('current_soc'))
-        max_power = float(request.data.get('max_power'))
+        latest_reading = InverterReading.objects.order_by('-timestamp').first()
+        pv_power_kw = (latest_reading.generation_power or 0) / 1000.0 if latest_reading else 0.0
+        battery_soc = float(latest_reading.battery_soc or 0) if latest_reading else 0.0
+        station_data = latest_reading.station_data or {} if latest_reading else {}
         
-        if not all([vehicle_id, target_soc, current_soc, max_power]):
-            return Response(
-                {"error": "Missing required fields: vehicle_id, target_soc, current_soc, max_power"},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
-        optimizer = EVChargingOptimizer()
-        recommendation = optimizer.get_charging_recommendation(
-            vehicle_id, target_soc, current_soc, max_power
+        load_power_kw = station_data.get('load_power', 0) / 1000.0
+        grid_voltage = station_data.get('grid_voltage', 230.0)
+        is_grid_available = bool(grid_voltage > 190.0)
+
+        latest_weather = WeatherLog.objects.order_by('-timestamp').first()
+        cloud_cover = float(latest_weather.cloud_cover) if latest_weather else 0.0
+        precipitation = float(latest_weather.precipitation_mm) if latest_weather else 0.0
+        is_raining = precipitation > 0
+
+        current_hour = timezone.localtime().hour
+        is_night_tariff = (current_hour >= 22 or current_hour < 6)
+
+        # Baseline common attributes
+        base_kwargs = {
+            'battery_soc': battery_soc,
+            'is_grid_available': is_grid_available,
+            'pv_production_kw': pv_power_kw,
+            'building_load_kw': load_power_kw,
+            'cloud_cover_percent': cloud_cover,
+            'is_raining': is_raining,
+            'weather_condition': 'clear',
+            'is_night_tariff': is_night_tariff,
+        }
+
+        # Scenario 1: 1 EV (Demand = 11kW)
+        state_1 = SystemState(
+            active_ev_sessions=1,
+            total_ev_demand_kw=11.0,
+            **base_kwargs
         )
+        decision_1 = DecisionEngine.evaluate(state_1)
         
-        return Response(recommendation)
+        # Scenario 2: 2 EVs (Demand = 22kW)
+        state_2 = SystemState(
+            active_ev_sessions=2,
+            total_ev_demand_kw=22.0,
+            **base_kwargs
+        )
+        decision_2 = DecisionEngine.evaluate(state_2)
+
+        def mode_to_str(m):
+            if isinstance(m, SystemWorkMode):
+                return m.name
+            return str(m)
+
+        def get_advice(power_allowed, target):
+            if power_allowed >= target:
+                return "Оптимално зареждане. Налична е достатъчно енергия."
+            elif power_allowed > 0:
+                return "Ограничено зареждане за предпазване на батерията."
+            else:
+                return "Липса на излишък. Зареждането ще бъде изчакване."
+
+        info_context = (f"Текуща PV мощност: {pv_power_kw:.2f}kW, "
+                        f"Консумация: {load_power_kw:.2f}kW, "
+                        f"Батерия: {battery_soc:.1f}%")
+
+        response_data = {
+            "context": info_context,
+            "scenario_1_ev": {
+                "mode": mode_to_str(decision_1.get("mode")),
+                "power_allowed": round(decision_1.get("ev_power_limit_kw", 0), 2),
+                "advice": get_advice(decision_1.get("ev_power_limit_kw", 0), 11.0)
+            },
+            "scenario_2_ev": {
+                "mode": mode_to_str(decision_2.get("mode")),
+                "power_allowed": round(decision_2.get("ev_power_limit_kw", 0), 2),
+                "advice": get_advice(decision_2.get("ev_power_limit_kw", 0), 22.0)
+            }
+        }
         
-    except (ValueError, TypeError) as e:
+        return Response(response_data)
+        
+    except Exception as e:
+        import traceback
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Charging recommendation error: {e}\\n{traceback.format_exc()}")
         return Response(
-            {"error": f"Invalid data format: {e}"},
-            status=status.HTTP_400_BAD_REQUEST
+            {"error": f"Грешка при генериране на препоръка: {e}"},
+            status=500
         )
     except Exception as e:
         logger.error(f"Failed to get charging recommendation: {e}")
@@ -479,3 +542,139 @@ def run_algorithm(request):
     except Exception as e:
         logger.error("Failed to run algorithm: %s", e, exc_info=True)
         return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+from django.http import HttpResponse
+import csv
+from datetime import timedelta
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def chart_data(request):
+    """Return timeseries data for the dashboard charts."""
+    try:
+        # Default to last 24 hours
+        time_range = request.GET.get('range', '24h')
+        
+        end_time = timezone.now()
+        if time_range == '7d':
+            start_time = end_time - timedelta(days=7)
+        elif time_range == '30d':
+            start_time = end_time - timedelta(days=30)
+        else:
+            start_time = end_time - timedelta(hours=24)
+            
+        readings = InverterReading.objects.filter(
+            timestamp__gte=start_time,
+            timestamp__lte=end_time
+        ).order_by('timestamp')
+        
+        # We might have multiple inverters. Grouping by timestamp might be needed if they report separately.
+        # But for simplicity, let's aggregate them by nearest minute or just return raw points if few.
+        # If there are many inverters, we should sum their generation power at roughly same timestamps.
+        
+        # For now, let's return raw readings formatted for Chart.js
+        labels = []
+        pv_generation = []
+        battery_soc = []
+        grid_power = []
+        building_load = []
+        
+        # To avoid massive duplicates, we can simply map them.
+        for r in readings:
+            labels.append(r.timestamp.strftime('%H:%M'))
+            pv_generation.append((r.generation_power or 0) / 1000.0) # Convert to kW
+            battery_soc.append(r.battery_soc or 0)
+            
+            # Use station_data for load if available
+            load = r.station_data.get('load_power', 0) / 1000.0 if r.station_data else 0
+            grid = (r.grid_power or 0) / 1000.0
+            
+            building_load.append(load)
+            grid_power.append(grid)
+
+        return Response({
+            'labels': labels,
+            'datasets': {
+                'pv_generation': pv_generation,
+                'battery_soc': battery_soc,
+                'building_load': building_load,
+                'grid_power': grid_power
+            }
+        })
+    except Exception as e:
+        logger.error(f"Error in chart_data: {e}")
+        return Response({"error": str(e)}, status=500)
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def export_chart_csv(request):
+    """Export chart data as CSV."""
+    time_range = request.GET.get('range', '24h')
+    
+    end_time = timezone.now()
+    if time_range == '7d':
+        start_time = end_time - timedelta(days=7)
+    elif time_range == '30d':
+        start_time = end_time - timedelta(days=30)
+    else:
+        start_time = end_time - timedelta(hours=24)
+        
+    readings = InverterReading.objects.filter(
+        timestamp__gte=start_time,
+        timestamp__lte=end_time
+    ).order_by('timestamp')
+
+    response = HttpResponse(content_type='text/csv')
+    response['Content-Disposition'] = f'attachment; filename="energy_data_{time_range}.csv"'
+
+    writer = csv.writer(response)
+    writer.writerow(['Timestamp', 'Inverter SN', 'PV Generation (kW)', 'Battery SOC (%)', 'Load Power (kW)', 'Grid Power (kW)'])
+
+    for r in readings:
+        load = r.station_data.get('load_power', 0) / 1000.0 if r.station_data else 0
+        pv = (r.generation_power or 0) / 1000.0
+        grid = (r.grid_power or 0) / 1000.0
+        
+        writer.writerow([
+            r.timestamp.strftime('%Y-%m-%d %H:%M:%S'),
+            r.inverter.device_sn,
+            f"{pv:.2f}",
+            f"{r.battery_soc or 0:.1f}",
+            f"{load:.2f}",
+            f"{grid:.2f}"
+        ])
+
+    return response
+
+@api_view(['POST'])
+def start_charging_session(request):
+    """
+    Starts a simulated charging session in the chosen mode (Auto/Manual).
+    This tells the background algorithm that a car is connected and charging should be managed dynamically.
+    """
+    from renew_website.apps.charging_stations.models import Transaction, Connector
+    
+    mode = request.data.get('mode', 'DYNAMIC_ECO_SOLAR_ONLY')
+    
+    # Just take the first available connector to simulate
+    connector = Connector.objects.first()
+    if not connector:
+        return Response({'success': False, 'message': 'Няма налични зарядни конектори в системата.'})
+        
+    # Check if a session already exists for this connector
+    active_txn = Transaction.objects.filter(connector=connector, stopped_at__isnull=True).first()
+    if active_txn:
+        return Response({'success': False, 'message': 'Вече има активна зарядна сесия на този конектор.'})
+        
+    # Create the new dynamic session (requested_power_kw=None means "Auto Mode" for algorithm)
+    Transaction.objects.create(
+        connector=connector,
+        id_tag='SIMULATED_DASHBOARD_USER',
+        requested_power_kw=None,
+        status='active'
+    )
+    
+    return Response({
+        'success': True, 
+        'message': f'Успешно стартирано зареждане в режим: {mode}. Алгоритъмът вече управлява мощността динамично.'
+    })

@@ -54,7 +54,8 @@ def fetch_inverter_telemetry():
         inverter_data_received.send(
             sender="deye_telemetry", 
             inverter_comp=inverter_comp, 
-            battery_comp=battery_comp
+            battery_comp=battery_comp,
+            data_dict=data
         )
 
         logger.debug(f"Прочетени данни от Deye: PV={inverter_comp.pv_production_kw}kW, SOC={battery_comp.soc_percentage}%")
