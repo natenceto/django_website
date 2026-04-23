@@ -50,7 +50,7 @@ services:
     environment:
       - DEBUG=1
       - SECRET_KEY=${SECRET_KEY:-dev-secret-key}
-      - ALLOWED_HOSTS=localhost,127.0.0.1,web,192.168.122.246,*
+      - ALLOWED_HOSTS=localhost,127.0.0.1,web,192.168.88.247,*
       - POSTGRES_DB=${POSTGRES_DB:-renew_db}
       - POSTGRES_USER=${POSTGRES_USER:-renew_user}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-changeme}

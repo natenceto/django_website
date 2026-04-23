@@ -11,7 +11,7 @@ from django.utils import timezone
 from rest_framework.views import APIView
 
 from .services import InverterDataService, EVChargingOptimizer
-from .models import InverterReading, WorkMode
+from .models import InverterReading, WorkMode, EnergyRecommendation
 from .serializers import (
     InverterReadingSerializer, 
     DashboardDataSerializer,
@@ -678,3 +678,175 @@ def start_charging_session(request):
         'success': True, 
         'message': f'Успешно стартирано зареждане в режим: {mode}. Алгоритъмът вече управлява мощността динамично.'
     })
+
+
+# ==============================
+# Energy Recommendations API
+# ==============================
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def energy_recommendations(request):
+    """Get current energy recommendations from the algorithm."""
+    try:
+        # Get latest pending recommendation
+        recommendation = EnergyRecommendation.get_latest_pending()
+        
+        if not recommendation:
+            return Response({
+                'has_recommendation': False,
+                'message': 'Няма активни препоръки от алгоритъма'
+            })
+        
+        # Calculate time until expiration
+        time_until_expiry = (recommendation.expires_at - timezone.now()).total_seconds()
+        
+        response_data = {
+            'has_recommendation': True,
+            'recommendation': {
+                'id': recommendation.id,
+                'mode': recommendation.mode,
+                'ev_power_limit_kw': recommendation.ev_power_limit_kw,
+                'power_per_station_kw': recommendation.power_per_station_kw,
+                'active_ev_sessions': recommendation.active_ev_sessions,
+                'system_state': {
+                    'battery_soc': recommendation.battery_soc,
+                    'pv_production_kw': recommendation.pv_production_kw,
+                    'building_load_kw': recommendation.building_load_kw,
+                },
+                'expires_in_seconds': int(time_until_expiry),
+                'expires_at': recommendation.expires_at.isoformat(),
+                'created_at': recommendation.created_at.isoformat(),
+                'algorithm_data': recommendation.algorithm_data
+            }
+        }
+        
+        return Response(response_data)
+        
+    except Exception as e:
+        logger.error(f"Failed to get energy recommendations: {e}")
+        return Response(
+            {"error": str(e)}, 
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def apply_energy_recommendation(request, recommendation_id):
+    """Apply a specific energy recommendation."""
+    try:
+        recommendation = EnergyRecommendation.objects.get(id=recommendation_id)
+        
+        if recommendation.status != 'pending':
+            return Response({
+                'success': False,
+                'message': f'Препоръката вече е {recommendation.get_status_display()}'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Check if recommendation has expired
+        if timezone.now() > recommendation.expires_at:
+            recommendation.status = 'expired'
+            recommendation.save()
+            return Response({
+                'success': False,
+                'message': 'Препоръката е изтекла'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Apply the recommendation
+        success, message = recommendation.apply_recommendation()
+        
+        if success:
+            return Response({
+                'success': True,
+                'message': message,
+                'applied_at': recommendation.applied_at.isoformat()
+            })
+        else:
+            return Response({
+                'success': False,
+                'message': message
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            
+    except EnergyRecommendation.DoesNotExist:
+        return Response({
+            'success': False,
+            'message': 'Препоръката не е намерена'
+        }, status=status.HTTP_404_NOT_FOUND)
+    except Exception as e:
+        logger.error(f"Failed to apply energy recommendation: {e}")
+        return Response(
+            {"error": str(e)}, 
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def ignore_energy_recommendation(request, recommendation_id):
+    """Ignore a specific energy recommendation."""
+    try:
+        recommendation = EnergyRecommendation.objects.get(id=recommendation_id)
+        
+        if recommendation.status != 'pending':
+            return Response({
+                'success': False,
+                'message': f'Препоръката вече е {recommendation.get_status_display()}'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        recommendation.status = 'ignored'
+        recommendation.save()
+        
+        return Response({
+            'success': True,
+            'message': 'Препоръката е игнорирана'
+        })
+            
+    except EnergyRecommendation.DoesNotExist:
+        return Response({
+            'success': False,
+            'message': 'Препоръката не е намерена'
+        }, status=status.HTTP_404_NOT_FOUND)
+    except Exception as e:
+        logger.error(f"Failed to ignore energy recommendation: {e}")
+        return Response(
+            {"error": str(e)}, 
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def energy_recommendations_history(request):
+    """Get history of energy recommendations."""
+    try:
+        limit = int(request.query_params.get('limit', 20))
+        recommendations = EnergyRecommendation.objects.all().order_by('-created_at')[:limit]
+        
+        history_data = []
+        for rec in recommendations:
+            history_data.append({
+                'id': rec.id,
+                'mode': rec.mode,
+                'ev_power_limit_kw': rec.ev_power_limit_kw,
+                'power_per_station_kw': rec.power_per_station_kw,
+                'status': rec.status,
+                'active_ev_sessions': rec.active_ev_sessions,
+                'battery_soc': rec.battery_soc,
+                'pv_production_kw': rec.pv_production_kw,
+                'created_at': rec.created_at.isoformat(),
+                'applied_at': rec.applied_at.isoformat() if rec.applied_at else None,
+                'expires_at': rec.expires_at.isoformat()
+            })
+        
+        return Response({
+            'history': history_data,
+            'total_count': EnergyRecommendation.objects.count()
+        })
+        
+    except Exception as e:
+        logger.error(f"Failed to get energy recommendations history: {e}")
+        return Response(
+            {"error": str(e)}, 
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )

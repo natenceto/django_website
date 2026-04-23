@@ -128,3 +128,95 @@ class WorkMode(models.Model):
                 control_mode='manual',
                 is_active=True
             )
+
+
+class EnergyRecommendation(models.Model):
+    """Algorithm recommendations for energy management."""
+    
+    RECOMMENDATION_STATUS = [
+        ('pending', 'Pending'),
+        ('applied', 'Applied'),
+        ('ignored', 'Ignored'),
+        ('expired', 'Expired'),
+    ]
+    
+    # Algorithm decision data
+    mode = models.CharField(max_length=50, help_text="Recommended mode by algorithm")
+    ev_power_limit_kw = models.FloatField(help_text="Total power limit for EV charging")
+    power_per_station_kw = models.FloatField(help_text="Power per station")
+    
+    # System state snapshot
+    battery_soc = models.FloatField(help_text="Battery SOC at time of recommendation")
+    pv_production_kw = models.FloatField(help_text="PV production at time of recommendation")
+    building_load_kw = models.FloatField(help_text="Building load at time of recommendation")
+    active_ev_sessions = models.IntegerField(help_text="Number of active EV sessions")
+    
+    # Status and tracking
+    status = models.CharField(
+        max_length=10,
+        choices=RECOMMENDATION_STATUS,
+        default='pending'
+    )
+    applied_at = models.DateTimeField(null=True, blank=True)
+    expires_at = models.DateTimeField(help_text="When this recommendation expires")
+    
+    # Additional data
+    algorithm_data = models.JSONField(default=dict, help_text="Additional algorithm data")
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['status', 'created_at']),
+            models.Index(fields=['expires_at']),
+        ]
+    
+    def __str__(self):
+        return f"Recommendation: {self.mode} - {self.status}"
+    
+    def apply_recommendation(self):
+        """Apply this recommendation to all active stations."""
+        if self.status != 'pending':
+            return False, "Recommendation already processed"
+        
+        try:
+            from renew_website.apps.charging_stations.tasks import set_charging_power_limit
+            from renew_website.apps.charging_stations.models import Station, Transaction
+            
+            # Get active stations
+            active_transactions = Transaction.objects.filter(
+                stopped_at__isnull=True
+            )
+            active_stations = Station.objects.filter(
+                id__in=active_transactions.values_list('connector__station_id', flat=True)
+            )
+            
+            # Apply power limit to each station
+            power_per_station_w = int(self.power_per_station_kw * 1000)
+            
+            for station in active_stations:
+                set_charging_power_limit.delay(station.id, power_per_station_w)
+            
+            # Update status
+            self.status = 'applied'
+            self.applied_at = timezone.now()
+            self.save()
+            
+            return True, f"Applied to {len(active_stations)} stations"
+            
+        except Exception as e:
+            return False, str(e)
+    
+    @classmethod
+    def get_latest_pending(cls):
+        """Get the latest pending recommendation."""
+        return cls.objects.filter(status='pending').order_by('-created_at').first()
+    
+    @classmethod
+    def expire_old_recommendations(cls):
+        """Mark old recommendations as expired."""
+        cutoff_time = timezone.now()
+        cls.objects.filter(
+            status='pending',
+            expires_at__lt=cutoff_time
+        ).update(status='expired')

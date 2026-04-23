@@ -1208,6 +1208,10 @@ class ChargePointConsumer(AsyncWebsocketConsumer):
             self.ws_wrapper = WebSocketWrapper(self)
             self.cp = ChargePoint(self.station_id, self.ws_wrapper, self)
             self.cp_task = asyncio.create_task(self.cp.start())
+            
+            # Изпрати статус ъпдейт до UI, че станцията е свързана
+            await self.broadcast_station_status(self.station_id, "active", "station_connected")
+            
         except Exception as e:
             station_logger.error("CP task failed: %s", str(e))
             await self.close()

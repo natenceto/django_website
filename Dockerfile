@@ -51,9 +51,10 @@ COPY --chown=appuser:appuser requirements/prod.txt requirements.txt
 RUN pip install --upgrade pip && pip install -r requirements.txt
 
 # -----------------------
-# Collect static files
+# Verify Django installation and collect static files
 # -----------------------
-RUN python manage.py collectstatic --noinput --clear
+RUN python -c "import django; print('Django version:', django.get_version())" && \
+    python manage.py collectstatic --noinput --clear
 
 # -----------------------
 # Expose port

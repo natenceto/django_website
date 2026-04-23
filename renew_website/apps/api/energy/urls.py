@@ -17,6 +17,12 @@ urlpatterns = [
     # EV charging optimization
     path('charging/recommendation/', views.charging_recommendation, name='charging-recommendation'),
     
+    # Energy Recommendations (NEW)
+    path('recommendations/', views.energy_recommendations, name='energy-recommendations'),
+    path('recommendations/<int:recommendation_id>/apply/', views.apply_energy_recommendation, name='apply-energy-recommendation'),
+    path('recommendations/<int:recommendation_id>/ignore/', views.ignore_energy_recommendation, name='ignore-energy-recommendation'),
+    path('recommendations/history/', views.energy_recommendations_history, name='energy-recommendations-history'),
+    
     # Data management
     path('data/collect/', views.collect_data, name='collect-data'),
     path('dashboard/api/', views.dashboard_data, name='dashboard'),

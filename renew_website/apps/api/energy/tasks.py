@@ -10,9 +10,7 @@ from renew_website.apps.charging_stations.models import Station, Transaction
 # Импорт за логиката на новия алгоритъм
 from renew_website.apps.algorithm.conditions import SystemState
 from renew_website.apps.algorithm.engine import DecisionEngine
-
-# Импорт на изпълнителната задача към зарядните станции
-from renew_website.apps.charging_stations.tasks import set_charging_power_limit
+from renew_website.apps.api.energy.models import EnergyRecommendation
 
 logger = logging.getLogger(__name__)
 
@@ -57,10 +55,9 @@ def run_energy_management_algorithm():
         current_hour = timezone.localtime().hour
         is_night_tariff = (current_hour >= 22 or current_hour < 6)
 
-        # 3. Активни станции (в автоматичен режим - където requested_power_kw e None)
+        # 3. Активни станции (всички активни сесии, не само автоматични)
         active_transactions = Transaction.objects.filter(
-            stopped_at__isnull=True,
-            requested_power_kw__isnull=True # Само тези станции, които са на режим "Авто"
+            stopped_at__isnull=True  # Всички активни сесии
         )
         
         active_count = active_transactions.count()
@@ -91,21 +88,42 @@ def run_energy_management_algorithm():
         
         logger.info(f"Engine Decision: Mode={mode}, Allowed UV Total Power: {total_ev_allowed_kw:.2f}kW")
 
-        # 6. Разпределяне на станция
-        power_per_station_w = int((total_ev_allowed_kw / active_count) * 1000)
+        # 6. Разпределяне на мощността
+        power_per_station_kw = total_ev_allowed_kw / active_count
         
         # Ако алгоритъмът е пуснал малко мощност (подобно на капка), което е под минимума 6A, спираме.
-        if power_per_station_w > 0 and power_per_station_w < MIN_SAFE_CHARGE_POWER:
-            power_per_station_w = 0 # Спираме изцяло
+        if power_per_station_kw > 0 and power_per_station_kw < (MIN_SAFE_CHARGE_POWER / 1000):
+            power_per_station_kw = 0  # Спираме изцяло
             
-        power_per_station_w = min(power_per_station_w, MAX_POWER_PER_STATION)
+        power_per_station_kw = min(power_per_station_kw, MAX_POWER_PER_STATION / 1000)
 
-        active_stations = Station.objects.filter(
-            id__in=active_transactions.values_list('connector__station_id', flat=True)
+        # 7. Създаване на recommendation вместо автоматично изпълнение
+        recommendation = EnergyRecommendation.objects.create(
+            mode=str(mode),
+            ev_power_limit_kw=total_ev_allowed_kw,
+            power_per_station_kw=power_per_station_kw,
+            battery_soc=battery_soc,
+            pv_production_kw=pv_power_kw,
+            building_load_kw=load_power_kw,
+            active_ev_sessions=active_count,
+            expires_at=timezone.now() + timezone.timedelta(minutes=15),  # Изтича след 15 минути
+            algorithm_data={
+                "decision": decision,
+                "state": {
+                    "is_grid_available": is_grid_available,
+                    "cloud_cover_percent": cloud_cover,
+                    "is_raining": is_raining,
+                    "weather_condition": weather_cond,
+                    "is_night_tariff": is_night_tariff
+                }
+            }
         )
         
-        for station in active_stations:
-            set_charging_power_limit.delay(station.id, power_per_station_w)
+        # Изчисти стари recommendations
+        EnergyRecommendation.expire_old_recommendations()
+        
+        logger.info(f"Created recommendation {recommendation.id}: {mode} at {power_per_station_kw:.2f}kW per station")
+        logger.info(f"Recommendation expires at: {recommendation.expires_at}")
             
     except Exception as e:
         logger.error(f"Грешка при изпълнение на Energy Management алгоритъма: {e}")
