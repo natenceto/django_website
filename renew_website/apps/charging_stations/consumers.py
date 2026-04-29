@@ -1122,7 +1122,7 @@ class ChargePoint(OCPPChargePoint):
                 "chargingProfileKind": "Absolute",
                 "chargingSchedule": {
                     "chargingRateUnit": "W",
-                    "chargingSchedulePeriod": [{"startPeriod": 0, "limit": float(requested_power_kw) * 1000.0}],
+                    "chargingSchedulePeriod": [{"startPeriod": 0, "limit": round(float(requested_power_kw) * 1000.0, 1)}],
                 },
             }
             ocpp_logger.info(f"Created charging profile for {requested_power_kw}kW: {charging_profile}")

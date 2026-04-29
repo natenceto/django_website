@@ -20,6 +20,25 @@ MIN_SAFE_CHARGE_POWER = 1380  # 6A * 230V (Минимум стандарт за 
 
 
 @shared_task
+def store_inverter_readings_task():
+    """
+    Периодична задача за събиране и записване на inverter данни в базата.
+    Извиква се на всеки 5 минути от Celery Beat.
+    """
+    from .services import InverterDataService
+    
+    try:
+        logger.info("Стартиране на задача за събиране на inverter данни.")
+        service = InverterDataService()
+        service.collect_current_data()
+        logger.info("Inverter данни успешно събрани и записани.")
+        return "Success"
+    except Exception as e:
+        logger.error(f"Грешка при събиране на inverter данни: {e}")
+        return f"Error: {e}"
+
+
+@shared_task
 def run_energy_management_algorithm():
     """
     "Мозъкът" на системата (EDA Event processor).

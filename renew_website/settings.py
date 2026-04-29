@@ -394,5 +394,9 @@ CELERY_BEAT_SCHEDULE = {
     'fetch-inverter-every-5-minutes': {
         'task': 'renew_website.apps.api.deye.tasks.fetch_inverter_telemetry',
         'schedule': crontab(minute='*/5'),
+    },
+    'store-inverter-readings-every-5-minutes': {
+        'task': 'renew_website.apps.api.energy.tasks.store_inverter_readings_task',
+        'schedule': crontab(minute='*/5'),
     }
 }
