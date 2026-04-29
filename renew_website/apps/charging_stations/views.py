@@ -104,35 +104,34 @@ def stations(request: HttpRequest) -> HttpResponse:
             from datetime import datetime, timezone
             
             # Get a valid RFID tag from the database, create one if none exists
-            valid_rfid = UserRFID.objects.first()
+            valid_rfid = UserRFID.objects.filter(tag="000000010160897").first()
             if not valid_rfid:
-                # Create a default RFID tag for testing
+                # Create the specific RFID tag for testing
                 valid_rfid = UserRFID.objects.create(
-                    tag="19",
+                    tag="000000010160897",
                     owner_name="Default Test Tag"
                 )
                 print(f"Created default RFID tag: {valid_rfid.tag}")
+            else:
+                print(f"Using existing RFID tag: {valid_rfid.tag}")
             
             results = []
             success_count = 0
             error_count = 0
             
             for station_id in station_ids:
-                # Convert station_id to int for ACTIVE_STATIONS lookup
+                # Convert station_id to int for database lookup
                 station_id = int(station_id)
                 
                 print(f"Processing station {station_id}, ACTIVE_STATIONS keys: {list(ACTIVE_STATIONS.keys())}")
                 
-                # Check if station is connected
-                if station_id not in ACTIVE_STATIONS:
-                    results.append(f"Station {station_id}: Not connected")
-                    error_count += 1
-                    print(f"Station {station_id} not in ACTIVE_STATIONS")
-                    continue
+                # Don't check connection status - just try to send the command
+                # The station will handle it if it's connected, or fail gracefully if not
+                # This avoids issues with database status not being updated in time
                 
-                consumer = ACTIVE_STATIONS[station_id]
-                print(f"Found consumer for station {station_id}")
-                
+                # Use channel layer to send message to station consumer
+                # This works even if ACTIVE_STATIONS is empty (multi-process issue)
+                group_name = f"charging_stations_group_{station_id}"
                 try:
                     if action == "start":
                         # Single-connector stations use connector_id = 1 per OCPP
@@ -156,30 +155,35 @@ def stations(request: HttpRequest) -> HttpResponse:
                             station = Station.objects.get(id=station_id)
                             power_limit = station.power_output
 
-                        # Send RemoteStartTransaction command
+                        # Send RemoteStartTransaction command via channel layer
                         power_msg = f"{power_limit}kW" if power_limit else "Auto (unlimited)"
                         print(f"Sending RemoteStartTransaction to station {station_id}: connector={connector.connector_id}, id_tag={valid_rfid.tag}, power={power_msg}")
                         
                         try:
-                            # Send the command with proper response handling
+                            # Use channel layer to send command to station consumer
+                            from channels.layers import get_channel_layer
+                            channel_layer = get_channel_layer()
                             
-                            response = async_to_sync(consumer.cp.call_remote_start_transaction)(
-                                connector_id=connector.connector_id,
-                                id_tag=valid_rfid.tag,
-                                requested_power=power_limit
+                            message = {
+                                "type": "remote_start_transaction",
+                                "connector_id": connector.connector_id,
+                                "id_tag": valid_rfid.tag,
+                                "requested_power": power_limit,
+                                "station_id": station_id,
+                            }
+                            
+                            print(f"Sending message via channel layer to group charging_stations_group_{station_id}: {message}")
+                            
+                            # Send command via channel layer
+                            async_to_sync(channel_layer.group_send)(
+                                f"charging_stations_group_{station_id}",
+                                message
                             )
                             
-                            print(f"RemoteStartTransaction response: {response}")
+                            print(f"Message sent successfully")
                             
-                            # Check response status
-                            if hasattr(response, 'status') and response.status == "Accepted":
-                                power_str = f"{power_limit} kW" if power_limit else "Auto"
-                                results.append(f"Station {station_id}: Charging session started ({power_str})")
-                                success_count += 1
-                            else:
-                                status_msg = getattr(response, 'status', 'Unknown')
-                                results.append(f"Station {station_id}: Start rejected - {status_msg}")
-                                error_count += 1
+                            results.append(f"Station {station_id}: RemoteStartTransaction sent successfully")
+                            success_count += 1
                             
                         except Exception as e:
                             print(f"RemoteStartTransaction failed: {e}")
@@ -196,15 +200,37 @@ def stations(request: HttpRequest) -> HttpResponse:
                         ).first()
                         
                         if active_transaction:
-                            response = async_to_sync(consumer.cp.call_remote_stop_transaction)(
-                                transaction_id=active_transaction.id
-                            )
+                            print(f"Stopping transaction {active_transaction.id} for station {station_id}")
                             
-                            if response.status == "Accepted":
-                                results.append(f"Station {station_id}: Charging session stopped")
+                            try:
+                                # Use channel layer to send command to station consumer
+                                from channels.layers import get_channel_layer
+                                channel_layer = get_channel_layer()
+                                
+                                message = {
+                                    "type": "remote_stop_transaction",
+                                    "transaction_id": active_transaction.id,
+                                    "station_id": station_id,
+                                }
+                                
+                                print(f"Sending stop message via channel layer to group charging_stations_group_{station_id}: {message}")
+                                
+                                # Send command via channel layer
+                                async_to_sync(channel_layer.group_send)(
+                                    f"charging_stations_group_{station_id}",
+                                    message
+                                )
+                                
+                                print(f"Stop message sent successfully")
+                                
+                                results.append(f"Station {station_id}: Stop command sent")
                                 success_count += 1
-                            else:
-                                results.append(f"Station {station_id}: Stop rejected - {response.status}")
+                                
+                            except Exception as e:
+                                print(f"Stop transaction failed: {e}")
+                                import traceback
+                                traceback.print_exc()
+                                results.append(f"Station {station_id}: Failed to stop charging - {str(e)}")
                                 error_count += 1
                         else:
                             results.append(f"Station {station_id}: No active charging session")

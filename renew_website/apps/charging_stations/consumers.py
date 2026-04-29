@@ -656,62 +656,54 @@ class ChargePoint(OCPPChargePoint):
                     if not tx:
                         return None
 
-                agg, _ = MeterValue.objects.get_or_create(
-                    transaction=tx,
-                    defaults={
-                        "value": tx.meter_start,
-                        "data": {
-                            "start": {"meter_start": tx.meter_start},
-                            "samples": [],
-                        },
-                    },
-                )
-
-                data = agg.data or {}
-                samples = data.get("samples") or []
-
-                # ---------------------------
-                # Append new samples
-                # ---------------------------
+                # Create a new MeterValue per reading
+                # Extract the latest values from the payload
+                energy_wh = None
+                power_w = None
+                
                 for mv in meter_value or []:
-                    ts = mv.get("timestamp")
-
+                    # Attempt to extract Energy.Active.Import.Register (Wh) and Power.Active.Import (W)
                     for sv in (mv.get("sampled_value") or []):
-                        if sv.get("value") is None:
+                        measurand = sv.get("measurand", "Energy.Active.Import.Register")
+                        val = sv.get("value")
+                        if not val:
                             continue
+                            
+                        try:
+                            num_val = float(val)
+                            
+                            # Usually Energy is standard Wh but can be kWh
+                            if measurand == "Energy.Active.Import.Register":
+                                if sv.get("unit") == "kWh":
+                                    num_val *= 1000
+                                energy_wh = int(num_val)
+                                
+                            # Usually Power is standard W but can be kW
+                            elif measurand == "Power.Active.Import":
+                                if sv.get("unit") == "kW":
+                                    num_val *= 1000
+                                power_w = int(num_val)
+                        except (ValueError, TypeError):
+                            pass
 
-                        samples.append(
-                            {
-                                "timestamp": ts,
-                                "value": sv.get("value"),
-                                "context": sv.get("context"),
-                                "format": sv.get("format"),
-                                "measurand": sv.get("measurand"),
-                                "phase": sv.get("phase"),
-                                "location": sv.get("location"),
-                                "unit": sv.get("unit"),
-                            }
-                        )
+                # Store raw payload just in case
+                data_dict = {"raw_payload": [mv_dict for mv_dict in (meter_value or [])]}
 
-                # ---------------------------
-                # Prevent unbounded growth (keep last 500 samples)
-                # ---------------------------
-                MAX_SAMPLES = 500
-                if len(samples) > MAX_SAMPLES:
-                    samples = samples[-MAX_SAMPLES:]
-
-                data["samples"] = samples
-                agg.data = data
-
-                # ---------------------------
-                # Persist SoC if valid
-                # ---------------------------
-                if soc_percentage is not None:
-                    agg.soc_percentage = soc_percentage
-                    agg.soc_timestamp = soc_timestamp or timezone.now()
-                    agg.soc_source = soc_source
-
-                agg.save()
+                # Send signals for processing
+                from renew_website.apps.charging_stations.tasks import process_meter_values
+                # We can call process_meter_values task (delaying it or locally)
+                try:
+                    process_meter_values.delay(
+                        station_id=self.station_id,
+                        connector_id=connector_id,
+                        transaction_id=tx.id,
+                        power_w=power_w or 0,
+                        energy_wh=energy_wh or 0,
+                        soc_percentage=soc_percentage,
+                        mv_data=data_dict
+                    )
+                except Exception as e:
+                    ocpp_logger.warning(f"Could not trigger process_meter_values: {e}")
 
                 return {
                     "station_id": self.station_id,
@@ -813,10 +805,12 @@ class ChargePoint(OCPPChargePoint):
                 data={"samples": []},
             )
 
-        mv.soc_percentage = float(soc_value)
-        mv.soc_timestamp = ts
-        mv.soc_source = source
-        mv.save(update_fields=["soc_percentage", "soc_timestamp", "soc_source"])
+        data = mv.data or {}
+        data["soc_percentage"] = float(soc_value)
+        data["soc_timestamp"] = ts
+        data["soc_source"] = source
+        mv.data = data
+        mv.save(update_fields=["data"])
 
     @on(Action.DiagnosticsStatusNotification)
     async def on_diagnostics_status_notification(self, status: str, **kwargs):
@@ -838,20 +832,35 @@ class ChargePoint(OCPPChargePoint):
         return call_result.SecurityEventNotificationPayload()
 
     @on(Action.StartTransaction)
-    async def on_start_transaction(self, connector_id: int, id_tag: str, timestamp: str, meter_start: int, **kwargs):
+    async def on_start_transaction(
+        self,
+        connector_id: int,
+        id_tag: str,
+        timestamp: str,
+        meter_start: int,
+        reservation_id: Optional[int] = None,
+        **kwargs,
+    ):
         id_tag = (id_tag or "")[:20]
 
-        try:
-            is_valid = await database_sync_to_async(
-                lambda: UserRFID.objects.filter(
-                    tag=id_tag,
-                    stations__id=self.station_id,
-                    is_active=True,
-                ).exists()
-            )()
-        except Exception:
-            ocpp_logger.exception("RFID validation error")
-            is_valid = False
+        # Заявка от платформата? Ако да, автоматично одобряваме,
+        #  без да изискваме RFID чекиране.
+        is_remote_start = (int(connector_id), id_tag) in self.pending_requested_power
+
+        if is_remote_start:
+            is_valid = True
+        else:
+            try:
+                is_valid = await database_sync_to_async(
+                    lambda: UserRFID.objects.filter(
+                        tag=id_tag,
+                        stations__id=self.station_id,
+                        is_active=True,
+                    ).exists()
+                )()
+            except Exception:
+                ocpp_logger.exception("RFID validation error")
+                is_valid = False
 
         if not is_valid:
             return call_result.StartTransactionPayload(
@@ -930,6 +939,7 @@ class ChargePoint(OCPPChargePoint):
         meter_stop: int,
         id_tag: Optional[str] = None,
         reason: Optional[str] = None,
+        transaction_data: Optional[list] = None,
         **kwargs,
     ):
         valid_reasons = {
@@ -1065,10 +1075,13 @@ class ChargePoint(OCPPChargePoint):
                 )
                 if not mv:
                     mv = MeterValue.objects.create(transaction=tx, value=tx.meter_start, data={"samples": []})
-                mv.soc_percentage = pct
-                mv.soc_timestamp = ts
-                mv.soc_source = src
-                mv.save(update_fields=["soc_percentage", "soc_timestamp", "soc_source"])
+                
+                data = mv.data or {}
+                data["soc_percentage"] = pct
+                data["soc_timestamp"] = ts
+                data["soc_source"] = src
+                mv.data = data
+                mv.save(update_fields=["data"])
                 return True
 
             ok = await update_mv()
@@ -1112,12 +1125,18 @@ class ChargePoint(OCPPChargePoint):
                     "chargingSchedulePeriod": [{"startPeriod": 0, "limit": float(requested_power_kw) * 1000.0}],
                 },
             }
+            ocpp_logger.info(f"Created charging profile for {requested_power_kw}kW: {charging_profile}")
+        else:
+            ocpp_logger.info(f"No charging profile (Auto power - station will negotiate)")
 
         req = call.RemoteStartTransactionPayload(
             connector_id=int(connector_id),
             id_tag=id_tag,
             charging_profile=charging_profile,
         )
+        
+        ocpp_logger.info(f"Sending RemoteStartTransaction: connector_id={connector_id}, id_tag={id_tag}, charging_profile={'present' if charging_profile else 'None'}")
+        
         return await self.call(req)
 
     async def call_remote_stop_transaction(self, transaction_id: int):
@@ -1170,6 +1189,8 @@ class ChargePointConsumer(AsyncWebsocketConsumer):
             get_station_logger(self.station_id).info("WS attempt: station=%s", self.station_id)
         except Exception:
             pass
+        
+        ocpp_logger.info(f"connect() called for station {self.station_id}, identity: {self.ocpp_identity}")
 
         # Избор на протокол
         offered = self.scope.get("subprotocols") or []
@@ -1178,6 +1199,8 @@ class ChargePointConsumer(AsyncWebsocketConsumer):
             chosen_subprotocol = "ocpp1.6"
         elif "OCPP1.6" in offered:
             chosen_subprotocol = "OCPP1.6"
+        
+        ocpp_logger.info(f"Chosen subprotocol: {chosen_subprotocol}")
 
         # Приемане на връзката
         try:
@@ -1207,11 +1230,8 @@ class ChargePointConsumer(AsyncWebsocketConsumer):
             self.cp = ChargePoint(self.station_id, self.ws_wrapper, self)
             self.cp_task = asyncio.create_task(self.cp.start())
             
-        except Exception as e:
-            logger.error("CP task failed: %s", str(e))
-            await self.close()
-
-
+            ocpp_logger.info(f"ChargePoint created and task started for station {self.station_id}")
+            
             def _log_cp_done(task: asyncio.Task) -> None:
                 try:
                     exc = task.exception()
@@ -1233,14 +1253,26 @@ class ChargePointConsumer(AsyncWebsocketConsumer):
                 pass
 
             self.watchdog_task = asyncio.create_task(self.liveness_watchdog())
+            ocpp_logger.info(f"Watchdog task started for station {self.station_id}")
 
             self.group_name = UI_HTML_GROUP
             await self.channel_layer.group_add(self.group_name, self.channel_name)
+            
+            ocpp_logger.info(f"Station {self.station_id} added to UI_HTML_GROUP")
+            
+            # Also add to station-specific group for commands
+            self.station_group_name = f"charging_stations_group_{self.station_id}"
+            ocpp_logger.info(f"Attempting to add station {self.station_id} to group: {self.station_group_name}")
+            await self.channel_layer.group_add(self.station_group_name, self.channel_name)
+            
+            ocpp_logger.info(f"Station {self.station_id} added to group: {self.station_group_name}")
 
             register_station(self.station_id, self)
+            
+            ocpp_logger.info(f"Station {self.station_id} registered in ACTIVE_STATIONS")
 
-        except Exception:
-            ocpp_logger.exception("Error during station initialization")
+        except Exception as e:
+            ocpp_logger.exception(f"Error during station initialization: {e}")
             await self.close(code=1011)
 
 
@@ -1295,8 +1327,34 @@ class ChargePointConsumer(AsyncWebsocketConsumer):
             await self.channel_layer.group_discard(self.group_name, self.channel_name)
         except Exception:
             pass
+        
+        try:
+            await self.channel_layer.group_discard(self.station_group_name, self.channel_name)
+        except Exception:
+            pass
 
         unregister_station(self.station_id)
+
+    async def remote_start_transaction(self, event):
+        """Handle remote start transaction command from channel layer."""
+        try:
+            connector_id = event.get("connector_id")
+            id_tag = event.get("id_tag")
+            requested_power = event.get("requested_power")
+            
+            ocpp_logger.info(f"RemoteStartTransaction command received: station={self.station_id}, connector={connector_id}, id_tag={id_tag}, power={requested_power}")
+            
+            # Call the OCPP command
+            response = await self.cp.call_remote_start_transaction(
+                connector_id=connector_id,
+                id_tag=id_tag,
+                requested_power=requested_power
+            )
+            
+            ocpp_logger.info(f"RemoteStartTransaction response: {response}")
+            
+        except Exception as e:
+            ocpp_logger.exception(f"RemoteStartTransaction failed: {e}")
 
     async def receive(self, text_data=None, bytes_data=None):
         if not text_data or not hasattr(self, "ws_wrapper"):
@@ -1314,14 +1372,64 @@ class ChargePointConsumer(AsyncWebsocketConsumer):
         except Exception:
             pass
         
-        try:
-            json.loads(text_data)
-        except Exception:
-            if text_data.strip().lower() == "ping":
-                await self.send(text_data="pong")
-            return
+        # Pass to ws_wrapper for OCPP message handling
+        if hasattr(self, "ws_wrapper"):
+            await self.ws_wrapper.feed(text_data)
 
-        await self.ws_wrapper.feed(text_data)
+    async def remote_start_transaction(self, event):
+        """Handle remote start transaction command from channel layer."""
+        try:
+            connector_id = event.get("connector_id")
+            id_tag = event.get("id_tag")
+            requested_power = event.get("requested_power")
+            
+            ocpp_logger.info(f"RemoteStartTransaction command received: station={self.station_id}, connector={connector_id}, id_tag={id_tag}, power={requested_power}")
+            
+            # Send command without waiting for response to avoid timeout issues
+            # The station will process it and update status via StatusNotification
+            try:
+                # Create the task but don't await it
+                asyncio.create_task(self.cp.call_remote_start_transaction(
+                    connector_id=connector_id,
+                    id_tag=id_tag,
+                    requested_power=requested_power
+                ))
+                ocpp_logger.info(f"RemoteStartTransaction command sent (fire-and-forget)")
+            except Exception as e:
+                ocpp_logger.warning(f"RemoteStartTransaction send failed: {e}")
+            
+        except Exception as e:
+            ocpp_logger.exception(f"RemoteStartTransaction failed: {e}")
+
+    async def remote_start_transaction_event(self, event):
+        """Handle remote start transaction command from channel layer (Channels naming convention)."""
+        ocpp_logger.info(f"remote_start_transaction_event called: station={self.station_id}, event={event}")
+        await self.remote_start_transaction(event)
+
+    async def remote_stop_transaction(self, event):
+        """Handle remote stop transaction command from channel layer."""
+        try:
+            transaction_id = event.get("transaction_id")
+            
+            ocpp_logger.info(f"RemoteStopTransaction command received: station={self.station_id}, transaction_id={transaction_id}")
+            
+            # Send command without waiting for response to avoid timeout issues
+            try:
+                # Create the task but don't await it
+                asyncio.create_task(self.cp.call_remote_stop_transaction(
+                    transaction_id=transaction_id
+                ))
+                ocpp_logger.info(f"RemoteStopTransaction command sent (fire-and-forget)")
+            except Exception as e:
+                ocpp_logger.warning(f"RemoteStopTransaction send failed: {e}")
+            
+        except Exception as e:
+            ocpp_logger.exception(f"RemoteStopTransaction failed: {e}")
+
+    async def remote_stop_transaction_event(self, event):
+        """Handle remote stop transaction command from channel layer (Channels naming convention)."""
+        ocpp_logger.info(f"remote_stop_transaction_event called: station={self.station_id}, event={event}")
+        await self.remote_stop_transaction(event)
 
     async def station_message(self, event):
         # UI_HTML_GROUP messages for templates; ignore here

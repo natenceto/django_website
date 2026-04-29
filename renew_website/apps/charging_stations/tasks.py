@@ -37,7 +37,7 @@ transaction_stopped = Signal()    # args: [sender, station_id, transaction_id, c
 # 2. ЗАДАЧИ ЗА ОБРАБОТКА НА СЪБИТИЯ (Events)
 # ==========================================
 @shared_task
-def process_meter_values(station_id, connector_id, transaction_id, power_w, energy_wh, soc_percentage=None):
+def process_meter_values(station_id, connector_id, transaction_id, power_w, energy_wh, soc_percentage=None, mv_data=None):
     """
     Извиква се от OCPP консюмъра (или външен клиент), когато дойдат нови данни за консумация.
     Записва в базата, ъпдейтва UI и изпраща сигнал към алгоритъма.
@@ -50,6 +50,7 @@ def process_meter_values(station_id, connector_id, transaction_id, power_w, ener
                 power_w=power_w,
                 energy_wh=energy_wh,
                 soc_percentage=soc_percentage,
+                data=mv_data or {},
                 timestamp=timezone.now()
             )
 

@@ -1,5 +1,6 @@
 from decimal import Decimal
 from django.db import models
+from django.utils import timezone
 
 class Station(models.Model):
     # Location
@@ -38,6 +39,7 @@ class Station(models.Model):
     def formatted_serial(self):
         """Return a formatted version of the serial number from the first connector's vendor_connector_id"""
         if not hasattr(self, '_formatted_serial'):
+            model_name = self.model or "Unknown Model"
             first_connector = self.connectors.first()
             if first_connector and first_connector.vendor_connector_id:
                 # If vendor_connector_id is in format "TACW2245324G0135" -> format as "TACW22-G0135"
@@ -45,11 +47,11 @@ class Station(models.Model):
                 if len(serial) >= 11:  # Ensure it's long enough to split
                     prefix = serial[:6]  # First 6 chars
                     suffix = serial[-5:]  # Last 5 chars
-                    self._formatted_serial = f"{prefix}-{suffix}"
+                    self._formatted_serial = f"{model_name} ({prefix}-{suffix})"
                 else:
-                    self._formatted_serial = serial
+                    self._formatted_serial = f"{model_name} ({serial})"
             else:
-                self._formatted_serial = f"Station-{self.id}"
+                self._formatted_serial = f"{model_name} - Station {self.id}"
         return self._formatted_serial
     
     def short_address(self):
@@ -254,12 +256,18 @@ class Transaction(models.Model):
 
 class MeterValue(models.Model):
     transaction = models.ForeignKey(Transaction, on_delete=models.CASCADE, related_name="meter_values")
-    timestamp = models.DateTimeField(auto_now_add=True)
-    value = models.IntegerField()
+    timestamp = models.DateTimeField(default=timezone.now, help_text="Момент на измерването")
+    value = models.IntegerField(null=True, blank=True, help_text="Стойноста на брояча (ако не се ползва energy_wh)")
+    
+    # Нови полета за графиките:
+    energy_wh = models.IntegerField(null=True, blank=True, help_text="Total energy consumed (Wh)")
+    power_w = models.IntegerField(null=True, blank=True, help_text="Current charging power (W)")
+    soc_percentage = models.FloatField(null=True, blank=True, help_text="State of Charge (%)")
+    
     data = models.JSONField(default=dict, blank=True)  # Store dictionary data for algorithms
     
     def __str__(self):
-        return f"Meter {self.value} at {self.timestamp}"
+        return f"Meter {self.energy_wh or self.value}Wh at {self.timestamp}"
     
 
 class UserRFID(models.Model):

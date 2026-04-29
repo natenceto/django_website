@@ -369,7 +369,7 @@ DEYE_LOGGER_SN = env('DEYE_LOGGER_SN', default='3117079603')
 DEYE_LOCAL_IP = env('DEYE_LOCAL_IP', default='192.168.88.254') 
 
 # Режим на свързване: 'cloud' (през интернет), 'local' (през мрежата) или 'auto'
-DEYE_CONNECTION_MODE = env('DEYE_CONNECTION_MODE', default='auto')
+DEYE_CONNECTION_MODE = env('DEYE_CONNECTION_MODE', default='cloud')
 # =============================================================================
 # Celery Configuration
 # =============================================================================

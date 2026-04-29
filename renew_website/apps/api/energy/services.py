@@ -116,69 +116,54 @@ class InverterDataService:
                 'device_id': str(device_data.get('deviceId', '')),
                 'device_type': device_data.get('deviceType', 'INVERTER'),
                 'product_id': device_data.get('productId', ''),
-                # Cannot set station_id directly as it's a FK to local Station model
-                # 'station_id': str(device_data.get('stationId', self.station_id)),
             }
         )
         
-        # Extract generation power from individual device data
-        generation_power = 0.0
-        battery_soc = 0.0
-        grid_power = 0.0
-
+        # Extract metrics from station_data (station-level data is more accurate)
+        generation_power = float(station_data.get('generationPower', 0) or 0)
+        battery_soc = float(station_data.get('batterySOC', 0) or 0)
+        grid_power = float(station_data.get('gridPower', 0) or 0)
+        
+        # If individual_data has better metrics, use them (but station_data is primary)
         if individual_data:
-            # Try to grab metrics from dataList if present
+            individual_gen = float(individual_data.get('generationPower', 0) or 0)
+            individual_soc = float(individual_data.get('batterySOC', 0) or 0)
+            individual_grid = float(individual_data.get('gridPower', 0) or 0)
+            
+            # Use individual data if station data is 0 or missing
+            generation_power = individual_gen if generation_power == 0 else generation_power
+            battery_soc = individual_soc if battery_soc == 0 else battery_soc
+            grid_power = individual_grid if grid_power == 0 else grid_power
+            
+            # Also check dataList for additional metrics
             data_list = individual_data.get('dataList', [])
             for item in data_list:
                 key = item.get('key')
-                # Deye API returns string values sometimes
                 try:
                     val = float(item.get('value', 0) or 0)
                 except (ValueError, TypeError):
                     val = 0.0
                 
-                if key in ['TotalSolarPower', 'ActivePower', 'Pac', 'GenerationPower']:
-                     generation_power = val
-                
-                if key in ['BatterySOC', 'SOC', 'BMSSOC']:
-                     battery_soc = val
-                
-                if key in ['GridActivePower', 'TotalGridPower', 'GridPower']:
-                     grid_power = val
-            
-            # If standard keys exist at root (override dataList if present and valid)
-            if individual_data.get('generationPower'): generation_power = float(individual_data['generationPower'])
-            if individual_data.get('batterySOC'): battery_soc = float(individual_data['batterySOC'])
-            if individual_data.get('gridPower'): grid_power = float(individual_data['gridPower'])
+                # Use dataList values if still 0
+                if generation_power == 0 and key in ['TotalSolarPower', 'ActivePower', 'Pac', 'GenerationPower']:
+                    generation_power = val
+                if battery_soc == 0 and key in ['BatterySOC', 'SOC', 'BMSSOC']:
+                    battery_soc = val
+                if grid_power == 0 and key in ['GridActivePower', 'TotalGridPower', 'GridPower']:
+                    grid_power = val
 
-        # Create Reading
-        InverterReading.objects.create(
+        # Create single Reading (remove duplication)
+        reading = InverterReading.objects.create(
             inverter=inverter,
             generation_power=generation_power,
             battery_soc=battery_soc,
             grid_power=grid_power,
-            connect_status=device_data.get('connectStatus', 0),
-            station_data=individual_data,
-            timestamp=timezone.now(),
-            collection_time=timezone.now()
-        )
-        
-
-        if battery_soc is None:
-            battery_soc = station_data.get('batterySOC')
-            
-        logger.info(f"Got data for {device_data['deviceSn']}: {generation_power}W, SOC {battery_soc}%")
-        
-        # Store individual inverter data
-        reading = InverterReading.objects.create(
-            inverter=inverter,
-            generation_power=generation_power,
-            battery_soc=station_data.get('batterySOC'),  # Station-level battery SOC
-            grid_power=station_data.get('gridPower'),
-            station_data=station_data,
+            station_data=station_data,  # Store station_data as primary source
             connect_status=device_data.get('connectStatus', 1),
-            collection_time=timezone.make_aware(datetime.fromtimestamp(device_data.get('collectionTime', 0)))
+            collection_time=timezone.make_aware(datetime.fromtimestamp(device_data.get('collectionTime', timezone.now().timestamp())))
         )
+        
+        logger.info(f"Stored reading for {device_data['deviceSn']}: {generation_power}W PV, SOC {battery_soc}%, Grid {grid_power}W")
         
         return reading
     

@@ -436,8 +436,8 @@
                     }
                     
                     // Handle station status updates
-                    if (data.type === 'status_update') {
-                        console.log('Received status update:', data);
+                    if (data.type === 'status_update' || data.type === 'station_status') {
+                        console.log('Received station status update:', data);
                         const stationId = data.station_id;
                         const status = data.status;
                         
@@ -449,6 +449,55 @@
                         if (connectorId) {
                             updateConnectorStatus(`${stationId}-${connectorId}`, status);
                         }
+                        return;
+                    }
+                    
+                    // Handle status snapshot (initial station status)
+                    if (data.type === 'status_snapshot' && data.stations) {
+                        console.log('Received status snapshot:', data);
+                        data.stations.forEach(station => {
+                            updateStationStatusBadge(station.station_id, station.status);
+                        });
+                        
+                        // Update dashboard counters
+                        const totalStations = document.getElementById('totalStations');
+                        const onlineStations = document.getElementById('onlineStations');
+                        const availableStations = document.getElementById('availableStations');
+                        
+                        if (totalStations) totalStations.textContent = data.stations.length;
+                        if (onlineStations) {
+                            const onlineCount = data.stations.filter(s => s.online).length;
+                            onlineStations.textContent = `${onlineCount} / ${data.stations.length}`;
+                        }
+                        if (availableStations) {
+                            const availableCount = data.stations.filter(s => s.status === 'active').length;
+                            availableStations.textContent = availableCount;
+                        }
+                        
+                        // Update progress bar
+                        const progressBar = document.getElementById('stationStatusBar');
+                        if (progressBar && data.stations.length > 0) {
+                            const onlineCount = data.stations.filter(s => s.online).length;
+                            const percentage = Math.round((onlineCount / data.stations.length) * 100);
+                            progressBar.style.width = `${percentage}%`;
+                            progressBar.setAttribute('aria-valuenow', percentage);
+                            
+                            if (percentage < 30) {
+                                progressBar.className = 'progress-bar bg-danger';
+                            } else if (percentage < 70) {
+                                progressBar.className = 'progress-bar bg-warning';
+                            } else {
+                                progressBar.className = 'progress-bar bg-success';
+                            }
+                        }
+                        
+                        // Update last update time
+                        const lastUpdate = document.getElementById('lastUpdate');
+                        if (lastUpdate) {
+                            const now = new Date();
+                            lastUpdate.textContent = now.toLocaleTimeString();
+                        }
+                        
                         return;
                     }
                     

@@ -66,12 +66,14 @@ class DeyeManager:
     def get_active_inverter(self):
         """Определя кой метод за комуникация е активен."""
         if self.master_sn:
+            # Използвай Cloud връзка за по-точни агрегирани данни
             if self.connection_mode in ["local", "auto"] and self._is_local_available():
-                 return {
-                     "device_sn": self.master_sn,
-                     "source": "local",
-                     "ip": self.local_ip
-                 }
+                # Local връзката е налична, но Cloud дава по-точни данни
+                return {
+                    "device_sn": self.master_sn,
+                    "source": "cloud",  # Принудително Cloud за точни данни
+                    "ip": self.local_ip
+                }
             return {"device_sn": self.master_sn, "source": "cloud"}
 
         master = self._find_master_via_cloud()
@@ -87,7 +89,18 @@ class DeyeManager:
             
         target_sn = device_sn or active["device_sn"]
         
-        # Опит за локално четене
+        # Използвай Cloud връзка за по-точни агрегирани данни
+        if active["source"] == "cloud":
+            try:
+                raw_response = self.cloud.get_device_latest(target_sn)
+                data_obj = self._unwrap_cloud_response(raw_response)
+                data_obj['device_sn'] = target_sn
+                data_obj['source'] = 'cloud'
+                return DeyeCloudSerializer(instance=data_obj).data
+            except Exception as e:
+                logger.warning(f"Cloud четене за {target_sn} пропадна: {e}. Fallback към Local.")
+        
+        # Fallback към локално четене
         if self.local and str(self.master_sn) == str(target_sn) and self._is_local_available():
             try:
                 raw_data = self.local.fetch_all_metrics()
@@ -96,17 +109,9 @@ class DeyeManager:
                     raw_data['source'] = 'local'
                     return DeyeLocalSerializer(instance=raw_data).data
             except Exception as e:
-                logger.warning(f"Локално четене за {target_sn} пропадна: {e}. Fallback към Cloud.")
-
-        # Четене от Облака
-        try:
-            raw_response = self.cloud.get_device_latest(target_sn)
-            data_obj = self._unwrap_cloud_response(raw_response)
-            data_obj['device_sn'] = target_sn
-            data_obj['source'] = 'cloud'
-            return DeyeCloudSerializer(instance=data_obj).data
-        except Exception as e:
-            raise DeyeManagerError(f"Cloud fetch failed: {e}")
+                logger.warning(f"Локално четене за {target_sn} пропадна: {e}.")
+        
+        raise DeyeManagerError(f"Неуспешно четене на данни от {target_sn}")
 
     def set_work_mode(self, mode_key: str) -> bool:
         """Задава базов режим на работа чрез стар мапинг."""
