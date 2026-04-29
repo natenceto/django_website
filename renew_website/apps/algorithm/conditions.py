@@ -47,21 +47,25 @@ def get_safe_battery_discharge_limit(state: SystemState) -> float:
     if not state.is_grid_available:
         return 0.0
         
-    # 2. Define minimum allowed SOC based on weather
-    min_allowed_soc = 25.0  # Sunny baseline (can go low)
+    # 2. Define absolute minimum allowed SOC
+    min_allowed_soc = 35.0  # Absolute hard minimum - never drain below this
+    
     if not is_sun_reliable(state):
-        min_allowed_soc = 35.0  # Protect heavily if weather is bad
+        min_allowed_soc = 40.0  # Protect heavily if weather is bad, raise minimum
         
     if state.is_night_tariff:
         min_allowed_soc = 50.0  # Don't drain battery during night tariff, we might need it for tomorrow
 
     # 3. Calculate available buffer
     if state.battery_soc <= min_allowed_soc:
-        return 0.0 # No battery power allowed for EVs
+        # Prevent any discharging if below the hard minimum
+        return 0.0
 
-    # We have surplus SOC. We linearly scale allowed discharge based on how full the battery is.
-    # Example: If min is 35 and we are at 40, we allow a tiny bit. If at 100, we allow Max.
+    # We do not want to *re-engage* the battery intensely if it's just barely fluttering at 36-39%.
+    # We scale the discharge based on how far above the minimum we are.
+    # At exactly minimum (35%), power = 0.
+    # We fully unlock max discharge at minimum + 5% (e.g. 40%).
     surplus_soc = state.battery_soc - min_allowed_soc
-    scale_factor = min(surplus_soc / 30.0, 1.0) # 30% above minimum unlocks full discharge power
+    scale_factor = min(surplus_soc / 5.0, 1.0) # Ramp up smoothly from 35 to 40
     
     return MAX_DISCHARGE_KW * scale_factor

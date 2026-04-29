@@ -25,13 +25,21 @@ class DecisionEngine:
         # 2. NIGHT TARIFF PROTECTION: Preemptively fill battery for tomorrow, pause EVs
         # (Assuming you don't want EVs stealing cheap grid directly without control, 
         # or maybe you do? For now, we protect battery if it's very low)
-        if state.is_night_tariff and state.battery_soc < 30.0:
+        if state.is_night_tariff and state.battery_soc < 50.0:
             return {
                 "mode": SystemWorkMode.PROTECT_BATTERY,
                 "ev_power_limit_kw": 0.0 
             }
 
-        # 3. STANDARD OPERATION: Calculate dynamic EV load limit
+        # 3. PRIORITY BATTERY CHARGING: Strong solar and low consumption
+        # If PV > 5kW, Load < 15kW, and battery needs charging, prioritize filling the battery first
+        if state.pv_production_kw > 5.0 and state.building_load_kw < 15.0 and state.battery_soc < 98.0:
+            return {
+                "mode": SystemWorkMode.CHARGE_BATTERY,
+                "ev_power_limit_kw": 0.0
+            }
+
+        # 4. STANDARD OPERATION: Calculate dynamic EV load limit
         return cls._calculate_dynamic_balances(state)
 
     @classmethod
@@ -73,9 +81,14 @@ class DecisionEngine:
             allowed_battery_discharge_kw = 0.0
             available_eco_power_kw = net_pv_surplus_kw
             mode = SystemWorkMode.DYNAMIC_ECO_SOLAR_ONLY
-        elif not is_weather_good and state.battery_soc > 20.0:
-            # Bad weather, but we still have a bit of buffer
+        elif not is_weather_good and state.battery_soc >= 40.0:
+            # Bad weather, but we still have a buffer above our 40% threshold to start using it
             # Keep battery discharge at whatever `get_safe_battery_discharge_limit` said
+            mode = SystemWorkMode.DYNAMIC_ECO_SOLAR_ONLY
+        elif not is_weather_good and state.battery_soc < 40.0:
+            # Bad weather and below 40% - strictly no battery allowed!
+            allowed_battery_discharge_kw = 0.0
+            available_eco_power_kw = net_pv_surplus_kw
             mode = SystemWorkMode.DYNAMIC_ECO_SOLAR_ONLY
             
         return {
