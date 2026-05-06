@@ -93,12 +93,12 @@ uvicorn renew_website.asgi:application --host 0.0.0.0 --port 8000 --reload
 
 1. **Development with Docker**
 ```bash
-docker-compose up -d
+docker compose up -d
 ```
 
 2. **Production with Docker**
 ```bash
-docker-compose -f docker-compose.prod.yml up -d
+docker compose -f docker-compose.prod.yml up -d
 ```
 
 ## Key Packages
@@ -229,7 +229,7 @@ CSRF_TRUSTED_ORIGINS=https://yourdomain.com
 
 ### Docker Production
 ```bash
-docker-compose -f docker-compose.prod.yml up -d
+docker compose -f docker-compose.prod.yml up -d
 ```
 
 ### Static Files
@@ -258,7 +258,7 @@ python manage.py collectstatic --noinput
 
 ### Logs
 - Application logs: `logs/django.log`
-- Docker logs: `docker-compose logs -f web`
+- Docker logs: `docker compose logs -f web`
 
 ## Contributing
 

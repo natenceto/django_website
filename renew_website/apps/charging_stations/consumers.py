@@ -87,10 +87,10 @@ def track_ws_performance(station_id: str, message_size: int, direction: str):
     
     if should_save:
         try:
-            _save_ws_metric_to_db(self.station_id, stats)
+            _save_ws_metric_to_db(station_id, stats)
             stats['db_save_count'] += 1
         except Exception as e:
-            get_station_logger(self.station_id).warning(f"Failed to save WebSocket metric to DB: {e}")
+            get_station_logger(station_id).warning(f"Failed to save WebSocket metric to DB: {e}")
 
 
 def _save_ws_metric_to_db(station_id: Union[int, str], stats: Dict[str, Any]):
@@ -357,6 +357,33 @@ class ChargePoint(OCPPChargePoint):
     async def on_boot_notification(self, charge_point_vendor: str, charge_point_model: str, **kwargs):
         station_id = self.station_id
         station_logger = get_station_logger(self.station_id)
+        
+        self.heartbeat_interval = int(getattr(self, "default_heartbeat_interval", 60))
+
+        @database_sync_to_async
+        def check_station_exists():
+            return Station.objects.filter(id=station_id).exists()
+
+        try:
+            station_exists = await check_station_exists()
+        except Exception:
+            ocpp_logger.exception("Error validating station existence")
+            station_exists = False
+
+        if not station_exists:
+            station_logger.warning(f"BootNotification rejected: Station {station_id} not found in database.")
+            current_time = (
+                timezone.now()
+                .astimezone(py_datetime.timezone.utc)
+                .replace(microsecond=0)
+                .isoformat()
+                .replace("+00:00", "Z")
+            )
+            return call_result.BootNotificationPayload(
+                status=RegistrationStatus.rejected,
+                current_time=current_time,
+                interval=self.heartbeat_interval,
+            )
 
         get_station_logger(self.station_id).info("=== OCPP 1.6 BootNotification ===")
         get_station_logger(self.station_id).info(f"Station ID: {station_id}")
@@ -367,7 +394,6 @@ class ChargePoint(OCPPChargePoint):
         if firmware_version:
             get_station_logger(self.station_id).info(f"Firmware: {firmware_version}")
 
-        self.heartbeat_interval = int(getattr(self, "default_heartbeat_interval", 60))
         get_station_logger(self.station_id).info(f"Heartbeat interval: {self.heartbeat_interval}s")
 
         try:
@@ -399,7 +425,7 @@ class ChargePoint(OCPPChargePoint):
             is_valid = await database_sync_to_async(
                 lambda: UserRFID.objects.filter(
                     tag=id_tag,
-                    stations__id=self.station_id,
+                    stations__id=self.station_id,  # station_id is already normalized to int (PK)
                     is_active=True,
                 ).exists()
             )()
@@ -455,6 +481,15 @@ class ChargePoint(OCPPChargePoint):
                     asyncio.create_task(self._update_station_status_async("active", "status0"))
                 elif s in {"faulted", "unavailable"}:
                     asyncio.create_task(self._update_station_status_async("inactive", "status0"))
+                    
+                # Update last status on Station model
+                @database_sync_to_async
+                def update_station_last_status():
+                    st = Station.objects.filter(id=station_id).first()
+                    if st:
+                        st.last_status = s
+                        st.save(update_fields=['last_status'])
+                asyncio.create_task(update_station_last_status())
             except Exception:
                 ocpp_logger.exception("Failed scheduling station status update for connectorId=0")
             return call_result.StatusNotificationPayload()
@@ -464,18 +499,17 @@ class ChargePoint(OCPPChargePoint):
 
                 @database_sync_to_async
                 def upsert_connector():
-                    conn, created = Connector.objects.get_or_create(
+                    # Use update_or_create to avoid unique_together integrity errors under load
+                    conn, created = Connector.objects.update_or_create(
                         station_id=station_id,
                         connector_id=int(connector_id),
                         defaults={"status": normalized},
                     )
                     changed = False
-                    old = conn.status
-                    if old != normalized:
-                        conn.status = normalized
-                        conn.save(update_fields=["status"])
-                        changed = True
-                    return conn.id, created, changed, old
+                    # We don't have the old status nicely with update_or_create unless we fetch first, 
+                    # but it's okay because we are saving it anyway. 
+                    # For consistency, we'll just return True for change if it was created.
+                    return conn.id, created, created, normalized
 
                 connector_pk, created, changed, old = await upsert_connector()
 
@@ -529,34 +563,46 @@ class ChargePoint(OCPPChargePoint):
         station_id = self.station_id
         station_logger = get_station_logger(self.station_id)
 
+        # Uses Django cache (Redis ideally) instead of global mem structures to support multiple workers
+        from django.core.cache import cache
         LOG_THROTTLE = 60
         DB_UPDATE_THROTTLE = 15
         RAPID_COUNT_LIMIT = 10
 
         now_ts = timezone.now()
+        now_ts_sec = now_ts.timestamp()
+        
+        last_log_key = f"hb_log_{station_id}"
+        last_db_key = f"hb_db_{station_id}"
+        rapid_count_key = f"hb_counts_{station_id}"
+        rapid_window_key = f"hb_window_{station_id}"
 
-        last_log = _last_heartbeat_log.get(station_id)
-        if not last_log or (now_ts - last_log).total_seconds() >= LOG_THROTTLE:
+        last_log = cache.get(last_log_key)
+        if not last_log or (now_ts_sec - last_log) >= LOG_THROTTLE:
             get_station_logger(self.station_id).info("Heartbeat received")
-            _last_heartbeat_log[station_id] = now_ts
+            cache.set(last_log_key, now_ts_sec, timeout=LOG_THROTTLE*2)
 
-        last_db = _last_heartbeat_db_update.get(station_id)
-        if not last_db or (now_ts - last_db).total_seconds() >= DB_UPDATE_THROTTLE:
-            _last_heartbeat_db_update[station_id] = now_ts
+        last_db = cache.get(last_db_key)
+        if not last_db or (now_ts_sec - last_db) >= DB_UPDATE_THROTTLE:
+            cache.set(last_db_key, now_ts_sec, timeout=DB_UPDATE_THROTTLE*2)
             try:
                 await self._touch_station_last_seen()
             except Exception:
                 ocpp_logger.exception("Failed updating station last_seen")
 
-        window = _rapid_heartbeat_count.setdefault(station_id, {"count": 0, "window_start": now_ts})
-        if (now_ts - window["window_start"]).total_seconds() < LOG_THROTTLE:
-            window["count"] += 1
+        window_start = cache.get(rapid_window_key) or now_ts_sec
+        count = cache.get(rapid_count_key) or 0
+        if (now_ts_sec - window_start) < LOG_THROTTLE:
+            count += 1
+            cache.set(rapid_count_key, count, timeout=LOG_THROTTLE*2)
+            cache.set(rapid_window_key, window_start, timeout=LOG_THROTTLE*2)
         else:
-            window["count"] = 1
-            window["window_start"] = now_ts
+            cache.set(rapid_count_key, 1, timeout=LOG_THROTTLE*2)
+            cache.set(rapid_window_key, now_ts_sec, timeout=LOG_THROTTLE*2)
+            count = 1
 
-        if window["count"] > RAPID_COUNT_LIMIT:
-            get_station_logger(self.station_id).warning(f"Rapid heartbeats detected ({window['count']} in {LOG_THROTTLE}s)")
+        if count > RAPID_COUNT_LIMIT:
+            get_station_logger(self.station_id).warning(f"Rapid heartbeats detected ({count} in {LOG_THROTTLE}s)")
 
         current_time = (
             now_ts.astimezone(py_datetime.timezone.utc)
@@ -652,6 +698,20 @@ class ChargePoint(OCPPChargePoint):
                         .order_by("-started_at", "-id")
                         .first()
                     )
+                    
+                    if not tx:
+                        # Fallback for meter values arriving just after stop transaction
+                        five_mins_ago = timezone.now() - py_datetime.timedelta(minutes=5)
+                        tx = (
+                            Transaction.objects
+                            .filter(
+                                connector__station_id=self.station_id,
+                                status="completed",
+                                stopped_at__gte=five_mins_ago
+                            )
+                            .order_by("-stopped_at", "-id")
+                            .first()
+                        )
 
                     if not tx:
                         return None
@@ -676,13 +736,13 @@ class ChargePoint(OCPPChargePoint):
                             if measurand == "Energy.Active.Import.Register":
                                 if sv.get("unit") == "kWh":
                                     num_val *= 1000
-                                energy_wh = int(num_val)
+                                energy_wh = round(num_val)  # handles large decimal numbers seamlessly 
                                 
                             # Usually Power is standard W but can be kW
                             elif measurand == "Power.Active.Import":
                                 if sv.get("unit") == "kW":
                                     num_val *= 1000
-                                power_w = int(num_val)
+                                power_w = round(num_val)
                         except (ValueError, TypeError):
                             pass
 
@@ -791,26 +851,17 @@ class ChargePoint(OCPPChargePoint):
         if not tx:
             return
 
-        mv = (
-            MeterValue.objects
-            .filter(transaction=tx)
-            .order_by("-timestamp", "-id")
-            .first()
+        MeterValue.objects.create(
+            transaction=tx,
+            value=tx.meter_start,
+            timestamp=ts,
+            data={
+                "soc_percentage": float(soc_value),
+                "soc_timestamp": ts.isoformat() if hasattr(ts, 'isoformat') else ts,
+                "soc_source": source,
+                "samples": []
+            },
         )
-        if not mv:
-            mv = MeterValue.objects.create(
-                transaction=tx,
-                value=tx.meter_start,
-                timestamp=ts,
-                data={"samples": []},
-            )
-
-        data = mv.data or {}
-        data["soc_percentage"] = float(soc_value)
-        data["soc_timestamp"] = ts
-        data["soc_source"] = source
-        mv.data = data
-        mv.save(update_fields=["data"])
 
     @on(Action.DiagnosticsStatusNotification)
     async def on_diagnostics_status_notification(self, status: str, **kwargs):
@@ -893,6 +944,8 @@ class ChargePoint(OCPPChargePoint):
                     if hasattr(tx, "transaction_id"):
                         tx.transaction_id = int(tx.id)
                         tx.save(update_fields=["transaction_id"])
+                    else:
+                        tx_id_used = tx.id
 
                     MeterValue.objects.get_or_create(
                         transaction=tx,
@@ -908,7 +961,7 @@ class ChargePoint(OCPPChargePoint):
                     conn.status = "charging"
                     conn.save(update_fields=["status"])
 
-                    return int(tx.id)
+                    return int(getattr(tx, "transaction_id", tx.id))
 
             tx_pk = await create_tx()
 
@@ -971,8 +1024,16 @@ class ChargePoint(OCPPChargePoint):
                         )
                     if not tx:
                         return None
+                        
+                    # Fix Meter Value units scaling discrepancy
+                    normalized_meter_stop = meter_stop
+                    if tx.meter_start is not None and meter_stop is not None:
+                        # Ex: meter_start is 54000 (Wh), meter_stop is 54 (kWh) -> multiplier needed
+                        if meter_stop > 0 and (tx.meter_start / meter_stop) > 100:
+                            normalized_meter_stop = meter_stop * 1000
+                            ocpp_logger.warning(f"Normalized meter_stop for TX {tx.id} from {meter_stop} to {normalized_meter_stop}")
 
-                    tx.meter_stop = meter_stop
+                    tx.meter_stop = normalized_meter_stop
                     tx.stopped_at = timezone.now()
                     tx.status = "completed"
                     tx.save(update_fields=["meter_stop", "stopped_at", "status"])
@@ -985,12 +1046,12 @@ class ChargePoint(OCPPChargePoint):
                     try:
                         MeterValue.objects.create(
                             transaction=tx,
-                            value=meter_stop,
+                            value=normalized_meter_stop,
                             data={
                                 "type": "final",
                                 "ocpp_timestamp": str(timestamp),
                                 "meter_start": tx.meter_start,
-                                "meter_stop": meter_stop,
+                                "meter_stop": normalized_meter_stop,
                                 "reason": safe_reason,
                             },
                         )
@@ -1067,21 +1128,18 @@ class ChargePoint(OCPPChargePoint):
                     tx = Transaction.objects.filter(id=int(transaction_id)).first()
                 if not tx:
                     return False
-                mv = (
-                    MeterValue.objects
-                    .filter(transaction=tx)
-                    .order_by("-timestamp", "-id")
-                    .first()
-                )
-                if not mv:
-                    mv = MeterValue.objects.create(transaction=tx, value=tx.meter_start, data={"samples": []})
                 
-                data = mv.data or {}
-                data["soc_percentage"] = pct
-                data["soc_timestamp"] = ts
-                data["soc_source"] = src
-                mv.data = data
-                mv.save(update_fields=["data"])
+                MeterValue.objects.create(
+                    transaction=tx, 
+                    value=tx.meter_start,
+                    timestamp=ts,
+                    data={
+                        "soc_percentage": pct,
+                        "soc_timestamp": ts.isoformat() if hasattr(ts, 'isoformat') else ts,
+                        "soc_source": src,
+                        "samples": []
+                    }
+                )
                 return True
 
             ok = await update_mv()
@@ -1193,12 +1251,8 @@ class ChargePointConsumer(AsyncWebsocketConsumer):
         ocpp_logger.info(f"connect() called for station {self.station_id}, identity: {self.ocpp_identity}")
 
         # Избор на протокол
-        offered = self.scope.get("subprotocols") or []
-        chosen_subprotocol = None
-        if "ocpp1.6" in offered:
-            chosen_subprotocol = "ocpp1.6"
-        elif "OCPP1.6" in offered:
-            chosen_subprotocol = "OCPP1.6"
+        offered = [p.lower() for p in self.scope.get("subprotocols", [])]
+        chosen_subprotocol = "ocpp1.6" if "ocpp1.6" in offered else None
         
         ocpp_logger.info(f"Chosen subprotocol: {chosen_subprotocol}")
 
@@ -1333,7 +1387,7 @@ class ChargePointConsumer(AsyncWebsocketConsumer):
         except Exception:
             pass
 
-        unregister_station(self.station_id)
+        await database_sync_to_async(unregister_station)(self.station_id)
 
     async def remote_start_transaction(self, event):
         """Handle remote start transaction command from channel layer."""
@@ -1344,17 +1398,31 @@ class ChargePointConsumer(AsyncWebsocketConsumer):
             
             ocpp_logger.info(f"RemoteStartTransaction command received: station={self.station_id}, connector={connector_id}, id_tag={id_tag}, power={requested_power}")
             
-            # Call the OCPP command
-            response = await self.cp.call_remote_start_transaction(
-                connector_id=connector_id,
-                id_tag=id_tag,
-                requested_power=requested_power
-            )
-            
-            ocpp_logger.info(f"RemoteStartTransaction response: {response}")
+            # Send command without waiting for response to avoid timeout issues
+            # The station will process it and update status via StatusNotification
+            try:
+                # Create the task but don't await it
+                task = asyncio.create_task(self.cp.call_remote_start_transaction(
+                    connector_id=connector_id,
+                    id_tag=id_tag,
+                    requested_power=requested_power
+                ))
+                
+                # Add callback to log response (Accepted/Rejected)
+                def on_start_done(t):
+                    try:
+                        res = t.result()
+                        ocpp_logger.info(f"RemoteStartTransaction response for station={self.station_id}: {res}")
+                    except Exception as e:
+                        ocpp_logger.warning(f"RemoteStartTransaction task error: {e}")
+                task.add_done_callback(on_start_done)
+
+                ocpp_logger.info(f"RemoteStartTransaction task created (fire-and-forget)")
+            except Exception as e:
+                ocpp_logger.warning(f"RemoteStartTransaction create task failed: {e}")
             
         except Exception as e:
-            ocpp_logger.exception(f"RemoteStartTransaction failed: {e}")
+            ocpp_logger.exception(f"RemoteStartTransaction handling failed: {e}")
 
     async def receive(self, text_data=None, bytes_data=None):
         if not text_data or not hasattr(self, "ws_wrapper"):
@@ -1376,35 +1444,6 @@ class ChargePointConsumer(AsyncWebsocketConsumer):
         if hasattr(self, "ws_wrapper"):
             await self.ws_wrapper.feed(text_data)
 
-    async def remote_start_transaction(self, event):
-        """Handle remote start transaction command from channel layer."""
-        try:
-            connector_id = event.get("connector_id")
-            id_tag = event.get("id_tag")
-            requested_power = event.get("requested_power")
-            
-            ocpp_logger.info(f"RemoteStartTransaction command received: station={self.station_id}, connector={connector_id}, id_tag={id_tag}, power={requested_power}")
-            
-            # Send command without waiting for response to avoid timeout issues
-            # The station will process it and update status via StatusNotification
-            try:
-                # Create the task but don't await it
-                asyncio.create_task(self.cp.call_remote_start_transaction(
-                    connector_id=connector_id,
-                    id_tag=id_tag,
-                    requested_power=requested_power
-                ))
-                ocpp_logger.info(f"RemoteStartTransaction command sent (fire-and-forget)")
-            except Exception as e:
-                ocpp_logger.warning(f"RemoteStartTransaction send failed: {e}")
-            
-        except Exception as e:
-            ocpp_logger.exception(f"RemoteStartTransaction failed: {e}")
-
-    async def remote_start_transaction_event(self, event):
-        """Handle remote start transaction command from channel layer (Channels naming convention)."""
-        ocpp_logger.info(f"remote_start_transaction_event called: station={self.station_id}, event={event}")
-        await self.remote_start_transaction(event)
 
     async def remote_stop_transaction(self, event):
         """Handle remote stop transaction command from channel layer."""
@@ -1416,12 +1455,22 @@ class ChargePointConsumer(AsyncWebsocketConsumer):
             # Send command without waiting for response to avoid timeout issues
             try:
                 # Create the task but don't await it
-                asyncio.create_task(self.cp.call_remote_stop_transaction(
+                task = asyncio.create_task(self.cp.call_remote_stop_transaction(
                     transaction_id=transaction_id
                 ))
-                ocpp_logger.info(f"RemoteStopTransaction command sent (fire-and-forget)")
+                
+                # Add callback to log response
+                def on_stop_done(t):
+                    try:
+                        res = t.result()
+                        ocpp_logger.info(f"RemoteStopTransaction response for station={self.station_id}: {res}")
+                    except Exception as e:
+                        ocpp_logger.warning(f"RemoteStopTransaction task error: {e}")
+                task.add_done_callback(on_stop_done)
+                
+                ocpp_logger.info(f"RemoteStopTransaction task created (fire-and-forget)")
             except Exception as e:
-                ocpp_logger.warning(f"RemoteStopTransaction send failed: {e}")
+                ocpp_logger.warning(f"RemoteStopTransaction create task failed: {e}")
             
         except Exception as e:
             ocpp_logger.exception(f"RemoteStopTransaction failed: {e}")
@@ -1467,20 +1516,14 @@ class ChargePointConsumer(AsyncWebsocketConsumer):
         connector_id = int(connector_id or 1)
 
         try:
-            conn = await database_sync_to_async(
-                lambda: Connector.objects.filter(station_id=station_id, connector_id=connector_id).first()
-            )()
-
-            if not conn:
-                conn = await database_sync_to_async(Connector.objects.create)(
+            # Use update_or_create to avoid unique_together integrity errors under load
+            conn, created = await database_sync_to_async(
+                lambda: Connector.objects.update_or_create(
                     station_id=station_id,
                     connector_id=connector_id,
-                    status=connector_status,
+                    defaults={"status": connector_status},
                 )
-            else:
-                if conn.status != connector_status:
-                    conn.status = connector_status
-                    await database_sync_to_async(conn.save)(update_fields=["status"])
+            )()
 
             await self._ui_send({
                 "type": "connector_status_update",
@@ -1569,6 +1612,8 @@ class ChargePointConsumer(AsyncWebsocketConsumer):
     async def liveness_watchdog(self):
         try:
             while True:
+                if not getattr(self, "_connected", False):
+                    break
                 await asyncio.sleep(5)
                 if not hasattr(self, "cp"):
                     continue

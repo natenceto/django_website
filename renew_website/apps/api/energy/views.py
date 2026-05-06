@@ -230,6 +230,7 @@ def dashboard_data(request):
         recent_readings = service.get_latest_readings()
 
         # Get today's energy from Deye API directly (more accurate)
+        data_source = 'unknown'
         try:
             # Use Manager to get normalized data from best source (Cloud or Local)
             manager = DeyeManager()
@@ -239,8 +240,9 @@ def dashboard_data(request):
             
             daily_energy = normalized_data.get('daily_energy', 0.0)
             total_energy = normalized_data.get('total_energy', 0.0)
+            data_source = normalized_data.get('source', 'unknown')
             
-            logger.debug(f"Energy stats from Manager ({normalized_data.get('source', 'unknown')}): Daily={daily_energy}, Total={total_energy}")
+            logger.debug(f"Energy stats from Manager ({data_source}): Daily={daily_energy}, Total={total_energy}")
 
         except (DeyeManagerError, Exception) as e:
             logger.warning(f"Failed to get energy from Deye Manager: {e}")
@@ -280,6 +282,7 @@ def dashboard_data(request):
                 total_energy_today += (avg_power / 1000) * time_diff  # kWh
         
         dashboard = {
+            'connection_source': data_source,
             'current': current_data,
             'daily_stats': {
                 'total_energy_kwh': round(total_energy_today, 2),
@@ -683,6 +686,38 @@ def start_charging_session(request):
 # ==============================
 # Energy Recommendations API
 # ==============================
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def direct_apply_inverter_mode(request):
+    """Directly sends the recommended mode's Modbus commands to the inverter without needing a pending DB recommendation."""
+    try:
+        from renew_website.apps.api.deye.manager import DeyeManager
+        from renew_website.apps.api.deye.control import get_modbus_commands_for_mode
+        
+        mode = request.data.get('mode')
+        if not mode:
+            return Response({'success': False, 'message': 'Missing mode parameter'}, status=400)
+            
+        modbus_commands = get_modbus_commands_for_mode(mode)
+        
+        if not modbus_commands:
+            return Response({
+                'success': True, 
+                'message': f'Режимът {mode} не изисква промени по регистрите на инвертора.'
+            })
+            
+        deye_mgr = DeyeManager()
+        is_applied = deye_mgr.apply_modbus_commands(modbus_commands)
+        
+        if is_applied:
+            return Response({'success': True, 'message': 'Командите бяха изпратени успешно по Modbus.'})
+        else:
+            return Response({'success': False, 'message': 'Комуникацията с Deye пропадна.'})
+            
+    except Exception as e:
+        logger.error(f"Failed to directly apply inverter mode: {e}")
+        return Response({'success': False, 'message': str(e)}, status=500)
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])

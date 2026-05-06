@@ -19,6 +19,7 @@ urlpatterns = [
     
     # Energy Recommendations (NEW)
     path('recommendations/', views.energy_recommendations, name='energy-recommendations'),
+    path('recommendations/direct-apply/', views.direct_apply_inverter_mode, name='direct-apply-inverter-mode'),
     path('recommendations/<int:recommendation_id>/apply/', views.apply_energy_recommendation, name='apply-energy-recommendation'),
     path('recommendations/<int:recommendation_id>/ignore/', views.ignore_energy_recommendation, name='ignore-energy-recommendation'),
     path('recommendations/history/', views.energy_recommendations_history, name='energy-recommendations-history'),

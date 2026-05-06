@@ -36,7 +36,12 @@
 
 <!-- Page Heading -->
 <div class="d-sm-flex align-items-center justify-content-between mb-4">
-    <h1 class="h3 mb-0 text-gray-800">Energy Management</h1>
+    <h1 class="h3 mb-0 text-gray-800">
+        Energy Management
+        <span id="data-source-badge" class="badge badge-secondary ml-2 d-none" style="font-size: 0.5em; vertical-align: middle;">
+            <i class="fas fa-spinner fa-spin mr-1"></i> Checking connection...
+        </span>
+    </h1>
     <div>
         <button onclick="collectData()" class="btn btn-sm btn-success shadow-sm mr-2">
             <i class="fas fa-sync fa-sm text-white-50"></i> Refresh
@@ -137,18 +142,27 @@
 <!-- EV Charging Recommendation -->
 <div class="row">
     <div class="col-12 mb-4">
-        <div class="card shadow">
+        <div class="card shadow border-left-info">
             <div class="card-header py-3 d-flex flex-row align-items-center justify-content-between">
-                <h6 class="m-0 font-weight-bold text-primary">EV Charging Recommendation</h6>
-                <button onclick="getChargingRecommendation()" class="btn btn-sm btn-primary">
-                    <i class="fas fa-magic"></i> Get Recommendation
+                <h6 class="m-0 font-weight-bold text-info">Energy Management & Recommendation</h6>
+                <button onclick="getChargingRecommendation()" class="btn btn-sm btn-info" id="btn-get-rec">
+                    <i class="fas fa-magic"></i> Calculate Recommendation
                 </button>
             </div>
             <div class="card-body" id="charging-content">
                 <div class="text-center py-4">
-                    <i class="fas fa-car fa-3x text-gray-300 mb-3"></i>
-                    <p class="text-gray-600">Get personalized charging recommendations based on current solar generation.</p>
+                    <i class="fas fa-brain fa-3x text-gray-300 mb-3"></i>
+                    <p class="text-gray-600">Get personalized charging and inverter operating recommendations based on current weather, solar generation and battery SOC.</p>
                 </div>
+            </div>
+            <!-- Action Footer (Hidden by Default) -->
+            <div class="card-footer text-right d-none" id="recommendation-actions">
+                <button class="btn btn-outline-secondary btn-sm mr-2" onclick="document.getElementById('recommendation-actions').classList.add('d-none');">
+                    Dismiss
+                </button>
+                <button class="btn btn-success btn-sm" id="btn-apply-inverter" onclick="applyInverterMode()">
+                    <i class="fas fa-bolt"></i> <strong>Apply to Inverter</strong>
+                </button>
             </div>
         </div>
     </div>
@@ -198,6 +212,38 @@
 
 {% block extra_js %}
 <script src="{% static 'js/api-client.js' %}"></script>
+<script>
+    // Global variable to hold recommendation result temporarily in memory
+    let lastRecommendationMode = null;
+
+    async function applyInverterMode() {
+        if (!lastRecommendationMode) return;
+        
+        const btn = document.getElementById('btn-apply-inverter');
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Apply...';
+        
+        try {
+            // Directly call an endpoint to trigger the modbus commands associated with this mode
+            const response = await window.EVPlatformAPI.request('/energy/recommendations/direct-apply/', {
+                method: 'POST',
+                body: JSON.stringify({ mode: lastRecommendationMode })
+            });
+            
+            if (response.success) {
+                alert("Успешно приложен режим по Modbus!");
+                document.getElementById('recommendation-actions').classList.add('d-none');
+            } else {
+                alert("Грешка при прилагане: " + response.message);
+            }
+        } catch (error) {
+            alert("Failed to communicate with inverter: " + error.message);
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-bolt"></i> <strong>Apply to Inverter</strong>';
+        }
+    }
+</script>
 <script src="{% static 'js/weather.js' %}"></script>
 <script>
 let chart = null;
@@ -208,6 +254,22 @@ async function loadDashboardData() {
         loadWeatherWidget('weather-cards');
 
         const data = await window.EVPlatformAPI.getDashboardData();
+        
+        // Update connection source badge
+        const badge = document.getElementById('data-source-badge');
+        if (badge) {
+            badge.classList.remove('d-none', 'badge-secondary', 'badge-success', 'badge-info');
+            if (data.connection_source === 'local') {
+                badge.classList.add('badge-success');
+                badge.innerHTML = '<i class="fas fa-network-wired mr-1"></i> Local (Modbus)';
+            } else if (data.connection_source === 'cloud') {
+                badge.classList.add('badge-info');
+                badge.innerHTML = '<i class="fas fa-cloud mr-1"></i> Cloud (API)';
+            } else {
+                badge.classList.add('badge-secondary');
+                badge.innerHTML = '<i class="fas fa-question-circle mr-1"></i> Unknown Source';
+            }
+        }
         
         // Update metrics
         document.getElementById('generation-power').textContent = 
@@ -337,9 +399,11 @@ async function updateChart() {
 
 async function getChargingRecommendation() {
     const content = document.getElementById('charging-content');
+    const actionsFooter = document.getElementById('recommendation-actions');
     
     // Show loading
     content.innerHTML = '<div class="text-center py-4"><div class="spinner-border text-primary" role="status"></div><p class="mt-2 text-muted">Анализиране на системата...</p></div>';
+    actionsFooter.classList.add('d-none');
     
     try {
         const data = await window.EVPlatformAPI.getChargingRecommendation();
@@ -347,6 +411,7 @@ async function getChargingRecommendation() {
         let sc1 = data.scenario_1_ev;
         let sc2 = data.scenario_2_ev;
         let p_mode = sc1.mode; // Algorithm selected mode
+        lastRecommendationMode = p_mode;
         
         content.innerHTML = `
             <div class="alert alert-info">
@@ -379,6 +444,8 @@ async function getChargingRecommendation() {
                 <span class="badge badge-dark p-2">${p_mode}</span>
             </div>
         `;
+        
+        actionsFooter.classList.remove('d-none');
         
     } catch (error) {
         content.innerHTML = `

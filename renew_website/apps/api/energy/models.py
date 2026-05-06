@@ -139,13 +139,6 @@ class WorkMode(models.Model):
 
     class Meta:
         ordering = ['-updated_at']
-        constraints = [
-            models.UniqueConstraint(
-                fields=['id'],
-                condition=Q(is_active=True),
-                name='only_one_active_workmode'
-            )
-        ]
 
     def __str__(self):
         return f"{self.get_mode_display()} ({self.get_control_mode_display()})"
@@ -196,7 +189,7 @@ class EnergyRecommendation(models.Model):
     applied_at = models.DateTimeField(null=True, blank=True)
 
     expires_at = models.DateTimeField(
-        default=lambda: timezone.now() + timedelta(minutes=5)
+        default=timezone.now() + timedelta(minutes=5)
     )
 
     # Extra
@@ -240,6 +233,20 @@ class EnergyRecommendation(models.Model):
 
                 for station in active_stations:
                     set_charging_power_limit.delay(station.id, power_watts)
+
+                # NEW: Apply the recommended mode directly to the Deye Inverter using Modbus
+                from renew_website.apps.api.deye.manager import DeyeManager
+                from renew_website.apps.api.deye.control import get_modbus_commands_for_mode
+                
+                try:
+                    modbus_commands = get_modbus_commands_for_mode(self.mode)
+                    if modbus_commands:
+                        deye_mgr = DeyeManager()
+                        is_applied = deye_mgr.apply_modbus_commands(modbus_commands)
+                        if not is_applied:
+                            return False, "Failed to send Modbus commands to Inverter"
+                except Exception as ex:
+                    return False, f"Modbus Invocation Error: {str(ex)}"
 
                 self.status = self.Status.APPLIED
                 self.applied_at = timezone.now()

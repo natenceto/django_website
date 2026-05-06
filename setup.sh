@@ -44,7 +44,9 @@ COMPOSE_CMD=""
 if $DOCKER_CMD compose version > /dev/null 2>&1; then
     COMPOSE_CMD="$DOCKER_CMD compose"
 else
-    COMPOSE_CMD="docker-compose"
+    echo "Error: Docker Compose V2 ('docker compose') is required but not found."
+    echo "Please update your Docker installation to use Docker Compose V2."
+    exit 1
 fi
 
 # 4. Build & Run
