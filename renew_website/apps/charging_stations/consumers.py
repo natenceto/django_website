@@ -482,14 +482,9 @@ class ChargePoint(OCPPChargePoint):
                 elif s in {"faulted", "unavailable"}:
                     asyncio.create_task(self._update_station_status_async("inactive", "status0"))
                     
-                # Update last status on Station model
-                @database_sync_to_async
-                def update_station_last_status():
-                    st = Station.objects.filter(id=station_id).first()
-                    if st:
-                        st.last_status = s
-                        st.save(update_fields=['last_status'])
-                asyncio.create_task(update_station_last_status())
+                # The Station model does not have a `last_status` field. 
+                # We can either log this or perform another valid operation if required.
+                # Removed update_station_last_status to fix ValueError.
             except Exception:
                 ocpp_logger.exception("Failed scheduling station status update for connectorId=0")
             return call_result.StatusNotificationPayload()
@@ -1721,11 +1716,32 @@ class StationStatusConsumer(AsyncWebsocketConsumer):
                 "online": online,
                 "status": status,
             })
+            
+        from .models import Transaction
+        
+        # Also grab active transactions
+        active_txs = Transaction.objects.filter(status='active').select_related('connector', 'connector__station')
+        active_sessions = []
+        for tx in active_txs:
+            # calculate energy delivered
+            energy = 0.0
+            if tx.connector and hasattr(tx.connector, 'energy_delivered_kwh') and tx.connector.energy_delivered_kwh is not None:
+                energy = float(tx.connector.energy_delivered_kwh)
+                
+            active_sessions.append({
+                "station_id": tx.connector.station.id if tx.connector and tx.connector.station else None,
+                "connector_id": tx.connector.connector_id if tx.connector else None,
+                "id_tag": tx.id_tag,
+                "start_time": tx.started_at.isoformat() if tx.started_at else None,
+                "energy_delivered": energy,
+                "status": "Charging" if tx.connector and tx.connector.status == 'charging' else tx.connector.status.capitalize() if tx.connector else "Active"
+            })
 
         return {
             "type": "status_snapshot",
             "timestamp": timezone.now().isoformat(),
             "stations": out,
+            "active_charging_sessions": active_sessions,
         }
 
     async def send_initial_snapshot(self):

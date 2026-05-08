@@ -20,6 +20,7 @@ class DeyeLocalClient:
             HoldingRegisters.BatteryVoltage,
             HoldingRegisters.BatteryOutCurrent,
             HoldingRegisters.TotalFromPV,
+            HoldingRegisters.TodayFromPV,
             HoldingRegisters.TotalToLoad,
             HoldingRegisters.TotalBuyGrid,
         ]

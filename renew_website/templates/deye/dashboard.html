@@ -128,7 +128,7 @@
                         <div class="text-xs font-weight-bold text-primary text-uppercase mb-1">
                             Today's Energy</div>
                         <div class="h5 mb-0 font-weight-bold text-gray-800" id="daily-energy">0 kWh</div>
-                        <div class="text-xs text-muted mt-1">Total generated</div>
+                        <div class="text-xs text-muted mt-1" id="lifetime-energy">Total generated: 0</div>
                     </div>
                     <div class="col-auto">
                         <i class="fas fa-chart-line fa-2x text-gray-300"></i>
@@ -280,6 +280,10 @@ async function loadDashboardData() {
             `${data.current.active_inverters}/2`;
         document.getElementById('daily-energy').textContent = 
             `${data.daily_stats.total_energy_kwh} kWh`;
+        if (data.daily_stats.lifetime_energy_kwh && data.daily_stats.lifetime_energy_kwh > 0) {
+            document.getElementById('lifetime-energy').textContent = 
+                `Total: ${data.daily_stats.lifetime_energy_kwh} kWh`;
+        }
         
         // Update inverter list
         updateInverterList(data.current.readings);

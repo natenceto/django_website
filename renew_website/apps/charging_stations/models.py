@@ -26,6 +26,7 @@ class Station(models.Model):
 
     # operations
     ocpp_identity = models.CharField(max_length=255, blank=True, null=True, help_text="OCPP Identity (ChargeBox Identity)")
+    ip_address = models.GenericIPAddressField(null=True, blank=True, help_text="Local IP address for Modbus/API access")
 
     # Owner Info
     email = models.EmailField()
@@ -251,6 +252,27 @@ class Transaction(models.Model):
         """Calculate energy consumed in kWh."""
         if self.meter_start is not None and self.meter_stop is not None:
             return (self.meter_stop - self.meter_start) / 1000  # Convert Wh to kWh
+        
+        # For active transactions, calculate from meter values
+        if self.status == 'active':
+            latest_meter = self.meter_values.order_by('-timestamp').first()
+            if latest_meter and latest_meter.energy_wh is not None:
+                return (latest_meter.energy_wh - self.meter_start) / 1000  # Convert Wh to kWh
+        
+        return None
+    
+    @property
+    def energy_kwh(self):
+        """Alias for energy_consumed for compatibility."""
+        return self.energy_consumed
+    
+    @property
+    def current_power_w(self):
+        """Get current charging power in watts for active transaction."""
+        if self.status == 'active':
+            latest_meter = self.meter_values.order_by('-timestamp').first()
+            if latest_meter and latest_meter.power_w is not None:
+                return latest_meter.power_w
         return None
 
 

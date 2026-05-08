@@ -8,6 +8,7 @@ from channels.layers import get_channel_layer
 
 from .models import Station, Connector, Transaction, MeterValue
 from .components import EVStationComponent
+from .modbus_client import ABBterraClient
 
 logger = logging.getLogger(__name__)
 
@@ -204,3 +205,31 @@ def update_station_status(station_id):
         logger.debug(f"Синхронизиран статус за станция {station_id} успешно.")
     except Exception as e:
         logger.error(f"Грешка при синхронизация на статус: {e}")
+
+
+@shared_task(name="sync_all_stations_modbus")
+def sync_all_stations_modbus():
+    """
+    Минава през всички станции и обновява мощността им през Modbus.
+    """
+    stations = Station.objects.filter(ip_address__isnull=False).exclude(ip_address="")
+    
+    for station in stations:
+        client = ABBterraClient(host=station.ip_address)
+        data = client.get_data() # Използваме метода, който написахме по-рано
+        
+        if data:
+            # 1. Обновяваме последно видяна
+            station.last_seen = timezone.now()
+            station.save(update_fields=['last_seen'])
+
+            # 2. Изпращаме сигнал към енергийния алгоритъм (Brain)
+            # Използваме твоя съществуващ сигнал
+            process_meter_values.delay(
+                station_id=station.id,
+                connector_id=1,
+                transaction_id=None, # Modbus не винаги знае за OCPP транзакцията
+                power_w=data.get('current_power_w', 0),
+                energy_wh=data.get('total_energy_kwh', 0) * 1000,
+            )
+            logger.info(f"Modbus синхронизация за {station.ip_address}: {data}")

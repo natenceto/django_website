@@ -27,6 +27,7 @@ urlpatterns = [
     # Data management
     path('data/collect/', views.collect_data, name='collect-data'),
     path('dashboard/api/', views.dashboard_data, name='dashboard'),
+    path('export/inverter-data/', views.export_inverter_data_csv, name='export-inverter-data'),
     
     # Real-time charts
     path('chart-data/', views.chart_data, name='chart-data'),

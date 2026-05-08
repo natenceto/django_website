@@ -1,5 +1,6 @@
 {% extends 'base.html' %}
 {% load static %}
+{% load tz %}
 {% load custom_tags %}
 
 {% block title %} RENEW | Statistics {% endblock%}
@@ -182,7 +183,7 @@
                         </span>
                     </div>
                     <div class="small text-muted mt-1">
-                        <i class="fas fa-clock"></i> {{ transaction.started_at|date:"M d, H:i" }}<br>
+                        <i class="fas fa-clock"></i> {{ transaction.started_at|timezone:"Europe/Sofia"|date:"M d, H:i" }}<br>
                         {% if transaction.meter_count %}
                         <i class="fas fa-tachometer-alt"></i> {{ transaction.meter_count }} readings<br>
                         <i class="fas fa-bolt"></i> Latest: <strong>{{ transaction.latest_reading }} Wh</strong>

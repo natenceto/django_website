@@ -115,7 +115,8 @@ def charging_recommendation(request):
         precipitation = float(latest_weather.precipitation_mm) if latest_weather else 0.0
         is_raining = precipitation > 0
 
-        current_hour = timezone.localtime().hour
+        now = timezone.now()
+        current_hour = timezone.localtime(now).hour if timezone.is_aware(now) else now.hour
         is_night_tariff = (current_hour >= 22 or current_hour < 6)
 
         # Baseline common attributes
@@ -235,11 +236,11 @@ def dashboard_data(request):
             # Use Manager to get normalized data from best source (Cloud or Local)
             manager = DeyeManager()
             
-            # get_latest_data returns a dictionary serialized by DeyeCloudSerializer/DeyeLocalSerializer
-            normalized_data = manager.get_latest_data()
+            # get_combined_inverter_data returns combined data from both master and slave inverters
+            normalized_data = manager.get_combined_inverter_data()
             
-            daily_energy = normalized_data.get('daily_energy', 0.0)
-            total_energy = normalized_data.get('total_energy', 0.0)
+            daily_energy = normalized_data.get('today_from_pv', 0.0)
+            total_energy = normalized_data.get('total_from_pv', 0.0)
             data_source = normalized_data.get('source', 'unknown')
             
             logger.debug(f"Energy stats from Manager ({data_source}): Daily={daily_energy}, Total={total_energy}")
@@ -271,9 +272,10 @@ def dashboard_data(request):
             timestamp__date=today
         ).order_by('timestamp')
         
-        # Calculate total energy today properly
-        total_energy_today = 0
-        if len(today_readings) > 1:
+        # Use daily_energy from DeyeManager if valid. Fallback to calculation if 0.
+        total_energy_today = daily_energy if 'daily_energy' in locals() and daily_energy > 0 else 0
+        
+        if total_energy_today == 0 and len(today_readings) > 1:
             for i in range(1, len(today_readings)):
                 prev_power = today_readings[i-1].station_data.get('generationPower', 0) if today_readings[i-1].station_data else 0
                 curr_power = today_readings[i].station_data.get('generationPower', 0) if today_readings[i].station_data else 0
@@ -286,6 +288,7 @@ def dashboard_data(request):
             'current': current_data,
             'daily_stats': {
                 'total_energy_kwh': round(total_energy_today, 2),
+                'lifetime_energy_kwh': round(total_energy, 2) if 'total_energy' in locals() else 0.0,
                 'peak_generation_watts': max(
                     (r.station_data.get('generationPower', 0) if r.station_data else 0) for r in today_readings
                 ) if today_readings else 0,
@@ -312,6 +315,49 @@ def dashboard_data(request):
             {"error": str(e)}, 
             status=status.HTTP_503_SERVICE_UNAVAILABLE
         )
+
+
+@login_required
+def export_inverter_data_csv(request):
+    """Export inverter data as CSV."""
+    import csv
+    from django.http import HttpResponse
+    
+    response = HttpResponse(content_type='text/csv')
+    response['Content-Disposition'] = 'attachment; filename="inverter_data.csv"'
+    
+    writer = csv.writer(response)
+    
+    # Get data from last 7 days
+    from datetime import timedelta
+    end_date = timezone.now()
+    start_date = end_date - timedelta(days=7)
+    
+    readings = InverterReading.objects.filter(
+        timestamp__range=[start_date, end_date]
+    ).select_related('inverter').order_by('-timestamp')
+    
+    # Write header
+    writer.writerow([
+        'Timestamp', 'Inverter SN', 'Generation Power (W)', 
+        'Battery SOC (%)', 'Grid Power (W)', 'Load Power (W)',
+        'Daily Energy (kWh)', 'Total Energy (kWh)'
+    ])
+    
+    # Write data
+    for reading in readings:
+        writer.writerow([
+            reading.timestamp.strftime('%Y-%m-%d %H:%M:%S'),
+            reading.inverter.device_sn if reading.inverter else 'Unknown',
+            reading.generation_power or 0,
+            reading.battery_soc or 0,
+            reading.grid_power or 0,
+            reading.load_power or 0,
+            reading.daily_energy or 0,
+            reading.total_energy or 0
+        ])
+    
+    return response
 
 
 def energy_dashboard(request):

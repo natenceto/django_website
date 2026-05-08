@@ -71,7 +71,8 @@ def run_energy_management_algorithm():
             is_raining = True
 
         # Проверка за нощна тарифа (приблизително 22:00 до 06:00)
-        current_hour = timezone.localtime().hour
+        now = timezone.now()
+        current_hour = timezone.localtime(now).hour if timezone.is_aware(now) else now.hour
         is_night_tariff = (current_hour >= 22 or current_hour < 6)
 
         # 3. Активни станции (всички активни сесии, не само автоматични)

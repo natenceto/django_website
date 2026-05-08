@@ -354,3 +354,48 @@ def get_soc_history(request: HttpRequest, station_id: int) -> JsonResponse:
 
 def update_station_soc_config(request: HttpRequest, station_id: int) -> JsonResponse:
     return JsonResponse({"status": "error", "message": "Not implemented"}, status=501)
+
+
+@login_required
+def export_charging_sessions_csv(request):
+    """Export charging sessions as CSV."""
+    import csv
+    from django.http import HttpResponse
+    
+    response = HttpResponse(content_type='text/csv')
+    response['Content-Disposition'] = 'attachment; filename="charging_sessions.csv"'
+    
+    writer = csv.writer(response)
+    
+    # Get data from last 30 days
+    from datetime import timedelta
+    end_date = timezone.now()
+    start_date = end_date - timedelta(days=30)
+    
+    transactions = Transaction.objects.filter(
+        started_at__range=[start_date, end_date]
+    ).select_related('connector__station').order_by('-started_at')
+    
+    # Write header
+    writer.writerow([
+        'ID', 'Station', 'Connector', 'Vehicle ID', 
+        'Start Time', 'End Time', 'Duration (minutes)',
+        'Energy (kWh)', 'Requested Power (kW)', 'Status'
+    ])
+    
+    # Write data
+    for transaction in transactions:
+        writer.writerow([
+            transaction.id,
+            transaction.connector.station.address,
+            transaction.connector.connector_id,
+            transaction.id_tag,
+            transaction.started_at.strftime('%Y-%m-%d %H:%M:%S'),
+            transaction.stopped_at.strftime('%Y-%m-%d %H:%M:%S') if transaction.stopped_at else '',
+            transaction.duration_minutes or '',
+            transaction.energy_kwh or 0,
+            transaction.requested_power_kw or 0,
+            transaction.status
+        ])
+    
+    return response

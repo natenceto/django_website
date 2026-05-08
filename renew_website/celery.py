@@ -15,8 +15,11 @@ app.config_from_object('django.conf:settings', namespace='CELERY')
 # Load task modules from all registered Django apps.
 app.autodiscover_tasks()
 
-# Explicitly discover tasks in the root package since it is not in INSTALLED_APPS
-app.conf.imports = ('renew_website.tasks',)
+# Explicitly discover tasks in the root package and apps
+app.conf.imports = (
+    'renew_website.tasks',
+    'renew_website.apps.charging_stations.tasks',
+)
 
 @app.task(bind=True)
 def debug_task(self):

@@ -184,7 +184,8 @@ TIME_ZONE = 'Europe/Sofia'
 
 USE_I18N = True
 
-USE_TZ = True
+#USE_TZ = True
+USE_TZ = False
 
 
 # Static files (CSS, JavaScript, Images)
@@ -362,11 +363,13 @@ DEYE_COMPANY_ID = env('DEYE_COMPANY_ID', default='0')   # '0' for personal accou
 # Hardware Identifiers (From .env)
 DEYE_MASTER_SN = env('DEYE_MASTER_SN', default='2409109016')
 DEYE_SLAVE_SN = env('DEYE_SLAVE_SN', default='2409109073')
-DEYE_LOGGER_SN = env('DEYE_LOGGER_SN', default='3117079603')
+DEYE_MASTER_LOGGER_SN = env('DEYE_MASTER_LOGGER_SN', default='3117882047')
+DEYE_SLAVE_LOGGER_SN = env('DEYE_SLAVE_LOGGER_SN', default='3117079603')
 
 # Local Connection Settings
 # IP-то на Wi-Fi логъра на Master инвертора
-DEYE_LOCAL_IP = env('DEYE_LOCAL_IP', default='192.168.88.254') 
+DEYE_MASTER_LOCAL_IP = env('DEYE_MASTER_LOCAL_IP', default='192.168.88.253')
+DEYE_SLAVE_LOCAL_IP = env('DEYE_SLAVE_LOCAL_IP', default='192.168.88.254') 
 
 # Режим на свързване: 'cloud' (през интернет), 'local' (през мрежата) или 'auto'
 DEYE_CONNECTION_MODE = env('DEYE_CONNECTION_MODE', default='cloud')
@@ -385,6 +388,10 @@ from celery.schedules import crontab
 CELERY_BEAT_SCHEDULE = {
     'sample_task': {
         'task': 'renew_website.tasks.sample_task',
+        'schedule': 30.0,
+    },
+    'sync-modbus-every-30-seconds': {
+        'task': 'sync_all_stations_modbus',
         'schedule': 30.0,
     },
     'fetch-weather-every-15-minutes': {
