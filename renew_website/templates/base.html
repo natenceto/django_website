@@ -368,7 +368,7 @@
 
             // Update active sessions table
             function updateActiveSessionsTable(sessions) {
-                const tbody = document.querySelector('#activeChargingSessions tbody');
+                const tbody = document.querySelector('#activeSessionsBody') || document.querySelector('#activeSessionsTable tbody');
                 if (!tbody) return;
                 
                 tbody.innerHTML = ''; // Clear existing rows
@@ -458,6 +458,11 @@
                         data.stations.forEach(station => {
                             updateStationStatusBadge(station.station_id, station.status);
                         });
+
+                        // Update active charging sessions if provided
+                        if (data.active_charging_sessions) {
+                            updateActiveSessionsTable(data.active_charging_sessions);
+                        }
                         
                         // Update dashboard counters
                         const totalStations = document.getElementById('totalStations');
@@ -467,7 +472,7 @@
                         if (totalStations) totalStations.textContent = data.stations.length;
                         if (onlineStations) {
                             const onlineCount = data.stations.filter(s => s.online).length;
-                            onlineStations.textContent = `${onlineCount} / ${data.stations.length}`;
+                            onlineStations.textContent = onlineCount;
                         }
                         if (availableStations) {
                             const availableCount = data.stations.filter(s => s.status === 'active').length;

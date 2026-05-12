@@ -6,202 +6,956 @@
 
 {% block content %}
 <style>
-    /* Pulse animation for live status indicator */
-    @keyframes pulse {
-        0% { opacity: 1; box-shadow: 0 0 0 0 rgba(40, 167, 69, 0.7); }
-        50% { opacity: 0.8; box-shadow: 0 0 0 6px rgba(40, 167, 69, 0); }
-        100% { opacity: 1; box-shadow: 0 0 0 0 rgba(40, 167, 69, 0); }
+    .ems-shell {
+        display: grid;
+        gap: 1.5rem;
+        font-size: 0.94rem;
     }
-    .status-dot { transition: all 0.3s ease; }
-    
-    /* Card hover effect */
-    #energy-cards .card {
-        transition: transform 0.2s ease, box-shadow 0.2s ease;
+
+    .ems-page-heading {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 1rem;
+        flex-wrap: wrap;
+        margin-bottom: 0;
     }
-    #energy-cards .card:hover {
-        transform: translateY(-3px);
-        box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.15) !important;
+
+    .ems-muted { color: #858796; }
+
+    .ems-card {
+        background: #fff;
+        border: 1px solid #e3e6f0;
+        border-radius: 0.75rem;
+        box-shadow: 0 0.15rem 1.75rem 0 rgba(58, 59, 69, 0.15);
+        padding: 1.2rem;
     }
-    
-    /* Status badge animations */
-    .badge { transition: all 0.3s ease; }
-    
-    /* Energy generation animation */
-    @keyframes energy-pulse {
-        0%, 100% { opacity: 1; }
-        50% { opacity: 0.6; }
+
+    .ems-card-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 1rem;
+        margin-bottom: 1rem;
+        padding-bottom: 1rem;
+        border-bottom: 1px solid #eaecf4;
     }
-    .border-left-warning { animation: energy-pulse 2s infinite; }
+
+    .header-actions {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.65rem;
+        flex-wrap: wrap;
+    }
+
+    .ems-title {
+        font-size: 0.74rem;
+        text-transform: uppercase;
+        letter-spacing: 0.16em;
+        color: #4e73df;
+        margin-bottom: 0.2rem;
+        font-weight: 700;
+    }
+
+    .ems-subtitle {
+        font-size: 1.02rem;
+        font-weight: 700;
+        color: #2e384d;
+        margin-bottom: 0;
+    }
+
+    .hero-card {
+        padding: 1.6rem;
+    }
+
+    .summary-grid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 1rem;
+    }
+
+    .summary-card {
+        padding: 1.1rem 1.15rem;
+        background: linear-gradient(180deg, #ffffff 0%, #f8faff 100%);
+        border-radius: 0.75rem;
+        border: 1px solid #e3e6f0;
+        min-height: 132px;
+        box-shadow: 0 0.15rem 1rem 0 rgba(58, 59, 69, 0.08);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 1rem;
+    }
+
+    .summary-card.is-primary { border-left: 0.25rem solid #4e73df; }
+    .summary-card.is-weather { border-left: 0.25rem solid #f6c23e; }
+    .summary-card.is-wind { border-left: 0.25rem solid #1cc88a; }
+    .summary-card.is-solar { border-left: 0.25rem solid #e74a3b; }
+    .summary-card.is-generation { border-left: 0.25rem solid #f6c23e; }
+    .summary-card.is-battery { border-left: 0.25rem solid #36b9cc; }
+    .summary-card.is-online { border-left: 0.25rem solid #1cc88a; }
+    .summary-card.is-energy { border-left: 0.25rem solid #4e73df; }
+
+    .summary-content {
+        min-width: 0;
+    }
+
+    .summary-card .label {
+        display: block;
+        margin-bottom: 0.45rem;
+        font-size: 0.72rem;
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+        font-weight: 700;
+        color: #4e73df;
+    }
+
+    .summary-card .value {
+        display: block;
+        font-size: 1.26rem;
+        line-height: 1.1;
+        font-weight: 700;
+        color: #2e384d;
+    }
+
+    .summary-card .meta {
+        display: block;
+        margin-top: 0.45rem;
+        font-size: 0.79rem;
+        color: #858796;
+    }
+
+    .summary-icon {
+        font-size: 1.7rem;
+        color: #d7dceb;
+        flex-shrink: 0;
+    }
+
+    .hero-status-bar {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 1rem;
+        margin-bottom: 1.25rem;
+        flex-wrap: wrap;
+    }
+
+    .live-badge,
+    .sync-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.45rem;
+        padding: 0.45rem 0.8rem;
+        border-radius: 999px;
+        font-size: 0.76rem;
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+        font-weight: 700;
+    }
+
+    .live-badge {
+        background: rgba(28, 200, 138, 0.12);
+        color: #1cc88a;
+        border: 1px solid rgba(28, 200, 138, 0.22);
+    }
+
+    .sync-badge {
+        background: rgba(78, 115, 223, 0.1);
+        color: #4e73df;
+        border: 1px solid rgba(78, 115, 223, 0.2);
+    }
+
+    .hero-grid {
+        position: relative;
+        min-height: 520px;
+        border-radius: 1rem;
+        background: linear-gradient(180deg, #fbfcff 0%, #f4f7fd 100%);
+        border: 1px solid #e6ebf5;
+        overflow: hidden;
+    }
+
+    .flow-wire {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        pointer-events: none;
+    }
+
+    .flow-wire path {
+        fill: none;
+        stroke: #9aa3b5;
+        stroke-width: 1.6;
+        stroke-dasharray: 7 6;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        transition: stroke 160ms ease, stroke-width 160ms ease, opacity 160ms ease;
+        opacity: 0.7;
+    }
+
+    .flow-wire path.is-active {
+        stroke-width: 2.4;
+        opacity: 1;
+        stroke-dasharray: 10 8;
+        animation: flow-dash 1.1s linear infinite;
+    }
+
+    @keyframes flow-dash {
+        from { stroke-dashoffset: 0; }
+        to { stroke-dashoffset: -36; }
+    }
+
+    .flow-wire path.is-active.route-pv {
+        stroke: #f6c23e;
+    }
+
+    .flow-wire path.is-active.route-grid {
+        stroke: #4e73df;
+    }
+
+    .flow-wire path.is-active.route-building {
+        stroke: #858796;
+    }
+
+    .flow-wire path.is-active.route-ev {
+        stroke: #e74a3b;
+    }
+
+    .flow-wire path.is-active.route-battery {
+        stroke: #1cc88a;
+    }
+
+    .flow-node {
+        position: absolute;
+        border-radius: 0.75rem;
+        padding: 0.95rem 1rem;
+        border: 1px solid #e3e6f0;
+        background: linear-gradient(180deg, #ffffff 0%, #f8faff 100%);
+        min-height: 94px;
+        width: 150px;
+        box-shadow: 0 0.15rem 1rem 0 rgba(58, 59, 69, 0.08);
+        z-index: 1;
+        transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
+    }
+
+    .flow-node.is-active {
+        transform: translateY(-2px);
+        box-shadow: 0 0.4rem 1.2rem 0 rgba(58, 59, 69, 0.14);
+    }
+
+    .flow-node .label {
+        display: block;
+        font-size: 0.72rem;
+        text-transform: uppercase;
+        letter-spacing: 0.13em;
+        color: #858796;
+        margin-bottom: 0.4rem;
+        font-weight: 700;
+    }
+
+    .flow-node-header {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        margin-bottom: 0.4rem;
+    }
+
+    .flow-node-icon {
+        width: 1.8rem;
+        height: 1.8rem;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 999px;
+        background: #eef3ff;
+        color: #4e73df;
+        font-size: 0.88rem;
+        flex-shrink: 0;
+    }
+
+    .flow-node .value {
+        display: block;
+        font-size: 1.34rem;
+        font-weight: 700;
+        color: #2e384d;
+        line-height: 1.1;
+    }
+
+    .flow-node .meta {
+        display: block;
+        margin-top: 0.4rem;
+        font-size: 0.77rem;
+        color: #858796;
+    }
+
+    .flow-node .meta:empty {
+        display: none;
+    }
+
+    .flow-node.pv { border-left: 0.35rem solid #f6c23e; }
+    .flow-node.pv .flow-node-icon { background: rgba(246, 194, 62, 0.14); color: #d69b00; }
+    .flow-node.pv .value { color: #d69b00; }
+    .flow-node.battery { border-left: 0.35rem solid #1cc88a; }
+    .flow-node.battery .flow-node-icon { background: rgba(28, 200, 138, 0.14); color: #169b6b; }
+    .flow-node.battery .value { color: #169b6b; }
+    .flow-node.grid { border-left: 0.35rem solid #4e73df; }
+    .flow-node.grid .flow-node-icon { background: rgba(78, 115, 223, 0.14); color: #3154be; }
+    .flow-node.grid .value { color: #3154be; }
+    .flow-node.building { border-left: 0.35rem solid #858796; }
+    .flow-node.building .flow-node-icon { background: rgba(133, 135, 150, 0.14); color: #4b5563; }
+    .flow-node.building .value { color: #4b5563; }
+    .flow-node.ev { border-left: 0.35rem solid #e74a3b; }
+    .flow-node.ev .flow-node-icon { background: rgba(231, 74, 59, 0.14); color: #c0392b; }
+    .flow-node.ev .value { color: #c0392b; }
+    .node-inverter .flow-node-icon {
+        background: rgba(78, 115, 223, 0.14);
+        color: #3154be;
+        margin: 0 auto 0.55rem;
+    }
+
+    .node-pv { top: 1rem; left: 1rem; }
+    .node-grid { top: 1rem; right: 1rem; }
+    .node-inverter {
+        top: 4rem;
+        left: calc(50% - 95px);
+        width: 190px;
+        border-left: 0.35rem solid #4e73df;
+        text-align: center;
+        background: linear-gradient(180deg, #ffffff 0%, #f4f8ff 100%);
+    }
+    .node-battery { bottom: 1rem; left: 1rem; }
+    .node-ev {
+        bottom: 1rem;
+        left: calc(50% - 75px);
+    }
+    .node-building { bottom: 1rem; right: 1rem; }
+
+    .inverter-title {
+        display: block;
+        font-size: 0.92rem;
+        font-weight: 700;
+        color: #2e384d;
+    }
+
+    .inverter-meta {
+        display: block;
+        margin-top: 0.45rem;
+        font-size: 0.76rem;
+        color: #6b7280;
+        line-height: 1.45;
+    }
+
+    .strategy-live-context {
+        margin-bottom: 0.75rem;
+        padding: 0.8rem 0.95rem;
+        border-radius: 0.75rem;
+        background: #f8f9fc;
+        border: 1px solid #e9edf7;
+        color: #6b7280;
+        font-size: 0.86rem;
+        line-height: 1.5;
+    }
+
+    .strategy-pills,
+    .status-pills {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.55rem;
+    }
+
+    .strategy-pill,
+    .status-pill {
+        display: inline-flex;
+        align-items: center;
+        padding: 0.42rem 0.72rem;
+        border-radius: 999px;
+        font-size: 0.76rem;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        font-weight: 700;
+    }
+
+    .strategy-pill {
+        background: rgba(255, 255, 255, 0.16);
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        color: #fff;
+    }
+
+                        <div class="flow-node-header">
+                            <span class="flow-node-icon" aria-hidden="true"><i class="fas fa-solar-panel"></i></span>
+                            <span class="label">PV</span>
+                        </div>
+    .status-pill.is-muted {
+        background: #f1f3f9;
+        border: 1px solid #e3e6f0;
+        color: #858796;
+    }
+                        <div class="flow-node-header">
+                            <span class="flow-node-icon" aria-hidden="true"><i class="fas fa-bolt"></i></span>
+                            <span class="label">Grid</span>
+                        </div>
+    .mini-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0.85rem;
+    }
+                        <span class="flow-node-icon" aria-hidden="true"><i class="fas fa-sliders-h"></i></span>
+
+    .mini-metric {
+        border-radius: 0.75rem;
+        padding: 0.95rem 1rem;
+        background: #f8f9fc;
+                        <div class="flow-node-header">
+                            <span class="flow-node-icon" aria-hidden="true"><i class="fas fa-car-battery"></i></span>
+                            <span class="label">Battery</span>
+                        </div>
+    }
+
+    .mini-metric .label {
+        display: block;
+        font-size: 0.72rem;
+                        <div class="flow-node-header">
+                            <span class="flow-node-icon" aria-hidden="true"><i class="fas fa-charging-station"></i></span>
+                            <span class="label">Charging Stations</span>
+                        </div>
+        letter-spacing: 0.1em;
+        color: #858796;
+        margin-bottom: 0.3rem;
+    }
+
+                        <div class="flow-node-header">
+                            <span class="flow-node-icon" aria-hidden="true"><i class="fas fa-building"></i></span>
+                            <span class="label">Building</span>
+                        </div>
+        display: block;
+        font-size: 1.02rem;
+        font-weight: 700;
+        color: #2e384d;
+    }
+
+    .compact-card {
+        padding: 1.2rem;
+        height: 100%;
+    }
+
+    .icon-action {
+        width: 36px;
+        height: 36px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 999px;
+        border: 1px solid #d1d9f0;
+        background: #fff;
+        color: #4e73df;
+    }
+
+    .icon-action:hover {
+        color: #2e59d9;
+        border-color: #4e73df;
+        text-decoration: none;
+    }
+
+    .strategy-panel {
+        padding: 1.25rem;
+    }
+
+    .ems-decision-panel {
+        padding: 1.4rem;
+    }
+
+    .ems-decision-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1.4fr) minmax(300px, 0.9fr);
+        gap: 1rem;
+    }
+
+    .decision-section {
+        border: 1px solid #e9edf7;
+        border-radius: 0.75rem;
+        background: #f8f9fc;
+        padding: 1rem 1.05rem;
+    }
+
+    .decision-section-title {
+        display: block;
+        font-size: 0.72rem;
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+        color: #4e73df;
+        font-weight: 700;
+        margin-bottom: 0.45rem;
+    }
+
+    .decision-title {
+        font-size: 1.18rem;
+        line-height: 1.2;
+        font-weight: 700;
+        color: #2e384d;
+        margin-bottom: 0.4rem;
+    }
+
+    .decision-summary {
+        color: #858796;
+        font-size: 0.88rem;
+        margin-bottom: 0.85rem;
+    }
+
+    .decision-live-grid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 0.8rem;
+    }
+
+    .live-metric {
+        border-radius: 0.75rem;
+        border: 1px solid #e3e6f0;
+        background: #fff;
+        padding: 0.9rem 1rem;
+        min-height: 102px;
+    }
+
+    .live-metric .label {
+        display: block;
+        font-size: 0.7rem;
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+        color: #858796;
+        margin-bottom: 0.35rem;
+        font-weight: 700;
+    }
+
+    .live-metric .value {
+        display: block;
+        font-size: 1.02rem;
+        line-height: 1.15;
+        font-weight: 700;
+        color: #2e384d;
+    }
+
+    .live-metric .meta {
+        display: block;
+        margin-top: 0.4rem;
+        font-size: 0.77rem;
+        color: #858796;
+    }
+
+    .flow-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 0.8rem;
+    }
+
+    .allocation-side-grid {
+        display: grid;
+        gap: 1rem;
+        align-content: start;
+    }
+
+    .allocation-empty-state {
+        color: #858796;
+        font-size: 0.92rem;
+        line-height: 1.5;
+        padding: 0.25rem 0;
+    }
+
+    .allocation-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 0.8rem;
+        margin-bottom: 1rem;
+    }
+
+    .allocation-card {
+        border-radius: 0.75rem;
+        padding: 0.95rem 1rem;
+        background: #f8f9fc;
+        border: 1px solid #e9edf7;
+    }
+
+    .allocation-card .label {
+        display: block;
+        font-size: 0.72rem;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        color: #858796;
+        margin-bottom: 0.3rem;
+    }
+
+    .allocation-card .value {
+        display: block;
+        font-size: 1rem;
+        font-weight: 700;
+    }
+
+    .allocation-card.pv .value { color: #d69b00; }
+    .allocation-card.battery .value { color: #169b6b; }
+    .allocation-card.grid .value { color: #3154be; }
+
+    .strategy-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 0.75rem;
+        margin-top: 1rem;
+        flex-wrap: wrap;
+    }
+
+    .btn-ems {
+        border-radius: 0.75rem;
+        padding: 0.7rem 1.15rem;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+    }
+
+    .device-list {
+        display: grid;
+        gap: 0.75rem;
+    }
+
+    .device-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1.45fr) minmax(110px, 0.9fr) minmax(84px, 0.7fr) minmax(84px, 0.7fr);
+        gap: 0.75rem;
+        align-items: center;
+        border-radius: 0.75rem;
+        padding: 0.85rem 1.2rem 0.85rem 1rem;
+        background: #f8f9fc;
+        border: 1px solid #e9edf7;
+        color: #858796;
+    }
+
+    .device-name {
+        font-weight: 700;
+        color: #2e384d;
+        min-width: 0;
+        overflow-wrap: anywhere;
+    }
+
+    .device-row > :not(:first-child) {
+        text-align: right;
+        justify-self: end;
+    }
+
+    .device-state.online { color: #1cc88a; }
+    .device-state.offline { color: #e74a3b; }
+
+    .sync-text {
+        font-size: 0.8rem;
+        color: #858796;
+        text-align: right;
+    }
+
+    .trend-panel {
+        padding: 1.2rem;
+    }
+
+    .chart-shell {
+        position: relative;
+        height: 240px;
+        width: 100%;
+    }
+
+    .panel-caption {
+        font-size: 0.9rem;
+        color: #858796;
+        margin-top: 0.2rem;
+    }
+
+    @media (max-width: 991.98px) {
+        .hero-grid {
+            min-height: 0;
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 1rem;
+            padding: 1rem;
+        }
+
+        .flow-wire {
+            display: none;
+        }
+
+        .flow-node {
+            position: static;
+            width: 100%;
+            transform: none;
+        }
+
+        .allocation-grid,
+        .mini-grid,
+        .summary-grid {
+            grid-template-columns: 1fr;
+        }
+    }
+
+    @media (max-width: 1199.98px) {
+        .summary-grid {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+    }
+
+    @media (max-width: 991.98px) {
+        .allocation-grid,
+        .mini-grid,
+        .summary-grid {
+            grid-template-columns: 1fr;
+        }
+
+        .device-row {
+            grid-template-columns: 1fr;
+        }
+    }
 </style>
 
-<!-- Page Heading -->
-<div class="d-sm-flex align-items-center justify-content-between mb-4">
-    <h1 class="h3 mb-0 text-gray-800">
-        Energy Management
-        <span id="data-source-badge" class="badge badge-secondary ml-2 d-none" style="font-size: 0.5em; vertical-align: middle;">
-            <i class="fas fa-spinner fa-spin mr-1"></i> Checking connection...
-        </span>
-    </h1>
-    <div>
-        <button onclick="collectData()" class="btn btn-sm btn-success shadow-sm mr-2">
-            <i class="fas fa-sync fa-sm text-white-50"></i> Refresh
-        </button>
-        <a href="/admin/energy/" class="btn btn-sm btn-info shadow-sm mr-2">
-            <i class="fas fa-cog fa-sm text-white-50"></i> Manage
-        </a>
-        <a href="/admin/energy/inverterreading/" class="btn btn-sm btn-primary shadow-sm">
-            <i class="fas fa-history fa-sm text-white-50"></i> View History
-        </a>
+<div class="ems-shell">
+    <div class="ems-page-heading">
+        <div>
+            <h1 class="h3 mb-1 text-gray-800">Energy Management</h1>
+            <div class="ems-muted">Live telemetry, strategy preview and controlled apply in the standard dashboard layout.</div>
+        </div>
+        <div class="d-flex align-items-center" style="gap:0.75rem; flex-wrap: wrap;">
+            <span class="live-badge" id="connection-source-badge"><i class="fas fa-circle"></i> Source pending</span>
+            <span class="sync-badge" id="global-sync-text">Waiting for read</span>
+            <button class="icon-action" type="button" id="refresh-dashboard-btn" onclick="collectData()" title="Refresh inverter and weather data" aria-label="Refresh inverter and weather data">
+                <i class="fas fa-sync-alt"></i>
+            </button>
+        </div>
     </div>
-</div>
 
-<!-- Weather Status Row -->
-<div class="row" id="weather-cards">
-    <!-- Weather Widget will be injected here via JS -->
-</div>
+    <div class="summary-grid">
+        <div class="summary-card is-primary">
+            <div class="summary-content">
+                <span class="label">Sofia, Bulgaria</span>
+                <span class="value" id="summary-time">--:--</span>
+                <span class="meta" id="summary-date">Waiting for time</span>
+            </div>
+            <i class="fas fa-map-marker-alt summary-icon"></i>
+        </div>
+        <div class="summary-card is-weather">
+            <div class="summary-content">
+                <span class="label">Conditions</span>
+                <span class="value" id="summary-temperature">--.-°C</span>
+                <span class="meta" id="summary-conditions-meta">Clouds: --% | Unknown</span>
+            </div>
+            <i class="fas fa-cloud-sun summary-icon" id="summary-conditions-icon"></i>
+        </div>
+        <div class="summary-card is-wind">
+            <div class="summary-content">
+                <span class="label">Wind & Pressure</span>
+                <span class="value" id="summary-wind">0.0 km/h</span>
+                <span class="meta" id="summary-pressure">Pressure: N/A</span>
+            </div>
+            <i class="fas fa-wind summary-icon"></i>
+        </div>
+        <div class="summary-card is-solar">
+            <div class="summary-content">
+                <span class="label">Solar Irradiance</span>
+                <span class="value" id="summary-irradiance">0 W/m²</span>
+                <span class="meta">PV Potential</span>
+            </div>
+            <i class="fas fa-sun summary-icon"></i>
+        </div>
+        <div class="summary-card is-generation">
+            <div class="summary-content">
+                <span class="label">Solar Generation</span>
+                <span class="value" id="production-current-power">0 W</span>
+                <span class="meta">Real-time output</span>
+            </div>
+            <i class="fas fa-solar-panel summary-icon"></i>
+        </div>
+        <div class="summary-card is-battery">
+            <div class="summary-content">
+                <span class="label">Battery Level</span>
+                <span class="value" id="summary-battery-level">0.0%</span>
+                <span class="meta">Average SOC</span>
+            </div>
+            <i class="fas fa-battery-three-quarters summary-icon"></i>
+        </div>
+        <div class="summary-card is-online">
+            <div class="summary-content">
+                <span class="label">Active Inverters</span>
+                <span class="value" id="summary-active-inverters">0/2</span>
+                <span class="meta" id="production-source-label">Source pending</span>
+            </div>
+            <i class="fas fa-plug summary-icon"></i>
+        </div>
+        <div class="summary-card is-energy">
+            <div class="summary-content">
+                <span class="label">Daily Production</span>
+                <span class="value" id="production-daily-energy">0.00 kWh</span>
+                <span class="meta" id="summary-total-meta">Installed capacity 0 kWp</span>
+            </div>
+            <i class="fas fa-chart-line summary-icon"></i>
+        </div>
+    </div>
 
-<!-- Energy Status Cards Row -->
-<div class="row" id="energy-cards">
-    <!-- Solar Generation Card -->
-    <div class="col-xl-3 col-md-6 mb-4">
-        <div class="card border-left-warning shadow h-100 py-2">
-            <div class="card-body">
-                <div class="row no-gutters align-items-center">
-                    <div class="col mr-2">
-                        <div class="text-xs font-weight-bold text-warning text-uppercase mb-1">
-                            Solar Generation</div>
-                        <div class="h5 mb-0 font-weight-bold text-gray-800" id="generation-power">0 W</div>
-                        <div class="text-xs text-muted mt-1">Real-time output</div>
+    <div class="ems-card strategy-panel">
+        <div class="ems-card-header">
+            <div>
+                <div class="ems-title">Strategy Control</div>
+                <div class="ems-subtitle">Allocation preview</div>
+            </div>
+            <div class="sync-badge" id="strategy-status-pill">No strategy read</div>
+        </div>
+
+        <div class="row">
+            <div class="col-lg-8 mb-3 mb-lg-0">
+                <div class="mb-3">
+                    <div class="ems-muted mb-2">Current strategy</div>
+                    <div class="h4 text-gray-800 mb-2" id="strategy-name">Standby</div>
+                    <div class="status-pills" id="constraint-pills">
+                        <span class="status-pill is-muted">Waiting</span>
                     </div>
-                    <div class="col-auto">
-                        <i class="fas fa-solar-panel fa-2x text-gray-300"></i>
+                </div>
+                <div class="allocation-grid">
+                    <div class="allocation-card pv">
+                        <span class="label">PV to EV</span>
+                        <span class="value" id="allocation-pv">0.00 kW</span>
+                    </div>
+                    <div class="allocation-card battery">
+                        <span class="label">Battery to EV</span>
+                        <span class="value" id="allocation-battery">0.00 kW</span>
+                    </div>
+                    <div class="allocation-card grid">
+                        <span class="label">Grid to EV</span>
+                        <span class="value" id="allocation-grid">0.00 kW</span>
+                    </div>
+                </div>
+                <div class="strategy-live-context" id="strategy-live-context">Live now: waiting for telemetry.</div>
+                <div class="ems-muted" id="strategy-summary-block">Read strategy to analyze the current plant state and preview the recommended operating mode before apply.</div>
+            </div>
+            <div class="col-lg-4">
+                <div class="mini-grid">
+                    <div class="mini-metric"><span class="label">Single EV Capacity</span><span class="value" id="capacity-1ev">0.00 kW</span></div>
+                    <div class="mini-metric"><span class="label">Two EV Capacity</span><span class="value" id="capacity-2ev">0.00 kW</span></div>
+                    <div class="mini-metric"><span class="label">Live Per EV</span><span class="value" id="capacity-session">--</span></div>
+                    <div class="mini-metric"><span class="label">Live Sessions</span><span class="value" id="capacity-active">0</span></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="strategy-actions">
+            <button class="btn btn-outline-primary btn-ems" id="btn-read-strategy" onclick="readStrategy()">
+                <i class="fas fa-brain mr-2"></i>Read Strategy
+            </button>
+            <button class="btn btn-primary btn-ems" id="btn-apply-allocation" onclick="applyEnergyAllocation()" disabled>
+                <i class="fas fa-bolt mr-2"></i>Apply
+            </button>
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col-12 mb-4">
+            <div class="hero-card ems-card">
+                <div class="hero-status-bar">
+                    <div>
+                        <div class="ems-title">Plant Flow</div>
+                        <div class="ems-subtitle">Real-Time Energy Routing</div>
+                        <div class="ems-muted">Live plant telemetry only. Strategy reasoning stays in Strategy Control.</div>
+                    </div>
+                    <div class="d-flex align-items-center" style="gap:0.75rem; flex-wrap: wrap;">
+                        <span class="live-badge"><i class="fas fa-signal"></i> Synced</span>
+                        <span class="sync-badge" id="flow-sync-text">Waiting for read</span>
+                    </div>
+                </div>
+
+                <div class="hero-grid">
+                    <svg class="flow-wire" aria-hidden="true">
+                        <defs>
+                            <marker id="flow-arrowhead" markerWidth="8" markerHeight="8" refX="8" refY="4" orient="auto" markerUnits="strokeWidth">
+                                <polygon points="0 0, 8 4, 0 8" fill="#667085"></polygon>
+                            </marker>
+                        </defs>
+                        <path id="route-pv-inverter" class="route-pv" marker-end="url(#flow-arrowhead)"></path>
+                        <path id="route-grid-inverter" class="route-grid" marker-end="url(#flow-arrowhead)"></path>
+                        <path id="route-inverter-battery" class="route-battery" marker-end="url(#flow-arrowhead)"></path>
+                        <path id="route-inverter-ev" class="route-ev" marker-end="url(#flow-arrowhead)"></path>
+                        <path id="route-inverter-building" class="route-building" marker-end="url(#flow-arrowhead)"></path>
+                    </svg>
+
+                    <div class="flow-node pv node-pv" id="node-pv">
+                        <div class="flow-node-header">
+                            <span class="flow-node-icon" aria-hidden="true"><i class="fas fa-solar-panel"></i></span>
+                            <span class="label">PV</span>
+                        </div>
+                        <span class="value" id="hero-pv-value">0.00 kW</span>
+                        <span class="meta" id="hero-pv-meta"></span>
+                    </div>
+
+                    <div class="flow-node grid node-grid" id="node-grid">
+                        <div class="flow-node-header">
+                            <span class="flow-node-icon" aria-hidden="true"><i class="fas fa-bolt"></i></span>
+                            <span class="label">Grid</span>
+                        </div>
+                        <span class="value" id="hero-grid-value">0.00 kW</span>
+                        <span class="meta" id="hero-grid-meta"></span>
+                    </div>
+
+                    <div class="flow-node node-inverter" id="node-inverter">
+                        <span class="flow-node-icon" aria-hidden="true"><i class="fas fa-wave-square"></i></span>
+                        <span class="inverter-title">Inverter</span>
+                        <span class="inverter-meta" id="hero-hub-meta">Priority order: 1. Building 2. Charging Stations 3. Battery</span>
+                    </div>
+
+                    <div class="flow-node battery node-battery" id="node-battery">
+                        <div class="flow-node-header">
+                            <span class="flow-node-icon" aria-hidden="true"><i class="fas fa-car-battery"></i></span>
+                            <span class="label">Battery</span>
+                        </div>
+                        <span class="value" id="hero-battery-value">0%</span>
+                        <span class="meta" id="hero-battery-meta">Idle</span>
+                    </div>
+
+                    <div class="flow-node ev node-ev" id="node-ev">
+                        <div class="flow-node-header">
+                            <span class="flow-node-icon" aria-hidden="true"><i class="fas fa-charging-station"></i></span>
+                            <span class="label">Charging Stations</span>
+                        </div>
+                        <span class="value" id="hero-ev-value">0.00 kW</span>
+                        <span class="meta" id="hero-ev-meta"></span>
+                    </div>
+
+                    <div class="flow-node building node-building" id="node-building">
+                        <div class="flow-node-header">
+                            <span class="flow-node-icon" aria-hidden="true"><i class="fas fa-building"></i></span>
+                            <span class="label">Building</span>
+                        </div>
+                        <span class="value" id="hero-building-value">0.00 kW</span>
+                        <span class="meta" id="hero-building-meta"></span>
                     </div>
                 </div>
             </div>
         </div>
-    </div>
-
-    <!-- Battery Level Card -->
-    <div class="col-xl-3 col-md-6 mb-4">
-        <div class="card border-left-info shadow h-100 py-2">
-            <div class="card-body">
-                <div class="row no-gutters align-items-center">
-                    <div class="col mr-2">
-                        <div class="text-xs font-weight-bold text-info text-uppercase mb-1">
-                            Battery Level</div>
-                        <div class="h5 mb-0 font-weight-bold text-gray-800" id="battery-soc">0%</div>
-                        <div class="text-xs text-muted mt-1">Average SOC</div>
+        <div class="col-lg-6 mb-4 mb-lg-0">
+            <div class="ems-card compact-card h-100">
+                <div class="ems-card-header">
+                    <div>
+                        <div class="ems-title">Inverters</div>
+                        <div class="ems-subtitle">Compact device state</div>
                     </div>
-                    <div class="col-auto">
-                        <i class="fas fa-battery-three-quarters fa-2x text-gray-300"></i>
+                    <div class="d-flex align-items-center" style="gap:0.75rem; flex-wrap: wrap;">
+                        <span class="sync-badge" id="device-source-badge">Source pending</span>
+                        <div class="sync-text" id="device-sync-text">Synced just now</div>
+                    </div>
+                </div>
+                <div class="device-list" id="inverter-list">
+                    <div class="device-row">
+                        <div class="device-name">No inverter data</div>
+                        <div class="device-state offline">Offline</div>
+                        <div>0.00 kW</div>
+                        <div>SOC 0%</div>
                     </div>
                 </div>
             </div>
         </div>
-    </div>
-
-    <!-- Active Inverters Card -->
-    <div class="col-xl-3 col-md-6 mb-4">
-        <div class="card border-left-success shadow h-100 py-2">
-            <div class="card-body">
-                <div class="row no-gutters align-items-center">
-                    <div class="col mr-2">
-                        <div class="text-xs font-weight-bold text-success text-uppercase mb-1">
-                            Active Inverters</div>
-                        <div class="h5 mb-0 font-weight-bold text-gray-800" id="active-inverters">0/2</div>
-                        <div class="text-xs text-muted mt-1">Devices online</div>
-                    </div>
-                    <div class="col-auto">
-                        <i class="fas fa-plug fa-2x text-gray-300"></i>
+        <div class="col-lg-6">
+            <div class="ems-card trend-panel h-100">
+                <div class="ems-card-header">
+                    <div>
+                        <div class="ems-title">Power Trend</div>
+                        <div class="ems-subtitle">24h output</div>
                     </div>
                 </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Today's Energy Card -->
-    <div class="col-xl-3 col-md-6 mb-4">
-        <div class="card border-left-primary shadow h-100 py-2">
-            <div class="card-body">
-                <div class="row no-gutters align-items-center">
-                    <div class="col mr-2">
-                        <div class="text-xs font-weight-bold text-primary text-uppercase mb-1">
-                            Today's Energy</div>
-                        <div class="h5 mb-0 font-weight-bold text-gray-800" id="daily-energy">0 kWh</div>
-                        <div class="text-xs text-muted mt-1">Total generated</div>
-                    </div>
-                    <div class="col-auto">
-                        <i class="fas fa-chart-line fa-2x text-gray-300"></i>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- EV Charging Recommendation -->
-<div class="row">
-    <div class="col-12 mb-4">
-        <div class="card shadow border-left-info">
-            <div class="card-header py-3 d-flex flex-row align-items-center justify-content-between">
-                <h6 class="m-0 font-weight-bold text-info">Energy Management & Recommendation</h6>
-                <button onclick="getChargingRecommendation()" class="btn btn-sm btn-info" id="btn-get-rec">
-                    <i class="fas fa-magic"></i> Calculate Recommendation
-                </button>
-            </div>
-            <div class="card-body" id="charging-content">
-                <div class="text-center py-4">
-                    <i class="fas fa-brain fa-3x text-gray-300 mb-3"></i>
-                    <p class="text-gray-600">Get personalized charging and inverter operating recommendations based on current weather, solar generation and battery SOC.</p>
-                </div>
-            </div>
-            <!-- Action Footer (Hidden by Default) -->
-            <div class="card-footer text-right d-none" id="recommendation-actions">
-                <button class="btn btn-outline-secondary btn-sm mr-2" onclick="document.getElementById('recommendation-actions').classList.add('d-none');">
-                    Dismiss
-                </button>
-                <button class="btn btn-success btn-sm" id="btn-apply-inverter" onclick="applyInverterMode()">
-                    <i class="fas fa-bolt"></i> <strong>Apply to Inverter</strong>
-                </button>
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- Inverter Status -->
-<div class="row">
-    <div class="col-12">
-        <div class="card shadow mb-4">
-            <div class="card-header py-3 d-flex flex-row align-items-center justify-content-between">
-                <h6 class="m-0 font-weight-bold text-primary">Inverter Status</h6>
-                <div class="dropdown no-arrow">
-                    <button onclick="collectData()" class="btn btn-sm btn-outline-primary">
-                        <i class="fas fa-sync"></i> Refresh
-                    </button>
-                </div>
-            </div>
-            <div class="card-body">
-                <div class="row" id="inverter-list">
-                    <!-- Inverters will be loaded here -->
-                    <div class="col-12 text-center text-gray-500 py-4">
-                        <i class="fas fa-plug fa-2x mb-2"></i>
-                        <p>No inverter data available. Click refresh to collect data.</p>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- Historical Data -->
-<div class="row">
-    <div class="col-12">
-        <div class="card shadow mb-4">
-            <div class="card-header py-3">
-                <h6 class="m-0 font-weight-bold text-primary">24-Hour Generation Chart</h6>
-            </div>
-            <div class="card-body">
-                <div class="chart-area" style="position: relative; height: 300px; width: 100%;">
+                <div class="chart-shell">
                     <canvas id="generation-chart"></canvas>
                 </div>
             </div>
@@ -213,34 +967,491 @@
 {% block extra_js %}
 <script src="{% static 'js/api-client.js' %}"></script>
 <script>
-    // Global variable to hold recommendation result temporarily in memory
-    let lastRecommendationMode = null;
+    let latestDashboardData = null;
+    let latestRecommendation = null;
 
-    async function applyInverterMode() {
-        if (!lastRecommendationMode) return;
-        
-        const btn = document.getElementById('btn-apply-inverter');
-        btn.disabled = true;
-        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Apply...';
-        
+    function formatKw(value) {
+        return `${Number(value || 0).toFixed(2)} kW`;
+    }
+
+    function formatWToKw(value) {
+        return `${(Number(value || 0) / 1000).toFixed(2)} kW`;
+    }
+
+    function formatPowerWatts(value) {
+        const numericValue = Number(value || 0);
+        if (numericValue >= 1000) {
+            return `${(numericValue / 1000).toFixed(2)} kW`;
+        }
+        return `${Math.round(numericValue)} W`;
+    }
+
+    function formatEnergyTotal(value) {
+        const numericValue = Number(value || 0);
+        if (numericValue >= 1000) {
+            return `${(numericValue / 1000).toFixed(2)} MWh`;
+        }
+        return `${numericValue.toFixed(2)} kWh`;
+    }
+
+    function formatCapacity(value) {
+        return `${Number(value || 0).toFixed(Number(value || 0) % 1 === 0 ? 0 : 2)} kWp`;
+    }
+
+    function formatSourceLabel(value) {
+        if (value === 'local') {
+            return 'Local Modbus';
+        }
+        if (value === 'cloud') {
+            return 'Cloud API';
+        }
+        if (value === 'database') {
+            return 'Database Fallback';
+        }
+        return 'Source pending';
+    }
+
+    function formatSourceBadgeLabel(value) {
+        if (value === 'local') {
+            return 'Local (Modbus)';
+        }
+        if (value === 'cloud') {
+            return 'Cloud';
+        }
+        if (value === 'database') {
+            return 'Database';
+        }
+        return 'Source pending';
+    }
+
+    function refreshSummaryDateTime() {
+        const now = new Date();
+        document.getElementById('summary-time').textContent = now.toLocaleTimeString('en-US', {
+            hour: '2-digit',
+            minute: '2-digit'
+        });
+        document.getElementById('summary-date').textContent = now.toLocaleDateString('en-US', {
+            weekday: 'long',
+            year: 'numeric',
+            month: 'long',
+            day: 'numeric'
+        });
+    }
+
+    function formatSyncTime(isoTimestamp) {
+        if (!isoTimestamp) {
+            return 'Waiting for read';
+        }
+        return `Synced ${window.EVPlatformAPI.formatTime(isoTimestamp)}`;
+    }
+
+    function toTitleCase(value) {
+        if (!value) {
+            return 'Standby';
+        }
+        return String(value)
+            .replace(/_/g, ' ')
+            .toLowerCase()
+            .replace(/\b\w/g, character => character.toUpperCase());
+    }
+
+    function normalizeStrategyName(value) {
+        return toTitleCase(value).replace(/\s+Strategy$/i, '');
+    }
+
+    function setTextIfExists(elementId, value) {
+        const element = document.getElementById(elementId);
+        if (element) {
+            element.textContent = value;
+        }
+    }
+
+    function toggleClassIfExists(elementId, className, force) {
+        const element = document.getElementById(elementId);
+        if (element) {
+            element.classList.toggle(className, force);
+        }
+    }
+
+    function setFlowActive(pathId, nodeId, isActive) {
+        toggleClassIfExists(pathId, 'is-active', isActive);
+        toggleClassIfExists(nodeId, 'is-active', isActive);
+    }
+
+    function setFlowDirection(pathId, direction) {
+        const path = document.getElementById(pathId);
+        if (!path) {
+            return;
+        }
+
+        if (direction === 'start') {
+            path.setAttribute('marker-start', 'url(#flow-arrowhead)');
+            path.removeAttribute('marker-end');
+            return;
+        }
+
+        if (direction === 'end') {
+            path.setAttribute('marker-end', 'url(#flow-arrowhead)');
+            path.removeAttribute('marker-start');
+            return;
+        }
+
+        path.removeAttribute('marker-start');
+        path.removeAttribute('marker-end');
+    }
+
+    function formatBatteryLiveMeta(powerWatts, averageSoc) {
+        if (powerWatts === 0) {
+            return `Idle | SOC ${Number(averageSoc || 0).toFixed(1)}%`;
+        }
+        return `${powerWatts < 0 ? 'Discharging' : 'Charging'} ${formatPowerWatts(Math.abs(powerWatts))}`;
+    }
+
+    function buildLivePlantSummary(data, activeSessions = null) {
+        const current = data?.current || {};
+        const evPowerWatts = Number(current.ev_power_watts || 0);
+        const batteryPowerWatts = Number(current.battery_power_watts || 0);
+        const batteryText = batteryPowerWatts === 0
+            ? `Battery idle at ${Number(current.average_battery_soc || 0).toFixed(1)}% SOC`
+            : `Battery ${batteryPowerWatts < 0 ? 'discharging' : 'charging'} ${formatPowerWatts(Math.abs(batteryPowerWatts))}`;
+        const resolvedSessions = activeSessions === null ? Number(current.active_ev_sessions || 0) : Number(activeSessions || 0);
+        return `Live now: PV ${formatWToKw(current.total_generation_watts || 0)}, EVs ${formatWToKw(evPowerWatts)}, Building ${formatWToKw(current.load_power_watts || 0)}, Grid ${formatWToKw(current.grid_power_watts || 0)}. ${batteryText}. Active sessions: ${resolvedSessions}.`;
+    }
+
+    function renderStrategyLiveContext(text) {
+        setTextIfExists('strategy-live-context', text);
+    }
+
+    function getNodeRectInGrid(grid, elementId) {
+        const gridRect = grid.getBoundingClientRect();
+        const element = document.getElementById(elementId);
+        if (!element) {
+            return null;
+        }
+
+        const rect = element.getBoundingClientRect();
+        return {
+            left: rect.left - gridRect.left,
+            top: rect.top - gridRect.top,
+            right: rect.right - gridRect.left,
+            bottom: rect.bottom - gridRect.top,
+            width: rect.width,
+            height: rect.height,
+            centerX: rect.left - gridRect.left + (rect.width / 2),
+            centerY: rect.top - gridRect.top + (rect.height / 2),
+        };
+    }
+
+    function setFlowRoute(pathId, points) {
+        const path = document.getElementById(pathId);
+        if (!path || !points || points.length < 2) {
+            return;
+        }
+
+        const rounded = points.map(point => ({
+            x: Number(point.x.toFixed(1)),
+            y: Number(point.y.toFixed(1)),
+        }));
+
+        const segments = rounded.map((point, index) => (
+            `${index === 0 ? 'M' : 'L'} ${point.x} ${point.y}`
+        ));
+        path.setAttribute('d', segments.join(' '));
+    }
+
+    function drawFlowRoutes() {
+        const grid = document.querySelector('.hero-grid');
+        const svg = grid?.querySelector('.flow-wire');
+        if (!grid || !svg) {
+            return;
+        }
+
+        const width = Math.round(grid.clientWidth);
+        const height = Math.round(grid.clientHeight);
+        if (!width || !height) {
+            return;
+        }
+
+        svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
+
+        const pv = getNodeRectInGrid(grid, 'node-pv');
+        const gridNode = getNodeRectInGrid(grid, 'node-grid');
+        const inverter = getNodeRectInGrid(grid, 'node-inverter');
+        const battery = getNodeRectInGrid(grid, 'node-battery');
+        const charging = getNodeRectInGrid(grid, 'node-ev');
+        const building = getNodeRectInGrid(grid, 'node-building');
+        if (!pv || !gridNode || !inverter || !battery || !charging || !building) {
+            return;
+        }
+
+        const inverterInputY = inverter.centerY;
+        const inverterInputLaneOffset = 28;
+        const inverterBatteryX = inverter.left + (inverter.width * 0.28);
+        const inverterEvX = inverter.centerX;
+        const inverterBuildingX = inverter.right - (inverter.width * 0.28);
+        const splitY = inverter.bottom + 30;
+        const pvTurnX = inverter.left - inverterInputLaneOffset;
+        const gridTurnX = inverter.right + inverterInputLaneOffset;
+
+        setFlowRoute('route-pv-inverter', [
+            { x: pv.right, y: pv.centerY },
+            { x: pvTurnX, y: pv.centerY },
+            { x: pvTurnX, y: inverterInputY },
+            { x: inverter.left, y: inverterInputY },
+        ]);
+
+        setFlowRoute('route-grid-inverter', [
+            { x: gridNode.left, y: gridNode.centerY },
+            { x: gridTurnX, y: gridNode.centerY },
+            { x: gridTurnX, y: inverterInputY },
+            { x: inverter.right, y: inverterInputY },
+        ]);
+
+        setFlowRoute('route-inverter-battery', [
+            { x: inverterBatteryX, y: inverter.bottom },
+            { x: inverterBatteryX, y: splitY },
+            { x: battery.centerX, y: splitY },
+            { x: battery.centerX, y: battery.top },
+        ]);
+
+        setFlowRoute('route-inverter-ev', [
+            { x: inverterEvX, y: inverter.bottom },
+            { x: inverterEvX, y: charging.top },
+        ]);
+
+        setFlowRoute('route-inverter-building', [
+            { x: inverterBuildingX, y: inverter.bottom },
+            { x: inverterBuildingX, y: splitY },
+            { x: building.centerX, y: splitY },
+            { x: building.centerX, y: building.top },
+        ]);
+    }
+
+    function renderConstraintPills(items, targetId, mutedLabel = 'Waiting') {
+        const target = document.getElementById(targetId);
+        if (!items || !items.length) {
+            target.innerHTML = `<span class="status-pill is-muted">${mutedLabel}</span>`;
+            return;
+        }
+        target.innerHTML = items.map(item => `<span class="status-pill">${item}</span>`).join('');
+    }
+
+    function renderProductionSummary(data) {
+        const summary = data.production_summary || {};
+        const sourceValue = summary.source || data.connection_source;
+        const sourceLabel = formatSourceLabel(sourceValue);
+        const sourceBadgeLabel = formatSourceBadgeLabel(sourceValue);
+
+        document.getElementById('production-current-power').textContent = formatPowerWatts(summary.current_power_watts);
+        document.getElementById('production-daily-energy').textContent = `${Number(summary.daily_energy_kwh || 0).toFixed(2)} kWh`;
+        document.getElementById('summary-battery-level').textContent = `${Number(data.current.average_battery_soc || 0).toFixed(1)}%`;
+        document.getElementById('summary-active-inverters').textContent = `${Number(data.current.active_inverters || 0)}/2`;
+        document.getElementById('production-source-label').textContent = sourceLabel;
+        const connectionSourceBadge = document.getElementById('connection-source-badge');
+        if (connectionSourceBadge) {
+            connectionSourceBadge.innerHTML = `<i class="fas fa-circle"></i> ${sourceBadgeLabel}`;
+        }
+        const deviceSourceBadge = document.getElementById('device-source-badge');
+        if (deviceSourceBadge) {
+            deviceSourceBadge.textContent = sourceLabel;
+        }
+        document.getElementById('summary-total-meta').textContent = `${formatCapacity(summary.installed_capacity_kwp)} installed | ${formatEnergyTotal(summary.total_energy_kwh)} total`;
+    }
+
+    function updateHeroFromTelemetry(data) {
+        latestDashboardData = data;
+        const readings = data.current.readings || [];
+        const primaryReading = readings[0] || {};
+        const totalGenerationWatts = Number(data.current.total_generation_watts || 0);
+        const gridInputWatts = Number(data.current.grid_power_watts || primaryReading.grid_power || 0);
+        const buildingLoadWatts = Number(data.current.load_power_watts || 0);
+        const batteryPowerWatts = Number(data.current.battery_power_watts || 0);
+        const evLivePowerWatts = Number(data.current.ev_power_watts || 0);
+        renderProductionSummary(data);
+        document.getElementById('hero-pv-value').textContent = formatWToKw(totalGenerationWatts);
+        document.getElementById('hero-pv-meta').textContent = '';
+        document.getElementById('hero-hub-meta').textContent = 'Priority order: 1. Building 2. Charging Stations 3. Battery';
+        document.getElementById('hero-building-value').textContent = formatWToKw(buildingLoadWatts);
+        document.getElementById('hero-building-meta').textContent = '';
+        document.getElementById('hero-battery-value').textContent = `${Number(data.current.average_battery_soc || 0).toFixed(1)}%`;
+        document.getElementById('hero-battery-meta').textContent = formatBatteryLiveMeta(batteryPowerWatts, data.current.average_battery_soc || 0);
+        document.getElementById('hero-grid-value').textContent = formatWToKw(gridInputWatts);
+        document.getElementById('hero-grid-meta').textContent = '';
+        document.getElementById('hero-ev-value').textContent = formatWToKw(evLivePowerWatts);
+        document.getElementById('hero-ev-meta').textContent = '';
+        renderStrategyLiveContext(buildLivePlantSummary(data, data.current.active_ev_sessions));
+        toggleClassIfExists('node-inverter', 'is-active', totalGenerationWatts > 0 || gridInputWatts > 0);
+        setFlowActive('route-pv-inverter', 'node-pv', totalGenerationWatts > 0);
+        setFlowActive('route-grid-inverter', 'node-grid', gridInputWatts > 0);
+        setFlowActive('route-inverter-building', 'node-building', buildingLoadWatts > 0);
+        setFlowActive('route-inverter-ev', 'node-ev', evLivePowerWatts > 0);
+        setFlowActive('route-inverter-battery', 'node-battery', batteryPowerWatts !== 0);
+        setFlowDirection('route-inverter-battery', batteryPowerWatts === 0 ? null : (batteryPowerWatts < 0 ? 'start' : 'end'));
+        requestAnimationFrame(drawFlowRoutes);
+        document.getElementById('global-sync-text').textContent = formatSyncTime(primaryReading.timestamp);
+        document.getElementById('flow-sync-text').textContent = formatSyncTime(primaryReading.timestamp);
+        document.getElementById('device-sync-text').textContent = formatSyncTime(primaryReading.timestamp);
+    }
+
+    function renderWeatherTelemetry(weather) {
+        const isRain = Number(weather.precipitation_mm || 0) > 0.1;
+        const cloudCover = Number(weather.cloud_cover || 0);
+        const condition = isRain ? 'Rain' : (cloudCover > 50 ? 'Cloudy' : 'Sunny');
+        let iconClass = 'fa-sun';
+        if (isRain) {
+            iconClass = 'fa-cloud-rain';
+        } else if (cloudCover > 60) {
+            iconClass = 'fa-cloud';
+        } else if (cloudCover > 20) {
+            iconClass = 'fa-cloud-sun';
+        }
+
+        document.getElementById('summary-temperature').textContent = `${Number(weather.temp_c || 0).toFixed(1)}°C`;
+        document.getElementById('summary-conditions-meta').textContent = `Clouds: ${cloudCover.toFixed(0)}% | ${condition}`;
+        document.getElementById('summary-wind').textContent = `${Number(weather.wind_kph || 0).toFixed(1)} km/h`;
+        document.getElementById('summary-pressure').textContent = `Pressure: ${weather.pressure_hpa ? `${weather.pressure_hpa} hPa` : 'N/A'}`;
+        document.getElementById('summary-irradiance').textContent = `${Number(weather.irradiance_wm2 || 0).toFixed(0)} W/m²`;
+
+        const icon = document.getElementById('summary-conditions-icon');
+        icon.className = `fas ${iconClass} summary-icon`;
+    }
+
+    function updateInverterList(readings) {
+        const container = document.getElementById('inverter-list');
+        container.innerHTML = '';
+
+        if (!readings || readings.length === 0) {
+            container.innerHTML = `
+                <div class="device-row">
+                    <div class="device-name">No inverter data</div>
+                    <div class="device-state offline">Offline</div>
+                    <div>0.00 kW</div>
+                    <div>SOC 0%</div>
+                </div>
+            `;
+            return;
+        }
+
+        readings.forEach(reading => {
+            const row = document.createElement('div');
+            const isOnline = reading.connect_status === 1;
+            row.className = 'device-row';
+            row.innerHTML = `
+                <div class="device-name">${reading.device_sn}</div>
+                <div class="device-state ${isOnline ? 'online' : 'offline'}">● ${isOnline ? 'Online' : 'Offline'}</div>
+                <div>${formatWToKw(reading.generation_power || 0)}</div>
+                <div>SOC ${Number(reading.battery_soc || 0).toFixed(1)}%</div>
+            `;
+            container.appendChild(row);
+        });
+    }
+
+    function resetStrategyPanel() {
+        document.getElementById('strategy-name').textContent = 'Standby';
+        document.getElementById('allocation-pv').textContent = '0.00 kW';
+        document.getElementById('allocation-battery').textContent = '0.00 kW';
+        document.getElementById('allocation-grid').textContent = '0.00 kW';
+        document.getElementById('capacity-1ev').textContent = '0.00 kW';
+        document.getElementById('capacity-2ev').textContent = '0.00 kW';
+        document.getElementById('capacity-session').textContent = '--';
+        document.getElementById('capacity-active').textContent = String(Number(latestDashboardData?.current?.active_ev_sessions || 0));
+        renderStrategyLiveContext(latestDashboardData ? buildLivePlantSummary(latestDashboardData, latestDashboardData?.current?.active_ev_sessions) : 'Live now: waiting for telemetry.');
+        document.getElementById('strategy-summary-block').textContent = 'Read strategy to see the recommended mode and the expected EV power split before apply.';
+        document.getElementById('strategy-status-pill').textContent = 'No strategy read';
+        toggleClassIfExists('allocation-detail-row', 'd-none', true);
+        toggleClassIfExists('allocation-empty-state', 'd-none', false);
+        renderConstraintPills([], 'constraint-pills');
+        document.getElementById('btn-apply-allocation').disabled = true;
+    }
+
+    function renderStrategyDecision(data) {
+        latestRecommendation = data;
+        const recommended = data.recommended_plan || {};
+        const allocation = recommended.allocation_plan || {};
+        const constraints = allocation.constraint_labels || [];
+        const strategyName = normalizeStrategyName(recommended.strategy_label || recommended.strategy);
+        const activeSessions = Number(recommended.active_ev_sessions || 0);
+        const hasRecommendation = Object.keys(allocation).length > 0;
+
+        document.getElementById('strategy-name').textContent = strategyName;
+        document.getElementById('allocation-pv').textContent = formatKw(allocation.pv_to_ev_kw || 0);
+        document.getElementById('allocation-battery').textContent = formatKw(allocation.battery_to_ev_kw || 0);
+        document.getElementById('allocation-grid').textContent = formatKw(allocation.grid_to_ev_kw || 0);
+        document.getElementById('capacity-1ev').textContent = formatKw(data.scenario_1_ev?.power_allowed || 0);
+        document.getElementById('capacity-2ev').textContent = formatKw(data.scenario_2_ev?.power_allowed || 0);
+        document.getElementById('capacity-session').textContent = activeSessions > 0
+            ? formatKw(allocation.per_session_limit_kw || 0)
+            : '--';
+        document.getElementById('capacity-active').textContent = String(activeSessions);
+        renderStrategyLiveContext(buildLivePlantSummary(latestDashboardData, activeSessions));
+        document.getElementById('strategy-summary-block').textContent = `${strategyName}: ${allocation.summary || 'Allocation ready.'} EV split now is PV ${formatKw(allocation.pv_to_ev_kw || 0)}, Battery ${formatKw(allocation.battery_to_ev_kw || 0)}, Grid ${formatKw(allocation.grid_to_ev_kw || 0)}.`;
+        document.getElementById('strategy-status-pill').textContent = activeSessions > 0 ? 'Strategy ready' : 'Preview ready';
+
+        toggleClassIfExists('allocation-detail-row', 'd-none', activeSessions === 0);
+        toggleClassIfExists('allocation-empty-state', 'd-none', activeSessions > 0);
+
+        renderConstraintPills(constraints, 'constraint-pills', 'No constraints');
+
+        document.getElementById('btn-apply-allocation').disabled = !hasRecommendation;
+    }
+
+    async function applyEnergyAllocation() {
+        if (!latestRecommendation?.recommended_plan?.allocation_plan) {
+            return;
+        }
+
+        const button = document.getElementById('btn-apply-allocation');
+        button.disabled = true;
+        button.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Apply';
+
         try {
-            // Directly call an endpoint to trigger the modbus commands associated with this mode
             const response = await window.EVPlatformAPI.request('/energy/recommendations/direct-apply/', {
                 method: 'POST',
-                body: JSON.stringify({ mode: lastRecommendationMode })
+                body: JSON.stringify({
+                    allocation_plan: latestRecommendation.recommended_plan.allocation_plan,
+                })
             });
-            
-            if (response.success) {
-                alert("Успешно приложен режим по Modbus!");
-                document.getElementById('recommendation-actions').classList.add('d-none');
-            } else {
-                alert("Грешка при прилагане: " + response.message);
+
+            if (!response.success) {
+                throw new Error(response.message || 'Apply failed');
             }
+
+            document.getElementById('strategy-status-pill').textContent = 'Applied';
+            await loadDashboardData();
         } catch (error) {
-            alert("Failed to communicate with inverter: " + error.message);
+            console.error('Apply EMS allocation failed:', error);
         } finally {
-            btn.disabled = false;
-            btn.innerHTML = '<i class="fas fa-bolt"></i> <strong>Apply to Inverter</strong>';
+            button.innerHTML = '<i class="fas fa-bolt mr-2"></i>Apply';
+            button.disabled = false;
+        }
+    }
+
+    async function readInverterData() {
+        try {
+            await window.EVPlatformAPI.collectEnergyData();
+        } catch (error) {
+            console.error('Failed inverter read:', error);
+        }
+        await loadDashboardData();
+    }
+
+    async function readWeatherData() {
+        try {
+            await window.EVPlatformAPI.fetchWeather();
+        } catch (error) {
+            console.error('Failed weather fetch:', error);
+        }
+        await loadWeatherData();
+    }
+
+    async function readStrategy() {
+        try {
+            document.getElementById('strategy-status-pill').textContent = 'Reading';
+            const data = await window.EVPlatformAPI.getChargingRecommendation();
+            renderStrategyDecision(data);
+        } catch (error) {
+            console.error('Failed strategy read:', error);
+            document.getElementById('strategy-status-pill').textContent = 'Read failed';
         }
     }
 </script>
@@ -250,272 +1461,156 @@ let chart = null;
 
 async function loadDashboardData() {
     try {
-        // Load weather in parallel
-        loadWeatherWidget('weather-cards');
-
         const data = await window.EVPlatformAPI.getDashboardData();
-        
-        // Update connection source badge
-        const badge = document.getElementById('data-source-badge');
-        if (badge) {
-            badge.classList.remove('d-none', 'badge-secondary', 'badge-success', 'badge-info');
-            if (data.connection_source === 'local') {
-                badge.classList.add('badge-success');
-                badge.innerHTML = '<i class="fas fa-network-wired mr-1"></i> Local (Modbus)';
-            } else if (data.connection_source === 'cloud') {
-                badge.classList.add('badge-info');
-                badge.innerHTML = '<i class="fas fa-cloud mr-1"></i> Cloud (API)';
-            } else {
-                badge.classList.add('badge-secondary');
-                badge.innerHTML = '<i class="fas fa-question-circle mr-1"></i> Unknown Source';
-            }
-        }
-        
-        // Update metrics
-        document.getElementById('generation-power').textContent = 
-            `${data.current.total_generation_watts} W`;
-        document.getElementById('battery-soc').textContent = 
-            `${data.current.average_battery_soc.toFixed(1)}%`;
-        document.getElementById('active-inverters').textContent = 
-            `${data.current.active_inverters}/2`;
-        document.getElementById('daily-energy').textContent = 
-            `${data.daily_stats.total_energy_kwh} kWh`;
-        
-        // Update inverter list
-        updateInverterList(data.current.readings);
-        
-        // Update chart
+        updateHeroFromTelemetry(data);
+        updateInverterList(data.current.readings || []);
         await updateChart();
-        
     } catch (error) {
         console.error('Failed to load dashboard data:', error);
     }
 }
 
-function updateInverterList(readings) {
-    const container = document.getElementById('inverter-list');
-    container.innerHTML = '';
-    
-    if (readings.length === 0) {
-        container.innerHTML = `
-            <div class="col-12 text-center text-gray-500 py-4">
-                <i class="fas fa-plug fa-2x mb-2"></i>
-                <p>No inverter data available. Click refresh to collect data.</p>
-            </div>
-        `;
-        return;
+async function loadWeatherData() {
+    try {
+        const weather = await window.EVPlatformAPI.getCurrentWeather();
+        renderWeatherTelemetry(weather);
+    } catch (error) {
+        console.error('Failed to load weather data:', error);
     }
-    
-    readings.forEach(reading => {
-        const status = reading.connect_status === 1 ? 'success' : 'danger';
-        const statusText = reading.connect_status === 1 ? 'Online' : 'Offline';
-        const col = document.createElement('div');
-        col.className = 'col-xl-4 col-md-6 mb-4';
-        col.innerHTML = `
-            <div class="card border-left-${status} shadow h-100 py-2">
-                <div class="card-body">
-                    <div class="row no-gutters align-items-center">
-                        <div class="col mr-2">
-                            <div class="text-xs font-weight-bold text-${status} text-uppercase mb-1">
-                                ${reading.device_sn}</div>
-                            <div class="h6 mb-0 font-weight-bold text-gray-800">
-                                <i class="fas fa-circle text-${status} fa-xs"></i> ${statusText}
-                            </div>
-                            <div class="text-xs text-muted mt-1">
-                                Generation: ${reading.generation_power || 0} W<br>
-                                Battery: ${reading.battery_soc || 0}%
-                            </div>
-                        </div>
-                        <div class="col-auto">
-                            <i class="fas fa-plug fa-2x text-gray-300"></i>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        `;
-        container.appendChild(col);
-    });
 }
 
 async function updateChart() {
     try {
         const response = await fetch('/api/energy/chart-data/?range=24h');
         const data = await response.json();
-        
+
         const ctx = document.getElementById('generation-chart');
         if (window.generationChart) {
             window.generationChart.destroy();
         }
-        
+
         window.generationChart = new Chart(ctx, {
             type: 'line',
             data: {
                 labels: data.labels,
                 datasets: [{
-                    label: 'Генерация (kW)',
+                    label: 'Power Trend',
                     data: data.datasets.pv_generation,
-                    backgroundColor: "rgba(78, 115, 223, 0.05)",
-                    borderColor: "rgba(78, 115, 223, 1)",
-                    pointRadius: 1,
-                    pointBackgroundColor: "rgba(78, 115, 223, 1)",
-                    pointBorderColor: "rgba(78, 115, 223, 1)",
-                    pointHoverRadius: 3,
-                    pointHoverBackgroundColor: "rgba(78, 115, 223, 1)",
-                    pointHoverBorderColor: "rgba(78, 115, 223, 1)",
-                    pointHitRadius: 10,
-                    pointBorderWidth: 2,
-                    fill: true,
-                    tension: 0.3
+                    backgroundColor: 'transparent',
+                    borderColor: 'rgba(125, 211, 252, 0.95)',
+                    pointRadius: 0,
+                    pointHoverRadius: 2,
+                    borderWidth: 2,
+                    fill: false,
+                    tension: 0.28
                 }]
             },
             options: {
                 maintainAspectRatio: false,
                 responsive: true,
-                interaction: {
-                    mode: 'index',
-                    intersect: false,
-                },
                 plugins: {
                     legend: { display: false }
                 },
                 scales: {
                     x: {
                         grid: { display: false, drawBorder: false },
-                        ticks: { maxTicksLimit: 12, autoSkip: true }
+                        ticks: { maxTicksLimit: 8, autoSkip: true, color: '#858796' }
                     },
                     y: {
                         beginAtZero: true,
-                        title: { display: true, text: 'Мощност (kW)' },
-                        grid: { color: "rgb(234, 236, 244)", drawBorder: false, borderDash: [2] }
+                        ticks: { display: false },
+                        grid: { color: 'rgba(133, 135, 150, 0.12)', drawBorder: false, borderDash: [2] }
                     }
                 }
             }
         });
-        
+
     } catch (error) {
         console.error('Failed to load chart data:', error);
     }
 }
 
-async function getChargingRecommendation() {
-    const content = document.getElementById('charging-content');
-    const actionsFooter = document.getElementById('recommendation-actions');
-    
-    // Show loading
-    content.innerHTML = '<div class="text-center py-4"><div class="spinner-border text-primary" role="status"></div><p class="mt-2 text-muted">Анализиране на системата...</p></div>';
-    actionsFooter.classList.add('d-none');
-    
-    try {
-        const data = await window.EVPlatformAPI.getChargingRecommendation();
-        
-        let sc1 = data.scenario_1_ev;
-        let sc2 = data.scenario_2_ev;
-        let p_mode = sc1.mode; // Algorithm selected mode
-        lastRecommendationMode = p_mode;
-        
-        content.innerHTML = `
-            <div class="alert alert-info">
-                <p class="mb-0"><i class="fas fa-info-circle"></i> <strong>Информация:</strong> ${data.context}</p>
-            </div>
-            
-            <div class="row">
-                <div class="col-md-6 mb-3">
-                    <div class="card border-left-success h-100">
-                        <div class="card-body py-2">
-                            <h6 class="font-weight-bold text-success mb-1">Сценарий 1 (Един автомобил - 11kW)</h6>
-                            <p class="small mb-1 text-gray-800">${sc1.advice}</p>
-                            <p class="mb-0 small"><strong>Отпусната мощност:</strong> ${sc1.power_allowed} kW</p>
-                        </div>
-                    </div>
-                </div>
-                <div class="col-md-6 mb-3">
-                    <div class="card border-left-primary h-100">
-                        <div class="card-body py-2">
-                            <h6 class="font-weight-bold text-primary mb-1">Сценарий 2 (Два автомобила - 22kW)</h6>
-                            <p class="small mb-1 text-gray-800">${sc2.advice}</p>
-                            <p class="mb-0 small"><strong>Отпусната мощност:</strong> ${sc2.power_allowed} kW</p>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            
-            <div class="alert alert-secondary mt-2 mb-0">
-                <i class="fas fa-microchip"></i> <strong>Препоръчан базов режим на инвертора:</strong> 
-                <span class="badge badge-dark p-2">${p_mode}</span>
-            </div>
-        `;
-        
-        actionsFooter.classList.remove('d-none');
-        
-    } catch (error) {
-        content.innerHTML = `
-            <div class="alert alert-danger">
-                <i class="fas fa-exclamation-circle"></i> Грешка при получаването на препоръка от алгоритъма. API-то не отговори.
-            </div>
-        `;
-        console.error('Charging recommendation error:', error);
-    }
-}
-
-function startCharging() {
-    alert('Charging started! (This would integrate with your EV charging system)');
-}
-
-function scheduleCharging() {
-    alert('Charging scheduled for optimal conditions!');
-}
-
 async function collectData() {
+    const refreshButton = document.getElementById('refresh-dashboard-btn');
+    const refreshIcon = refreshButton ? refreshButton.querySelector('i') : null;
+    const syncLabel = document.getElementById('global-sync-text');
+    const previousSyncText = syncLabel ? syncLabel.textContent : '';
+
+    if (refreshButton) {
+        refreshButton.disabled = true;
+    }
+    if (refreshIcon) {
+        refreshIcon.classList.add('fa-spin');
+    }
+    if (syncLabel) {
+        syncLabel.textContent = 'Refreshing...';
+    }
+
     try {
-        // Parallel data collection: Inverters + Weather (Force Refresh)
-        showNotification('Refreshing Inverter and Weather data...', 'info');
-        
-        await Promise.all([
+        const collectionResults = await Promise.allSettled([
             window.EVPlatformAPI.collectEnergyData(),
             window.EVPlatformAPI.fetchWeather()
         ]);
 
-        loadDashboardData(); // Refresh the UI
-        showNotification('Data collection completed successfully!', 'success');
+        collectionResults.forEach((result, index) => {
+            if (result.status === 'rejected') {
+                const label = index === 0 ? 'inverter read' : 'weather refresh';
+                console.error(`Manual ${label} failed:`, result.reason);
+            }
+        });
+
+        const reloadResults = await Promise.allSettled([
+            loadDashboardData(),
+            loadWeatherData(),
+        ]);
+
+        const reloadFailed = reloadResults.every(result => result.status === 'rejected');
+        if (reloadFailed && syncLabel) {
+            syncLabel.textContent = 'Refresh failed';
+        }
     } catch (error) {
         console.error('Failed to collect data:', error);
-        showNotification('Failed to collect data: ' + error.message, 'error');
-    }
-}
-
-function getCookie(name) {
-    let cookieValue = null;
-    if (document.cookie && document.cookie !== '') {
-        const cookies = document.cookie.split(';');
-        for (let i = 0; i < cookies.length; i++) {
-            const cookie = cookies[i].trim();
-            if (cookie.substring(0, name.length + 1) === (name + '=')) {
-                cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
-                break;
-            }
+        if (syncLabel) {
+            syncLabel.textContent = 'Refresh failed';
+        }
+    } finally {
+        if (refreshIcon) {
+            refreshIcon.classList.remove('fa-spin');
+        }
+        if (refreshButton) {
+            refreshButton.disabled = false;
+        }
+        if (syncLabel && syncLabel.textContent === 'Refreshing...') {
+            syncLabel.textContent = previousSyncText || 'Refresh complete';
         }
     }
-    return cookieValue;
 }
 
-// Load data on page load
-document.addEventListener('DOMContentLoaded', loadDashboardData);
+document.addEventListener('DOMContentLoaded', async function() {
+    resetStrategyPanel();
+    refreshSummaryDateTime();
+    await Promise.all([
+        loadDashboardData(),
+        loadWeatherData(),
+    ]);
+});
 
-// Auto-refresh every 3 minutes (180000 ms)
-const REFRESH_INTERVAL = 3 * 60 * 1000;
+window.addEventListener('resize', () => {
+    requestAnimationFrame(drawFlowRoutes);
+});
+
+const REFRESH_INTERVAL = 10 * 1000;
+
+setInterval(refreshSummaryDateTime, 60 * 1000);
 
 setInterval(async () => {
     try {
-        console.log('Automated refresh: Updating weather and energy stats...');
-        // We do shallow update for UI (loadDashboardData) which fetches latest from DB
-        // But for "live" feel we might want to trigger collection too, 
-        // however triggering collection every 3 minutes might hit API limits or be slow.
-        // Best approach: Just refresh UI. The background service (celery/cron) should handle collection.
-        // Since we don't have background workers yet, we will trigger collection here.
-        
-        await collectData(); 
+        await Promise.all([
+            loadDashboardData(),
+            loadWeatherData(),
+        ]);
     } catch (e) {
-        console.error("Auto-refresh failed", e);
+        console.error('Auto-refresh failed', e);
     }
 }, REFRESH_INTERVAL);
 </script>

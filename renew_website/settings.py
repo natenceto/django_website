@@ -370,6 +370,7 @@ DEYE_LOCAL_IP = env('DEYE_LOCAL_IP', default='192.168.88.254')
 
 # Режим на свързване: 'cloud' (през интернет), 'local' (през мрежата) или 'auto'
 DEYE_CONNECTION_MODE = env('DEYE_CONNECTION_MODE', default='cloud')
+DEYE_INSTALLED_CAPACITY_KWP = env.float('DEYE_INSTALLED_CAPACITY_KWP', default=10.0)
 # =============================================================================
 # Celery Configuration
 # =============================================================================
