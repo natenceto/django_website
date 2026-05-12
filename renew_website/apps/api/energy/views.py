@@ -7,8 +7,8 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.decorators import action, api_view, permission_classes
 from django.shortcuts import render
-from django.utils import timezone
 from django.contrib.auth.decorators import login_required
+from django.utils import timezone
 from rest_framework.views import APIView
 
 from .services import InverterDataService, EVChargingOptimizer
@@ -22,12 +22,43 @@ from .serializers import (
 )
 from renew_website.apps.api.deye.cloud_client import DeyeCloudClient, DeyeCloudError, WORK_MODE_MAP
 from renew_website.apps.api.deye.manager import DeyeManager, DeyeManagerError
+from .decision_service import EnergyOrchestrator
+from .execution_service import EMSExecutionService
 from .utils import run_work_mode_algorithm
 
 logger = logging.getLogger(__name__)
 
 # Global cache for websocket performance
 _ws_performance_stats = {}
+
+
+def _strategy_to_str(strategy):
+    return strategy.name if hasattr(strategy, 'name') else str(strategy)
+
+
+def _serialize_strategy_decision(state, decision, target_ev_sessions, target_ev_demand_kw):
+    strategy = decision.strategy
+    plan = decision.allocation_plan
+    return {
+        'strategy': _strategy_to_str(strategy),
+        'strategy_label': str(strategy.label) if hasattr(strategy, 'label') else _strategy_to_str(strategy),
+        'active_ev_sessions': target_ev_sessions,
+        'requested_ev_demand_kw': round(target_ev_demand_kw, 2),
+        'ev_power_limit_kw': round(float(plan.get('ev_charge_limit_kw', 0.0) or 0.0), 2),
+        'allocation_plan': plan,
+        'current_snapshot': {
+            'battery_soc': state.battery_soc,
+            'pv_power_kw': state.pv_production_kw,
+            'load_power_kw': state.building_load_kw,
+            'weather_condition': state.weather_condition,
+            'cloud_cover_percent': state.cloud_cover_percent,
+            'weather_solar_score': state.weather_solar_score,
+            'weather_risk_score': state.weather_risk_score,
+            'is_night_tariff': state.is_night_tariff,
+            'active_ev_sessions': state.active_ev_sessions,
+            'total_ev_demand_kw': state.total_ev_demand_kw,
+        },
+    }
 
 # -----------------------
 # Views
@@ -94,64 +125,18 @@ def charging_recommendation(request):
     """
     Get EV charging recommendation based on real-time conditions (mocked 1 and 2 EV scenarios).
     """
-    from django.utils import timezone
-    from renew_website.apps.api.energy.models import InverterReading
-    from renew_website.apps.api.weather.models import WeatherLog
-    from renew_website.apps.algorithm.conditions import SystemState
-    from renew_website.apps.algorithm.engine import DecisionEngine
-    from renew_website.apps.algorithm.work_modes import SystemWorkMode
-
     try:
-        latest_reading = InverterReading.objects.order_by('-timestamp').first()
-        pv_power_kw = (latest_reading.generation_power or 0) / 1000.0 if latest_reading else 0.0
-        battery_soc = float(latest_reading.battery_soc or 0) if latest_reading else 0.0
-        station_data = latest_reading.station_data or {} if latest_reading else {}
-        
-        load_power_kw = station_data.get('load_power', 0) / 1000.0
-        grid_voltage = station_data.get('grid_voltage', 230.0)
-        is_grid_available = bool(grid_voltage > 190.0)
+        orchestrator = EnergyOrchestrator()
+        current_decision = orchestrator.evaluate_current_decision()
+        decision_1 = orchestrator.evaluate_capacity_scenario(1, 11.0)
+        decision_2 = orchestrator.evaluate_capacity_scenario(2, 22.0)
+        current_state = current_decision.state or decision_1.state
 
-        latest_weather = WeatherLog.objects.order_by('-timestamp').first()
-        cloud_cover = float(latest_weather.cloud_cover) if latest_weather else 0.0
-        precipitation = float(latest_weather.precipitation_mm) if latest_weather else 0.0
-        is_raining = precipitation > 0
-
-        now = timezone.now()
-        current_hour = timezone.localtime(now).hour if timezone.is_aware(now) else now.hour
-        is_night_tariff = (current_hour >= 22 or current_hour < 6)
-
-        # Baseline common attributes
-        base_kwargs = {
-            'battery_soc': battery_soc,
-            'is_grid_available': is_grid_available,
-            'pv_production_kw': pv_power_kw,
-            'building_load_kw': load_power_kw,
-            'cloud_cover_percent': cloud_cover,
-            'is_raining': is_raining,
-            'weather_condition': 'clear',
-            'is_night_tariff': is_night_tariff,
+        snapshot = {
+            'pv_power_kw': round(current_state.pv_production_kw, 2) if current_state else 0.0,
+            'building_load_kw': round(current_state.building_load_kw, 2) if current_state else 0.0,
+            'battery_soc': round(current_state.battery_soc, 1) if current_state else 0.0,
         }
-
-        # Scenario 1: 1 EV (Demand = 11kW)
-        state_1 = SystemState(
-            active_ev_sessions=1,
-            total_ev_demand_kw=11.0,
-            **base_kwargs
-        )
-        decision_1 = DecisionEngine.evaluate(state_1)
-        
-        # Scenario 2: 2 EVs (Demand = 22kW)
-        state_2 = SystemState(
-            active_ev_sessions=2,
-            total_ev_demand_kw=22.0,
-            **base_kwargs
-        )
-        decision_2 = DecisionEngine.evaluate(state_2)
-
-        def mode_to_str(m):
-            if isinstance(m, SystemWorkMode):
-                return m.name
-            return str(m)
 
         def get_advice(power_allowed, target):
             if power_allowed >= target:
@@ -161,22 +146,37 @@ def charging_recommendation(request):
             else:
                 return "Липса на излишък. Зареждането ще бъде изчакване."
 
-        info_context = (f"Текуща PV мощност: {pv_power_kw:.2f}kW, "
-                        f"Консумация: {load_power_kw:.2f}kW, "
-                        f"Батерия: {battery_soc:.1f}%")
+        info_context = (
+            f"Текуща PV мощност: {snapshot['pv_power_kw']:.2f}kW, "
+            f"Консумация: {snapshot['building_load_kw']:.2f}kW, "
+            f"Батерия: {snapshot['battery_soc']:.1f}%"
+        )
+
+        recommended = decision_1 if decision_1.get('ev_power_limit_kw', 0) >= decision_2.get('ev_power_limit_kw', 0) else decision_2
+        recommended_state = state_1 if recommended is decision_1 else state_2
+        recommended_sessions = 1 if recommended is decision_1 else 2
+        recommended_demand = 11.0 if recommended is decision_1 else 22.0
 
         response_data = {
             "context": info_context,
             "scenario_1_ev": {
-                "mode": mode_to_str(decision_1.get("mode")),
-                "power_allowed": round(decision_1.get("ev_power_limit_kw", 0), 2),
-                "advice": get_advice(decision_1.get("ev_power_limit_kw", 0), 11.0)
+                "strategy": _strategy_to_str(decision_1.strategy),
+                "power_allowed": round(decision_1.allocation_plan.get("ev_charge_limit_kw", 0), 2),
+                "advice": get_advice(decision_1.allocation_plan.get("ev_charge_limit_kw", 0), 11.0),
+                "allocation_plan": decision_1.allocation_plan,
             },
             "scenario_2_ev": {
-                "mode": mode_to_str(decision_2.get("mode")),
-                "power_allowed": round(decision_2.get("ev_power_limit_kw", 0), 2),
-                "advice": get_advice(decision_2.get("ev_power_limit_kw", 0), 22.0)
-            }
+                "strategy": _strategy_to_str(decision_2.strategy),
+                "power_allowed": round(decision_2.allocation_plan.get("ev_charge_limit_kw", 0), 2),
+                "advice": get_advice(decision_2.allocation_plan.get("ev_charge_limit_kw", 0), 22.0),
+                "allocation_plan": decision_2.allocation_plan,
+            },
+            "recommended_plan": _serialize_strategy_decision(
+                current_decision.state,
+                current_decision,
+                current_decision.state.active_ev_sessions if current_decision.state else 0,
+                current_decision.state.total_ev_demand_kw if current_decision.state else 0.0,
+            ),
         }
         
         return Response(response_data)
@@ -232,15 +232,16 @@ def dashboard_data(request):
         recent_readings = service.get_latest_readings()
 
         # Get today's energy from Deye API directly (more accurate)
-        data_source = 'database_fallback'
+        data_source = 'unknown'
         try:
             # Use Manager to get normalized data from best source (Cloud or Local)
             manager = DeyeManager()
             
+            # get_latest_data returns a dictionary serialized by DeyeCloudSerializer/DeyeLocalSerializer
             normalized_data = manager.get_latest_data()
             
-            daily_energy = normalized_data.get('today_from_pv', 0.0)
-            total_energy = normalized_data.get('total_from_pv', 0.0)
+            daily_energy = normalized_data.get('daily_energy', 0.0)
+            total_energy = normalized_data.get('total_energy', 0.0)
             data_source = normalized_data.get('source', 'unknown')
             
             logger.debug(f"Energy stats from Manager ({data_source}): Daily={daily_energy}, Total={total_energy}")
@@ -272,10 +273,9 @@ def dashboard_data(request):
             timestamp__date=today
         ).order_by('timestamp')
         
-        # Use daily_energy from DeyeManager if valid. Fallback to calculation if 0.
-        total_energy_today = daily_energy if 'daily_energy' in locals() and daily_energy > 0 else 0
-        
-        if total_energy_today == 0 and len(today_readings) > 1:
+        # Calculate total energy today properly
+        total_energy_today = 0
+        if len(today_readings) > 1:
             for i in range(1, len(today_readings)):
                 prev_power = today_readings[i-1].station_data.get('generationPower', 0) if today_readings[i-1].station_data else 0
                 curr_power = today_readings[i].station_data.get('generationPower', 0) if today_readings[i].station_data else 0
@@ -288,7 +288,6 @@ def dashboard_data(request):
             'current': current_data,
             'daily_stats': {
                 'total_energy_kwh': round(total_energy_today, 2),
-                'lifetime_energy_kwh': round(total_energy, 2) if 'total_energy' in locals() else 0.0,
                 'peak_generation_watts': max(
                     (r.station_data.get('generationPower', 0) if r.station_data else 0) for r in today_readings
                 ) if today_readings else 0,
@@ -321,30 +320,25 @@ def dashboard_data(request):
 def export_inverter_data_csv(request):
     """Export inverter data as CSV."""
     import csv
+    from datetime import timedelta
     from django.http import HttpResponse
-    
+
     response = HttpResponse(content_type='text/csv')
     response['Content-Disposition'] = 'attachment; filename="inverter_data.csv"'
-    
+
     writer = csv.writer(response)
-    
-    # Get data from last 7 days
-    from datetime import timedelta
     end_date = timezone.now()
     start_date = end_date - timedelta(days=7)
-    
     readings = InverterReading.objects.filter(
         timestamp__range=[start_date, end_date]
     ).select_related('inverter').order_by('-timestamp')
-    
-    # Write header
+
     writer.writerow([
-        'Timestamp', 'Inverter SN', 'Generation Power (W)', 
+        'Timestamp', 'Inverter SN', 'Generation Power (W)',
         'Battery SOC (%)', 'Grid Power (W)', 'Load Power (W)',
         'Daily Energy (kWh)', 'Total Energy (kWh)'
     ])
-    
-    # Write data
+
     for reading in readings:
         writer.writerow([
             reading.timestamp.strftime('%Y-%m-%d %H:%M:%S'),
@@ -354,9 +348,9 @@ def export_inverter_data_csv(request):
             reading.grid_power or 0,
             reading.load_power or 0,
             reading.daily_energy or 0,
-            reading.total_energy or 0
+            reading.total_energy or 0,
         ])
-    
+
     return response
 
 
@@ -569,22 +563,26 @@ def run_algorithm(request):
         if config.control_mode != "automatic":
             return Response({"error": "Algorithm can only run in automatic mode"}, status=status.HTTP_400_BAD_REQUEST)
 
-        algorithm_selected = run_work_mode_algorithm()
-        if algorithm_selected not in WORK_MODE_MAP:
-            return Response({"error": f"Algorithm returned invalid mode: {algorithm_selected}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        algorithm_result = EnergyOrchestrator().evaluate_current_decision()
+        algorithm_selected = algorithm_result.strategy
+        allocation_plan = algorithm_result.allocation_plan
+        if not algorithm_selected:
+            return Response({"error": "Algorithm could not determine an EMS strategy"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-        config.algorithm_selected_mode = algorithm_selected
+        config.algorithm_selected_mode = _strategy_to_str(algorithm_selected)
         config.save(update_fields=["algorithm_selected_mode"])
-
-        manager = DeyeManager()
-        sync_success = manager.set_work_mode(algorithm_selected)
 
         return Response(
             {
-                "message": "Algorithm executed successfully",
-                "selected_mode": algorithm_selected,
+                "message": "EMS strategy computed successfully",
+                "selected_mode": _strategy_to_str(algorithm_selected),
                 "selected_mode_display": config.get_algorithm_selected_mode_display(),
-                "deye_sync": {"synced": bool(sync_success), "timestamp": timezone.now().isoformat()},
+                "allocation_plan": allocation_plan,
+                "deye_sync": {
+                    "synced": False,
+                    "timestamp": timezone.now().isoformat(),
+                    "note": "Strategy computed only. Apply sends charger limits without changing inverter operating mode.",
+                },
             }
         )
 
@@ -594,7 +592,7 @@ def run_algorithm(request):
 
 from django.http import HttpResponse
 import csv
-from datetime import timedelta, datetime
+from datetime import timedelta
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
@@ -607,16 +605,8 @@ def chart_data(request):
         end_time = timezone.now()
         if time_range == '7d':
             start_time = end_time - timedelta(days=7)
-        elif time_range == '30d' or time_range == 'lastMonth':
+        elif time_range == '30d':
             start_time = end_time - timedelta(days=30)
-        elif time_range == 'specificDay':
-            date_str = request.GET.get('date')
-            if date_str:
-                selected_date = datetime.strptime(date_str, '%Y-%m-%d').date()
-                start_time = timezone.make_aware(datetime.combine(selected_date, datetime.min.time()))
-                end_time = start_time + timedelta(days=1)
-            else:
-                start_time = end_time - timedelta(hours=24)
         else:
             start_time = end_time - timedelta(hours=24)
             
@@ -671,16 +661,8 @@ def export_chart_csv(request):
     end_time = timezone.now()
     if time_range == '7d':
         start_time = end_time - timedelta(days=7)
-    elif time_range == '30d' or time_range == 'lastMonth':
+    elif time_range == '30d':
         start_time = end_time - timedelta(days=30)
-    elif time_range == 'specificDay':
-        date_str = request.GET.get('date')
-        if date_str:
-            selected_date = datetime.strptime(date_str, '%Y-%m-%d').date()
-            start_time = timezone.make_aware(datetime.combine(selected_date, datetime.min.time()))
-            end_time = start_time + timedelta(days=1)
-        else:
-            start_time = end_time - timedelta(hours=24)
     else:
         start_time = end_time - timedelta(hours=24)
         
@@ -752,33 +734,23 @@ def start_charging_session(request):
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def direct_apply_inverter_mode(request):
-    """Directly sends the recommended mode's Modbus commands to the inverter without needing a pending DB recommendation."""
+    """Apply an EMS allocation plan without changing the fixed inverter operating policy."""
     try:
-        from renew_website.apps.api.deye.manager import DeyeManager
-        from renew_website.apps.api.deye.control import get_modbus_commands_for_mode
-        
-        mode = request.data.get('mode')
-        if not mode:
-            return Response({'success': False, 'message': 'Missing mode parameter'}, status=400)
-            
-        modbus_commands = get_modbus_commands_for_mode(mode)
-        
-        if not modbus_commands:
-            return Response({
-                'success': True, 
-                'message': f'Режимът {mode} не изисква промени по регистрите на инвертора.'
-            })
-            
-        deye_mgr = DeyeManager()
-        is_applied = deye_mgr.apply_modbus_commands(modbus_commands)
-        
-        if is_applied:
-            return Response({'success': True, 'message': 'Командите бяха изпратени успешно по Modbus.'})
-        else:
-            return Response({'success': False, 'message': 'Комуникацията с Deye пропадна.'})
+        allocation_plan = request.data.get('allocation_plan') or {}
+        if not allocation_plan:
+            mode = request.data.get('mode')
+            if mode:
+                algorithm_result = run_work_mode_algorithm()
+                allocation_plan = algorithm_result.get('allocation_plan', {})
+
+        if not allocation_plan:
+            return Response({'success': False, 'message': 'Missing allocation_plan payload'}, status=400)
+
+        result = EMSExecutionService().apply_allocation_plan(allocation_plan)
+        return Response(result.to_dict())
             
     except Exception as e:
-        logger.error(f"Failed to directly apply inverter mode: {e}")
+        logger.error(f"Failed to directly apply EMS allocation: {e}")
         return Response({'success': False, 'message': str(e)}, status=500)
 
 @api_view(['GET'])

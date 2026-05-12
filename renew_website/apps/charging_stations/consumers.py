@@ -23,8 +23,8 @@ from ocpp.v16.enums import (
 )
 
 from .logging_config import get_ocpp_logger, get_station_logger
-from .models import Station, Connector, Transaction, UserRFID, MeterValue
-from .registry import ACTIVE_STATIONS
+from .models import Station, Connector, Transaction, UserRFID, MeterValue, CommandLog
+from .registry import ACTIVE_STATIONS, station_runtime
 
 
 # -------------------------
@@ -146,20 +146,20 @@ def _normalize_station_key(station_id: Union[int, str]) -> int:
 
 def register_station(station_id: Union[int, str], consumer) -> None:
     key = _normalize_station_key(station_id)
-    ACTIVE_STATIONS[key] = consumer
-    ocpp_logger.info(f"Station {key} registered in ACTIVE_STATIONS")
+    station_runtime.set_online(key, consumer)
+    ocpp_logger.info(f"Station {key} registered in station runtime service")
 
 
 def unregister_station(station_id: Union[int, str]) -> None:
     key = _normalize_station_key(station_id)
-    ACTIVE_STATIONS.pop(key, None)
+    station_runtime.set_offline(key)
     for d in (_last_heartbeat_log, _last_heartbeat_db_update, _rapid_heartbeat_count):
         d.pop(key, None)
     
     # Finalize WebSocket performance metric when station disconnects
     _finalize_ws_metric(station_id)
     
-    ocpp_logger.info(f"Station {key} unregistered from ACTIVE_STATIONS")
+    ocpp_logger.info(f"Station {key} unregistered from station runtime service")
 
 
 def _finalize_ws_metric(station_id: Union[int, str]):
@@ -220,6 +220,7 @@ class ChargePoint(OCPPChargePoint):
 
         # optional: remember requested power for (connectorId, idTag) when RemoteStart includes profile
         self.pending_requested_power: Dict[Tuple[int, str], Optional[float]] = {}
+        self.pending_session_context: Dict[Tuple[int, str], Dict[str, Any]] = {}
 
         self.last_seen = timezone.now()
         self.heartbeat_interval = 60
@@ -742,7 +743,15 @@ class ChargePoint(OCPPChargePoint):
                             pass
 
                 # Store raw payload just in case
-                data_dict = {"raw_payload": [mv_dict for mv_dict in (meter_value or [])]}
+                previous_session_context = {}
+                latest_meter = MeterValue.objects.filter(transaction=tx).order_by('-timestamp', '-id').first()
+                if latest_meter and isinstance(latest_meter.data, dict):
+                    previous_session_context = latest_meter.data.get('session_context', {}) or {}
+
+                data_dict = {
+                    "raw_payload": [mv_dict for mv_dict in (meter_value or [])],
+                    "session_context": previous_session_context,
+                }
 
                 # Send signals for processing
                 from renew_website.apps.charging_stations.tasks import process_meter_values
@@ -914,7 +923,9 @@ class ChargePoint(OCPPChargePoint):
                 id_tag_info={"status": AuthorizationStatus.invalid.value},
             )
 
-        requested_power = self.pending_requested_power.get((int(connector_id), id_tag))
+        pending_key = (int(connector_id), id_tag)
+        requested_power = self.pending_requested_power.get(pending_key)
+        session_context = self.pending_session_context.get(pending_key, {})
 
         async with self.db_lock:
 
@@ -948,6 +959,7 @@ class ChargePoint(OCPPChargePoint):
                             "value": meter_start,
                             "data": {
                                 "start": {"ocpp_timestamp": str(timestamp), "meter_start": meter_start},
+                                "session_context": session_context,
                                 "samples": [],
                             },
                         },
@@ -960,7 +972,8 @@ class ChargePoint(OCPPChargePoint):
 
             tx_pk = await create_tx()
 
-        self.pending_requested_power.pop((int(connector_id), id_tag), None)
+        self.pending_requested_power.pop(pending_key, None)
+        self.pending_session_context.pop(pending_key, None)
 
         try:
             asyncio.create_task(self._update_station_status_async("active", "start"))
@@ -1157,6 +1170,7 @@ class ChargePoint(OCPPChargePoint):
         id_tag: str,
         requested_power_kw: Optional[float] = None,
         requested_power: Optional[float] = None,
+        session_context: Optional[Dict[str, Any]] = None,
     ):
         """
         OCPP 1.6: RemoteStartTransaction supports chargingProfile (optional).
@@ -1166,6 +1180,7 @@ class ChargePoint(OCPPChargePoint):
         if requested_power_kw is None and requested_power is not None:
             requested_power_kw = requested_power
         self.pending_requested_power[(int(connector_id), id_tag)] = requested_power_kw
+        self.pending_session_context[(int(connector_id), id_tag)] = session_context or {}
 
         charging_profile = None
         if requested_power_kw is not None:
@@ -1391,6 +1406,8 @@ class ChargePointConsumer(AsyncWebsocketConsumer):
             connector_id = event.get("connector_id")
             id_tag = event.get("id_tag")
             requested_power = event.get("requested_power")
+            session_context = event.get("session_context") or {}
+            command_id = event.get("command_id")
             
             ocpp_logger.info(f"RemoteStartTransaction command received: station={self.station_id}, connector={connector_id}, id_tag={id_tag}, power={requested_power}")
             
@@ -1401,7 +1418,8 @@ class ChargePointConsumer(AsyncWebsocketConsumer):
                 task = asyncio.create_task(self.cp.call_remote_start_transaction(
                     connector_id=connector_id,
                     id_tag=id_tag,
-                    requested_power=requested_power
+                    requested_power=requested_power,
+                    session_context=session_context,
                 ))
                 
                 # Add callback to log response (Accepted/Rejected)
@@ -1409,16 +1427,32 @@ class ChargePointConsumer(AsyncWebsocketConsumer):
                     try:
                         res = t.result()
                         ocpp_logger.info(f"RemoteStartTransaction response for station={self.station_id}: {res}")
+                        if command_id:
+                            asyncio.create_task(
+                                self._record_command_result(
+                                    command_id=command_id,
+                                    response=res,
+                                    success_detail="RemoteStartTransaction acknowledged by station",
+                                    rejected_detail="RemoteStartTransaction rejected by station",
+                                )
+                            )
                     except Exception as e:
                         ocpp_logger.warning(f"RemoteStartTransaction task error: {e}")
+                        if command_id:
+                            asyncio.create_task(self._record_command_failure(command_id, e))
                 task.add_done_callback(on_start_done)
 
                 ocpp_logger.info(f"RemoteStartTransaction task created (fire-and-forget)")
             except Exception as e:
                 ocpp_logger.warning(f"RemoteStartTransaction create task failed: {e}")
+                if command_id:
+                    await self._record_command_failure(command_id, e)
             
         except Exception as e:
             ocpp_logger.exception(f"RemoteStartTransaction handling failed: {e}")
+            command_id = event.get("command_id")
+            if command_id:
+                await self._record_command_failure(command_id, e)
 
     async def receive(self, text_data=None, bytes_data=None):
         if not text_data or not hasattr(self, "ws_wrapper"):
@@ -1445,6 +1479,7 @@ class ChargePointConsumer(AsyncWebsocketConsumer):
         """Handle remote stop transaction command from channel layer."""
         try:
             transaction_id = event.get("transaction_id")
+            command_id = event.get("command_id")
             
             ocpp_logger.info(f"RemoteStopTransaction command received: station={self.station_id}, transaction_id={transaction_id}")
             
@@ -1460,21 +1495,87 @@ class ChargePointConsumer(AsyncWebsocketConsumer):
                     try:
                         res = t.result()
                         ocpp_logger.info(f"RemoteStopTransaction response for station={self.station_id}: {res}")
+                        if command_id:
+                            asyncio.create_task(
+                                self._record_command_result(
+                                    command_id=command_id,
+                                    response=res,
+                                    success_detail="RemoteStopTransaction acknowledged by station",
+                                    rejected_detail="RemoteStopTransaction rejected by station",
+                                )
+                            )
                     except Exception as e:
                         ocpp_logger.warning(f"RemoteStopTransaction task error: {e}")
+                        if command_id:
+                            asyncio.create_task(self._record_command_failure(command_id, e))
                 task.add_done_callback(on_stop_done)
                 
                 ocpp_logger.info(f"RemoteStopTransaction task created (fire-and-forget)")
             except Exception as e:
                 ocpp_logger.warning(f"RemoteStopTransaction create task failed: {e}")
+                if command_id:
+                    await self._record_command_failure(command_id, e)
             
         except Exception as e:
             ocpp_logger.exception(f"RemoteStopTransaction failed: {e}")
+            command_id = event.get("command_id")
+            if command_id:
+                await self._record_command_failure(command_id, e)
 
     async def remote_stop_transaction_event(self, event):
         """Handle remote stop transaction command from channel layer (Channels naming convention)."""
         ocpp_logger.info(f"remote_stop_transaction_event called: station={self.station_id}, event={event}")
         await self.remote_stop_transaction(event)
+
+    async def _record_command_result(self, command_id: str, response, success_detail: str, rejected_detail: str):
+        await self._update_command_log(
+            command_id=command_id,
+            response_status=self._extract_response_status(response),
+            detail=str(response),
+            success_detail=success_detail,
+            rejected_detail=rejected_detail,
+        )
+
+    async def _record_command_failure(self, command_id: str, exc: Exception):
+        status = "timeout" if "timeout" in str(exc).lower() else "failed_at_station"
+        await self._update_command_log(
+            command_id=command_id,
+            response_status=status,
+            detail=str(exc),
+            success_detail="",
+            rejected_detail="",
+        )
+
+    def _extract_response_status(self, response) -> str:
+        status = getattr(response, "status", None)
+        if hasattr(status, "value"):
+            status = status.value
+        normalized = str(status or "").strip().lower()
+        if normalized == "accepted":
+            return "acknowledged"
+        if normalized == "rejected":
+            return "rejected"
+        return "failed_at_station"
+
+    @database_sync_to_async
+    def _update_command_log(self, command_id: str, response_status: str, detail: str, success_detail: str, rejected_detail: str):
+        command_log = CommandLog.objects.filter(command_id=command_id).first()
+        if not command_log:
+            return
+        if command_log.status not in {"sent", "pending"}:
+            return
+        command_log.status = response_status
+        if response_status == "acknowledged":
+            command_log.detail = success_detail or detail
+            command_log.error_message = ""
+        elif response_status == "rejected":
+            command_log.detail = rejected_detail or detail
+            command_log.error_message = detail
+        else:
+            command_log.detail = detail or "Station command execution failed"
+            command_log.error_message = detail
+        command_log.executed_at = timezone.now()
+        command_log.save(update_fields=["status", "detail", "error_message", "executed_at"])
 
     async def station_message(self, event):
         # UI_HTML_GROUP messages for templates; ignore here

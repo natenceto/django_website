@@ -25,10 +25,6 @@ class InverterReadingAdmin(admin.ModelAdmin):
         return super().get_queryset(request).select_related('inverter')
 
 
-
-
-
-
 @admin.register(GridPricing)
 class GridPricingAdmin(admin.ModelAdmin):
     list_display = ['start_time', 'end_time', 'price_per_kwh', 'is_peak']

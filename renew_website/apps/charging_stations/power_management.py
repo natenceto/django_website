@@ -13,6 +13,7 @@ from datetime import datetime, timedelta
 from django.utils import timezone
 from channels.db import database_sync_to_async
 from .models import Station, Connector, Transaction
+from .registry import station_runtime
 from apps.api.deye.manager import DeyeManager
 from .modbus_client import EVSEModbusClient
 
@@ -47,20 +48,7 @@ class PowerManager:
                 power_kw = max_power
             
             # Send OCPP command to set charging power
-            from .consumers import ACTIVE_STATIONS
-            
-            def get_station_consumer(station_id):
-                """Get station consumer by ID."""
-                return ACTIVE_STATIONS.get(station_id)
-
-            def get_chargepoint(station_id):
-                """Get chargepoint by station ID."""
-                consumer = ACTIVE_STATIONS.get(station_id)
-                if consumer and hasattr(consumer, 'cp'):
-                    return consumer.cp
-                return None
-            
-            chargepoint = get_chargepoint(station.id)
+            chargepoint = station_runtime.get_chargepoint(station.id)
             
             if chargepoint:
                 # Use OCPP SetChargingProfile command
@@ -102,20 +90,7 @@ class PowerManager:
         try:
             station = await Station.objects.aget(id=station_id)
             
-            from .consumers import ACTIVE_STATIONS
-            
-            def get_station_consumer(station_id):
-                """Get station consumer by ID."""
-                return ACTIVE_STATIONS.get(station_id)
-
-            def get_chargepoint(station_id):
-                """Get chargepoint by station ID."""
-                consumer = ACTIVE_STATIONS.get(station_id)
-                if consumer and hasattr(consumer, 'cp'):
-                    return consumer.cp
-                return None
-            
-            chargepoint = get_chargepoint(station.id)
+            chargepoint = station_runtime.get_chargepoint(station.id)
             
             if chargepoint:
                 # Find active transaction for this connector
@@ -224,20 +199,7 @@ class PowerManager:
         try:
             station = await Station.objects.aget(id=station_id)
             
-            from .consumers import ACTIVE_STATIONS
-            
-            def get_station_consumer(station_id):
-                """Get station consumer by ID."""
-                return ACTIVE_STATIONS.get(station_id)
-
-            def get_chargepoint(station_id):
-                """Get chargepoint by station ID."""
-                consumer = ACTIVE_STATIONS.get(station_id)
-                if consumer and hasattr(consumer, 'cp'):
-                    return consumer.cp
-                return None
-            
-            chargepoint = get_chargepoint(station.id)
+            chargepoint = station_runtime.get_chargepoint(station.id)
             
             if chargepoint:
                 if connector_id:
@@ -340,13 +302,11 @@ class SmartCharging:
 # Helper functions for external modules
 def is_station_connected(station_id):
     """Check if station is connected."""
-    from .consumers import ACTIVE_STATIONS
-    return station_id in ACTIVE_STATIONS
+    return station_runtime.is_online(station_id)
 
 def get_connected_stations():
     """Get list of all connected station IDs."""
-    from .consumers import ACTIVE_STATIONS
-    return list(ACTIVE_STATIONS.keys())
+    return station_runtime.get_all_online()
 
 class EnergyBalancer:
     def __init__(self):

@@ -1,12 +1,14 @@
-from django.shortcuts import render, redirect
+from django.shortcuts import get_object_or_404, render, redirect
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from .forms import StationForm
 from .models import Station
+from django.template.loader import render_to_string
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
-from django.template.loader import render_to_string
+
+from .services import CommandDispatchError, StartChargingCommand, StopChargingCommand, command_bus
 
 def stations(request: HttpRequest) -> HttpResponse:
     """
@@ -89,12 +91,153 @@ def stations(request: HttpRequest) -> HttpResponse:
         elif "action" in request.POST:
             station_ids = request.POST.getlist("station_ids")
             action = request.POST.get("action")
-            power = request.POST.get("power")
             is_ajax = request.headers.get('X-Requested-With') == 'XMLHttpRequest'
             
-            from .services.commands import execute_station_action
-            success_count, error_count, message = execute_station_action(action, station_ids, power)
+            print(f"=== Action received: {action}, stations: {station_ids}, ajax: {is_ajax} ===")
+
+            if not station_ids:
+                message = "No station selected."
+                if is_ajax:
+                    return JsonResponse({'success': False, 'message': message})
+                messages.error(request, message)
+                return redirect(f"{request.path}?tab=list")
+
+            from .consumers import ACTIVE_STATIONS
+            from .models import UserRFID, Transaction, Connector
+            from datetime import datetime, timezone
             
+            # Get a valid RFID tag from the database, create one if none exists
+            valid_rfid = UserRFID.objects.filter(tag="000000010160897").first()
+            if not valid_rfid:
+                # Create the specific RFID tag for testing
+                valid_rfid = UserRFID.objects.create(
+                    tag="000000010160897",
+                    owner_name="Default Test Tag"
+                )
+                print(f"Created default RFID tag: {valid_rfid.tag}")
+            else:
+                print(f"Using existing RFID tag: {valid_rfid.tag}")
+            
+            results = []
+            success_count = 0
+            error_count = 0
+            
+            for station_id in station_ids:
+                # Convert station_id to int for database lookup
+                station_id = int(station_id)
+                
+                print(f"Processing station {station_id}, ACTIVE_STATIONS keys: {list(ACTIVE_STATIONS.keys())}")
+                
+                # Don't check connection status - just try to send the command
+                # The station will handle it if it's connected, or fail gracefully if not
+                # This avoids issues with database status not being updated in time
+                
+                # Use channel layer to send message to station consumer
+                # This works even if ACTIVE_STATIONS is empty (multi-process issue)
+                group_name = f"charging_stations_group_{station_id}"
+                try:
+                    if action == "start":
+                        # Single-connector stations use connector_id = 1 per OCPP
+                        connector = Connector.objects.filter(station_id=station_id, connector_id=1).first()
+                        if not connector:
+                            # Not yet reported by the station
+                            results.append(f"Station {station_id}: Connector 1 not discovered yet. Wait for station boot/status to report connector 1.")
+                            error_count += 1
+                            continue
+                        
+                        # Get requested power from UI, or use station's max power as default
+                        requested_power = request.POST.get("power")
+                        power_limit = None
+                        if requested_power and requested_power.lower() == 'auto':
+                            print(f"Station {station_id}: Requested 'Auto' power - leaving it to EV to negotiate")
+                            power_limit = None # No TxProfile will be created in consumer.py
+                        elif requested_power:
+                            power_limit = int(requested_power)
+                        else:
+                            # Default to station's maximum power output
+                            station = Station.objects.get(id=station_id)
+                            power_limit = station.power_output
+
+                        # Send RemoteStartTransaction command via channel layer
+                        power_msg = f"{power_limit}kW" if power_limit else "Auto (unlimited)"
+                        print(f"Sending RemoteStartTransaction to station {station_id}: connector={connector.connector_id}, id_tag={valid_rfid.tag}, power={power_msg}")
+                        
+                        try:
+                            command_bus.dispatch(
+                                StartChargingCommand(
+                                    station_id=station_id,
+                                    connector_id=connector.connector_id,
+                                    id_tag=valid_rfid.tag,
+                                    requested_power_kw=power_limit,
+                                )
+                            )
+                            
+                            print(f"RemoteStartTransaction dispatched successfully for station {station_id}")
+                            
+                            results.append(f"Station {station_id}: RemoteStartTransaction sent successfully")
+                            success_count += 1
+                            
+                        except CommandDispatchError as e:
+                            print(f"RemoteStartTransaction failed: {e}")
+                            import traceback
+                            traceback.print_exc()
+                            results.append(f"Station {station_id}: Failed to start charging - {str(e)}")
+                            error_count += 1
+                    
+                    elif action == "stop":
+                        # Find the active transaction for this station
+                        active_transaction = Transaction.objects.filter(
+                            connector__station_id=station_id,
+                            status="active"
+                        ).first()
+                        
+                        if active_transaction:
+                            print(f"Stopping transaction {active_transaction.id} for station {station_id}")
+                            
+                            try:
+                                command_bus.dispatch(
+                                    StopChargingCommand(
+                                        station_id=station_id,
+                                        transaction_id=active_transaction.id,
+                                    )
+                                )
+                                
+                                print(f"RemoteStopTransaction dispatched successfully for station {station_id}")
+                                
+                                results.append(f"Station {station_id}: Stop command sent")
+                                success_count += 1
+                                
+                            except CommandDispatchError as e:
+                                print(f"Stop transaction failed: {e}")
+                                import traceback
+                                traceback.print_exc()
+                                results.append(f"Station {station_id}: Failed to stop charging - {str(e)}")
+                                error_count += 1
+                        else:
+                            results.append(f"Station {station_id}: No active charging session")
+                            error_count += 1
+                    
+                    elif action == "apply_power":
+                        power = request.POST.get("power", "11")
+                        # TODO: Implement ChangeConfiguration for charging power
+                        results.append(f"Station {station_id}: Power set to {power} kW (not implemented)")
+                        success_count += 1
+                    
+                    else:
+                        results.append(f"Unknown action: {action}")
+                        error_count += 1
+                
+                except Exception as e:
+                    error_msg = str(e)
+                    # Check if it's a timeout (unsupported command by simulator)
+                    if "Waited 30s for response" in error_msg or "timeout" in error_msg.lower():
+                        results.append(f"Station {station_id}: Command not supported by simulator/station")
+                    else:
+                        results.append(f"Station {station_id}: Error - {error_msg}")
+                    error_count += 1
+
+            # Prepare response message
+            message = '<br>'.join(results)
             overall_success = success_count > 0 and error_count == 0
             
             if is_ajax:
@@ -105,6 +248,9 @@ def stations(request: HttpRequest) -> HttpResponse:
                     'error_count': error_count
                 })
             
+            # Non-AJAX response
+            if overall_success:
+                messages.success(request, message)
             elif success_count > 0:
                 messages.warning(request, message)
             else:
@@ -197,25 +343,20 @@ def export_charging_sessions_csv(request):
     from .services.exports import download_transactions_csv, get_filtered_transactions
 
     transactions = get_filtered_transactions(request)
-
     return download_transactions_csv(transactions)
 
-from django.shortcuts import get_object_or_404
+
 @login_required
 def transaction_detail(request, pk):
     from .models import Transaction
+
     txn = get_object_or_404(Transaction, pk=pk)
-    
-    # Heartbeat timeline is derived from meter values or last seen
-    # If the transaction is active, it's updating.
     meter_values = txn.meter_values.order_by('timestamp')
-    heartbeats = [{'time': m.timestamp, 'value': m.value} for m in meter_values]
-    
-    last_meter = meter_values.last()
-    
+    heartbeats = [{'time': meter.timestamp, 'value': meter.value} for meter in meter_values]
+
     context = {
         'txn': txn,
         'heartbeats': heartbeats,
-        'last_meter': last_meter,
+        'last_meter': meter_values.last(),
     }
     return render(request, "charging_stations/transaction_detail.html", context)

@@ -30,3 +30,23 @@ def get_modbus_commands_for_mode(mode: str) -> dict:
         pass
 
     return commands
+
+
+def build_modbus_commands_for_allocation(allocation_plan: dict) -> dict:
+    """
+    Translate supported EMS allocation controls to Modbus writes.
+
+    The fixed inverter operating policy (register 131 / zero export behavior) is NOT modified here.
+    Only optional low-level support registers that align with the EMS plan may be written.
+    """
+    if not allocation_plan:
+        return {}
+
+    commands = {}
+
+    # TOU enable can remain on when we need to enforce reserve-oriented constraints,
+    # but we do not map EMS strategies back to inverter operating modes.
+    if allocation_plan.get('grid_assist_allowed'):
+        commands[231] = 1
+
+    return commands

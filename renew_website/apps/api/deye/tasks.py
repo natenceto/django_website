@@ -91,24 +91,25 @@ def set_inverter_work_mode(mode_name):
 @shared_task
 def apply_system_work_mode(system_mode_str):
     """
-    Вика се от 'energy' модула. Получава абстрактния SystemWorkMode, 
-    превежда го чрез control.py и праща конкретните регистри на Manager-а.
+    Backwards-compatible wrapper for the older task name.
+    The EMS layer now applies allocation constraints instead of treating strategy as an inverter mode.
     """
     try:
-        from .control import get_modbus_commands_for_mode
-        commands = get_modbus_commands_for_mode(system_mode_str)
+        allocation_plan = system_mode_str if isinstance(system_mode_str, dict) else {}
+        from .control import build_modbus_commands_for_allocation
+        commands = build_modbus_commands_for_allocation(allocation_plan)
 
         if not commands:
-            logger.info(f"Няма конкретни Modbus команди за режим {system_mode_str}.")
+            logger.info("Няма поддържани Modbus constraint команди за текущия EMS план.")
             return
             
         manager = DeyeManager()
         success = manager.apply_modbus_commands(commands)
         
         if success:
-            logger.info(f"Успешно приложени {len(commands)} Modbus регистри за режим: {system_mode_str}")
+            logger.info(f"Успешно приложени {len(commands)} Modbus constraint регистри за EMS плана")
         else:
-            logger.warning(f"Грешка при прилагане на регистри за режим {system_mode_str}.")
+            logger.warning("Грешка при прилагане на Modbus constraint регистри за EMS плана.")
             
     except Exception as e:
-        logger.error(f"Критична грешка при прилагане на {system_mode_str}: {e}")
+        logger.error(f"Критична грешка при прилагане на EMS allocation constraints: {e}")

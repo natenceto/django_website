@@ -1,3 +1,4 @@
+import uuid
 from decimal import Decimal
 from django.db import models
 from django.utils import timezone
@@ -424,7 +425,7 @@ class PricingPlan(models.Model):
     """Pricing configuration for charging stations."""
     name = models.CharField(max_length=100, help_text="Name of the pricing plan")
     description = models.TextField(blank=True)
-    
+
     # Pricing structure
     price_per_kwh = models.DecimalField(
         max_digits=6, decimal_places=4,
@@ -467,6 +468,47 @@ class PricingPlan(models.Model):
     
     def __str__(self):
         return f"{self.name} ({self.price_per_kwh} {self.currency}/kWh)"
+
+
+class CommandLog(models.Model):
+    """Audit trail for command dispatches into the OCPP transport layer."""
+
+    STATUS_CHOICES = [
+        ("pending", "Pending"),
+        ("sent", "Sent"),
+        ("acknowledged", "Acknowledged"),
+        ("rejected", "Rejected"),
+        ("timeout", "Timeout"),
+        ("failed", "Failed"),
+        ("failed_at_station", "Failed At Station"),
+    ]
+
+    command_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+    station = models.ForeignKey(
+        Station,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="command_logs",
+    )
+    command_type = models.CharField(max_length=64)
+    payload = models.JSONField(default=dict, blank=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="pending")
+    detail = models.TextField(blank=True)
+    error_message = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    executed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["station", "status"]),
+            models.Index(fields=["command_type", "created_at"]),
+            models.Index(fields=["created_at"]),
+        ]
+
+    def __str__(self):
+        return f"{self.command_type} [{self.status}] for station {self.station_id or 'n/a'}"
 
 
 class StationPricing(models.Model):
