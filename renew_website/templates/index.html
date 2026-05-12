@@ -16,189 +16,126 @@
     </div>
 </div>
 
+<!-- Compact Status Cards Row -->
 <div class="row mb-4">
-    <div class="col-xl-8 mb-4">
-        <div class="card shadow energy-hero-card h-100">
-            <div class="card-body p-4">
-                <div class="d-flex flex-wrap align-items-start justify-content-between mb-4">
-                    <div>
-                        <p class="hero-kicker mb-2">Energy Operations</p>
-                        <h2 class="h3 text-white mb-1">Live Energy Flow</h2>
-                        <p class="text-white-50 mb-0">Grid, inverter, battery and charger load in one compact operational view.</p>
+    <!-- Active Charging Sessions (Compact) -->
+    <div class="col-xl-3 col-md-6 mb-2">
+        <div class="card border-left-primary shadow h-100 py-1">
+            <div class="card-body py-2">
+                <div class="row no-gutters align-items-center">
+                    <div class="col mr-2">
+                        <div class="text-xs font-weight-bold text-primary text-uppercase mb-1">Active Sessions</div>
+                        <div class="h6 mb-0 font-weight-bold text-gray-800"><span id="activeSessions">{{ active_sessions_count }}</span> <small class="text-muted">(<span id="totalSessions">{{ total_sessions_today }}</span> today)</small></div>
                     </div>
-                    <div class="text-xl-right mt-3 mt-xl-0">
-                        <span class="badge badge-pill badge-light px-3 py-2 text-dark">{{ live_energy_snapshot.data_source }} source</span>
-                        <div class="small text-white-50 mt-2">Updated {{ live_energy_snapshot.updated_at }}</div>
-                    </div>
-                </div>
-
-                <div class="energy-flow-grid">
-                    <div class="flow-node flow-node-grid">
-                        <span class="flow-label">Grid</span>
-                        <strong>{{ live_energy_snapshot.grid_direction }}</strong>
-                        <span>{{ live_energy_snapshot.grid_kw }} kW</span>
-                    </div>
-                    <div class="flow-connector">&#8594;</div>
-                    <div class="flow-node flow-node-inverter">
-                        <span class="flow-label">Inverter</span>
-                        <strong>{{ live_energy_snapshot.inverter_status }}</strong>
-                        <span>{{ live_energy_snapshot.load_kw }} kW load</span>
-                    </div>
-                    <div class="flow-connector">&#8594;</div>
-                    <div class="flow-node flow-node-chargers">
-                        <span class="flow-label">Chargers</span>
-                        <strong>{{ active_sessions_count }} active</strong>
-                        <span>{{ live_energy_snapshot.active_charger_power_kw }} kW</span>
-                    </div>
-                    <div class="flow-node flow-node-solar">
-                        <span class="flow-label">Solar</span>
-                        <strong>{{ live_energy_snapshot.solar_kw }} kW</strong>
-                        <span>{{ live_energy_snapshot.daily_solar_kwh }} kWh today</span>
-                    </div>
-                    <div class="flow-node flow-node-battery">
-                        <span class="flow-label">Battery</span>
-                        <strong>{{ live_energy_snapshot.battery_soc }}%</strong>
-                        <span>{{ live_energy_snapshot.battery_state }}</span>
-                    </div>
-                </div>
-
-                <div class="row mt-4 hero-footer-metrics">
-                    <div class="col-sm-4 mb-3 mb-sm-0">
-                        <div class="hero-footer-card">
-                            <span class="text-white-50 d-block">Renewable Coverage</span>
-                            <strong class="text-white">{{ live_energy_snapshot.renewable_ratio }}%</strong>
-                        </div>
-                    </div>
-                    <div class="col-sm-4 mb-3 mb-sm-0">
-                        <div class="hero-footer-card">
-                            <span class="text-white-50 d-block">Solar Lifetime</span>
-                            <strong class="text-white">{{ live_energy_snapshot.lifetime_solar_kwh }} kWh</strong>
-                        </div>
-                    </div>
-                    <div class="col-sm-4">
-                        <div class="hero-footer-card">
-                            <span class="text-white-50 d-block">Current Charger Load</span>
-                            <strong class="text-white">{{ live_energy_snapshot.active_charger_power_kw }} kW</strong>
-                        </div>
+                    <div class="col-auto">
+                        <i class="fas fa-bolt fa-lg text-gray-300"></i>
                     </div>
                 </div>
             </div>
         </div>
     </div>
 
-    <div class="col-xl-4 mb-4">
-        <div class="card shadow h-100 border-0">
-            <div class="card-body p-3 p-lg-4 d-flex flex-column">
-                <div class="d-flex align-items-center justify-content-between mb-3">
-                    <div>
-                        <p class="text-uppercase text-xs text-muted font-weight-bold mb-1">Summary KPIs</p>
-                        <h3 class="h5 mb-0">Energy and charging snapshot</h3>
+    <!-- Total Energy Delivered (Compact) -->
+    <div class="col-xl-3 col-md-6 mb-2">
+        <div class="card border-left-success shadow h-100 py-1">
+            <div class="card-body py-2">
+                <div class="row no-gutters align-items-center">
+                    <div class="col mr-2">
+                        <div class="text-xs font-weight-bold text-success text-uppercase mb-1">Energy (Today)</div>
+                        <div class="h6 mb-0 font-weight-bold text-gray-800"><span id="energyDelivered">{{ energy_delivered_today }}</span> <small class="text-muted" id="energyUnit">kWh</small></div>
                     </div>
-                    <span class="badge badge-light border text-muted">ABB / Deye style</span>
-                </div>
-
-                <div class="summary-tile-grid mb-4">
-                    <div class="summary-tile">
-                        <span>Energy Today</span>
-                        <strong>{{ energy_delivered_today }} kWh</strong>
-                    </div>
-                    <div class="summary-tile">
-                        <span>Current Load</span>
-                        <strong>{{ live_energy_snapshot.load_kw }} kW</strong>
-                    </div>
-                    <div class="summary-tile">
-                        <span>Active Chargers</span>
-                        <strong>{{ active_sessions_count }}</strong>
-                    </div>
-                    <div class="summary-tile">
-                        <span>Solar Today</span>
-                        <strong>{{ live_energy_snapshot.daily_solar_kwh }} kWh</strong>
-                    </div>
-                    <div class="summary-tile">
-                        <span>Grid {{ live_energy_snapshot.grid_direction }}</span>
-                        <strong>{{ live_energy_snapshot.grid_kw }} kW</strong>
-                    </div>
-                    <div class="summary-tile">
-                        <span>Battery SOC</span>
-                        <strong>{{ live_energy_snapshot.battery_soc }}%</strong>
-                    </div>
-                    <div class="summary-tile">
-                        <span>Revenue Today</span>
-                        <strong>{{ today_revenue }}</strong>
-                    </div>
-                    <div class="summary-tile">
-                        <span>Peak Demand</span>
-                        <strong>{{ live_energy_snapshot.load_kw }} kW</strong>
-                    </div>
-                </div>
-
-                <div class="session-outcomes-widget mt-auto">
-                    <div class="d-flex justify-content-between align-items-center mb-3">
-                        <div>
-                            <p class="text-uppercase text-xs text-muted font-weight-bold mb-1">Session Outcomes</p>
-                            <h4 class="h6 mb-0">Compact operational health</h4>
-                        </div>
-                        <span class="badge badge-pill badge-light border">Widget</span>
-                    </div>
-                    <div class="outcomes-mini-grid">
-                        <div class="outcome-mini success">
-                            <span>Successful</span>
-                            <strong id="quickStatsSuccessful">{{ quick_stats.successful }}</strong>
-                        </div>
-                        <div class="outcome-mini danger">
-                            <span>Failed / Aborted</span>
-                            <strong id="quickStatsFailed">{{ quick_stats.failed }}</strong>
-                        </div>
-                        <div class="outcome-mini primary">
-                            <span>Avg Energy</span>
-                            <strong id="quickStatsAvgEnergy">{{ quick_stats.avg_energy }} <small>kWh</small></strong>
-                        </div>
-                        <div class="outcome-mini info">
-                            <span>Avg Duration</span>
-                            <strong id="quickStatsAvgDuration">{{ quick_stats.avg_duration }} <small>min</small></strong>
-                        </div>
-                    </div>
-                    <div class="outcome-total mt-3">
-                        <span>Total Energy (Recent)</span>
-                        <strong id="quickStatsTotalEnergy">{{ quick_stats.total_energy }} <small>kWh</small></strong>
+                    <div class="col-auto">
+                        <i class="fas fa-battery-three-quarters fa-lg text-gray-300"></i>
                     </div>
                 </div>
             </div>
         </div>
     </div>
-</div>
 
-<div class="row mb-4">
-    <div class="col-xl-4 col-md-6 mb-4">
-        <div class="card shadow h-100 mini-trend-card">
-            <div class="card-header bg-white border-0 pb-0">
-                <p class="text-uppercase text-xs text-muted font-weight-bold mb-1">Mini Analytics</p>
-                <h6 class="m-0 font-weight-bold text-dark">Power Profile</h6>
-            </div>
-            <div class="card-body">
-                <canvas id="powerProfileChart" height="120"></canvas>
-            </div>
-        </div>
-    </div>
-    <div class="col-xl-4 col-md-6 mb-4">
-        <div class="card shadow h-100 mini-trend-card">
-            <div class="card-header bg-white border-0 pb-0">
-                <p class="text-uppercase text-xs text-muted font-weight-bold mb-1">Mini Analytics</p>
-                <h6 class="m-0 font-weight-bold text-dark">Production vs Consumption</h6>
-            </div>
-            <div class="card-body">
-                <canvas id="productionConsumptionChart" height="120"></canvas>
+    <!-- Station Status (Compact) -->
+    <div class="col-xl-3 col-md-6 mb-2">
+        <div class="card border-left-info shadow h-100 py-1">
+            <div class="card-body py-2">
+                <div class="row no-gutters align-items-center">
+                    <div class="col mr-2">
+                        <div class="text-xs font-weight-bold text-info text-uppercase mb-1">Station Status</div>
+                        <div class="h6 mb-0 font-weight-bold text-gray-800">
+                            <span id="onlineStations" class="text-success">{{ online_stations }}</span> / <span id="totalStations">{{ total_stations }}</span> Online
+                        </div>
+                    </div>
+                    <div class="col-auto">
+                        <i class="fas fa-charging-station fa-lg text-gray-300"></i>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
-    <div class="col-xl-4 col-md-12 mb-4">
-        <div class="card shadow h-100 mini-trend-card">
-            <div class="card-header bg-white border-0 pb-0">
-                <p class="text-uppercase text-xs text-muted font-weight-bold mb-1">Infrastructure</p>
-                <h6 class="m-0 font-weight-bold text-dark">Charger Usage</h6>
+
+    <!-- Revenue (Compact) -->
+    <div class="col-xl-3 col-md-6 mb-2">
+        <div class="card border-left-warning shadow h-100 py-1">
+            <div class="card-body py-2">
+                <div class="row no-gutters align-items-center">
+                    <div class="col mr-2">
+                        <div class="text-xs font-weight-bold text-warning text-uppercase mb-1">Revenue</div>
+                        <div class="h6 mb-0 font-weight-bold text-gray-800">
+                            <span id="todayRevenue">{{ today_revenue }}</span> <small class="text-muted">(Today)</small>
+                        </div>
+                    </div>
+                    <div class="col-auto">
+                        <i class="fas fa-euro-sign fa-lg text-gray-300"></i>
+                    </div>
+                </div>
             </div>
-            <div class="card-body">
-                <canvas id="chargerUsageChart" height="120"></canvas>
+        </div>
+    </div>
+
+    <!-- Total Chargers (Status Count) -->
+    <div class="col-xl-2 col-md-4 mb-2">
+        <div class="card border-left-secondary shadow h-100 py-1">
+            <div class="card-body py-2">
+                <div class="text-xs font-weight-bold text-secondary text-uppercase mb-1">Total Chargers</div>
+                <div class="h6 mb-0 font-weight-bold text-gray-800">{{ total_chargers }}</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Available Chargers -->
+    <div class="col-xl-2 col-md-4 mb-2">
+        <div class="card border-left-success shadow h-100 py-1">
+            <div class="card-body py-2">
+                <div class="text-xs font-weight-bold text-success text-uppercase mb-1">Available</div>
+                <div class="h6 mb-0 font-weight-bold text-gray-800">{{ charger_status_counts.available }}</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Charging Chargers -->
+    <div class="col-xl-2 col-md-4 mb-2">
+        <div class="card border-left-primary shadow h-100 py-1">
+            <div class="card-body py-2">
+                <div class="text-xs font-weight-bold text-primary text-uppercase mb-1">Charging</div>
+                <div class="h6 mb-0 font-weight-bold text-gray-800">{{ charger_status_counts.charging }}</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Faulted Chargers -->
+    <div class="col-xl-2 col-md-4 mb-2">
+        <div class="card border-left-danger shadow h-100 py-1">
+            <div class="card-body py-2">
+                <div class="text-xs font-weight-bold text-danger text-uppercase mb-1">Faulted</div>
+                <div class="h6 mb-0 font-weight-bold text-gray-800">{{ charger_status_counts.faulted }}</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Offline Chargers -->
+    <div class="col-xl-2 col-md-4 mb-2">
+        <div class="card border-left-dark shadow h-100 py-1">
+            <div class="card-body py-2">
+                <div class="text-xs font-weight-bold text-dark text-uppercase mb-1">Offline</div>
+                <div class="h6 mb-0 font-weight-bold text-gray-800">{{ charger_status_counts.offline }}</div>
             </div>
         </div>
     </div>
@@ -309,6 +246,32 @@
                 </div>
             </div>
 
+            <!-- Transaction Aggregations -->
+            <div class="card-body border-bottom">
+                <div class="row text-center">
+                    <div class="col-md-2 border-right">
+                        <small class="text-muted d-block">Successful Sessions</small>
+                        <h5 class="text-success font-weight-bold mb-0" id="quickStatsSuccessful">{{ quick_stats.successful }}</h5>
+                    </div>
+                    <div class="col-md-2 border-right">
+                        <small class="text-muted d-block">Failed / Aborted</small>
+                        <h5 class="text-danger font-weight-bold mb-0" id="quickStatsFailed">{{ quick_stats.failed }}</h5>
+                    </div>
+                    <div class="col-md-2 border-right">
+                        <small class="text-muted d-block">Avg Energy</small>
+                        <h5 class="text-primary font-weight-bold mb-0" id="quickStatsAvgEnergy">{{ quick_stats.avg_energy }} <small>kWh</small></h5>
+                    </div>
+                    <div class="col-md-2 border-right">
+                        <small class="text-muted d-block">Avg Duration</small>
+                        <h5 class="text-info font-weight-bold mb-0" id="quickStatsAvgDuration">{{ quick_stats.avg_duration }} <small>min</small></h5>
+                    </div>
+                    <div class="col-md-4">
+                        <small class="text-muted d-block">Total Energy (Recent)</small>
+                        <h5 class="text-success font-weight-bold mb-0" id="quickStatsTotalEnergy">{{ quick_stats.total_energy }} <small>kWh</small></h5>
+                    </div>
+                </div>
+            </div>
+
             <!-- Transactions Table -->
             <div class="card-body">
                 <div class="table-responsive" style="max-height: 400px; overflow-y: auto;">
@@ -354,6 +317,30 @@
                         </tbody>
 
                     </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Energy Consumption -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card shadow">
+            <div class="card-header py-3 d-flex flex-row align-items-center justify-content-between">
+                <h6 class="m-0 font-weight-bold text-primary">Session Outcomes (Success vs. Failure)</h6>
+                <div class="dropdown no-arrow d-flex align-items-center">
+                    <input type="date" id="specificDateInput" class="form-control form-control-sm mr-2" style="display: none;">
+                    <select class="form-control form-control-sm" id="timeRangeSelect">
+                        <option value="24h">24 Hours</option>
+                        <option value="lastMonth">Last Month</option>
+                        <option value="specificDay">Specific Day</option>
+                    </select>
+                </div>
+            </div>
+            <div class="card-body">
+                <div class="chart-area" style="height: 300px;">
+                    <canvas id="energyConsumptionChart"></canvas>
                 </div>
             </div>
         </div>
@@ -458,125 +445,6 @@
     animation: pulse 2s infinite;
 }
 
-.energy-hero-card {
-    border: 0;
-    background:
-        radial-gradient(circle at top left, rgba(84, 180, 255, 0.28), transparent 32%),
-        radial-gradient(circle at bottom right, rgba(43, 212, 151, 0.2), transparent 35%),
-        linear-gradient(135deg, #0f172a 0%, #132238 55%, #0c5c7a 100%);
-}
-
-.hero-kicker {
-    color: rgba(255, 255, 255, 0.72);
-    font-size: 0.72rem;
-    letter-spacing: 0.14em;
-    text-transform: uppercase;
-    font-weight: 700;
-}
-
-.energy-flow-grid {
-    display: grid;
-    grid-template-columns: minmax(120px, 1fr) 28px minmax(150px, 1.2fr) 28px minmax(120px, 1fr);
-    grid-template-areas:
-        "grid arrow1 inverter arrow2 chargers"
-        ". . battery . ."
-        ". . solar . .";
-    gap: 1rem;
-    align-items: center;
-}
-
-.flow-node {
-    position: relative;
-    padding: 1rem;
-    border-radius: 18px;
-    background: rgba(255, 255, 255, 0.08);
-    border: 1px solid rgba(255, 255, 255, 0.12);
-    display: flex;
-    flex-direction: column;
-    min-height: 110px;
-    backdrop-filter: blur(8px);
-}
-
-.flow-node strong,
-.flow-node span {
-    color: #fff;
-}
-
-.flow-label {
-    color: rgba(255, 255, 255, 0.65) !important;
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    font-size: 0.7rem;
-    margin-bottom: 0.5rem;
-}
-
-.flow-node-grid { grid-area: grid; }
-.flow-node-inverter { grid-area: inverter; }
-.flow-node-chargers { grid-area: chargers; }
-.flow-node-battery { grid-area: battery; }
-.flow-node-solar { grid-area: solar; }
-
-.flow-connector {
-    color: rgba(255, 255, 255, 0.75);
-    text-align: center;
-    font-size: 1.5rem;
-    font-weight: 700;
-}
-
-.energy-flow-grid .flow-connector:nth-of-type(1) { grid-area: arrow1; }
-.energy-flow-grid .flow-connector:nth-of-type(2) { grid-area: arrow2; }
-
-.hero-footer-card {
-    padding: 0.9rem 1rem;
-    border-radius: 14px;
-    background: rgba(255, 255, 255, 0.07);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-}
-
-.summary-tile-grid,
-.outcomes-mini-grid {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 0.75rem;
-}
-
-.summary-tile,
-.outcome-mini,
-.outcome-total {
-    padding: 0.9rem 1rem;
-    border-radius: 14px;
-    background: #f8fafc;
-    border: 1px solid #e5edf5;
-}
-
-.summary-tile span,
-.outcome-mini span,
-.outcome-total span {
-    display: block;
-    font-size: 0.72rem;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    color: #64748b;
-    margin-bottom: 0.35rem;
-    font-weight: 700;
-}
-
-.summary-tile strong,
-.outcome-mini strong,
-.outcome-total strong {
-    font-size: 1rem;
-    color: #0f172a;
-}
-
-.outcome-mini.success { border-left: 4px solid #1cc88a; }
-.outcome-mini.danger { border-left: 4px solid #e74a3b; }
-.outcome-mini.primary { border-left: 4px solid #4e73df; }
-.outcome-mini.info { border-left: 4px solid #36b9cc; }
-
-.mini-trend-card canvas {
-    max-height: 130px;
-}
-
 @keyframes pulse {
     0%, 100% {
         opacity: 1;
@@ -585,31 +453,8 @@
         opacity: 0.7;
     }
 }
-
-@media (max-width: 1199.98px) {
-    .energy-flow-grid {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        grid-template-areas:
-            "grid inverter"
-            "solar battery"
-            "chargers chargers";
-    }
-
-    .flow-connector {
-        display: none;
-    }
-}
-
-@media (max-width: 575.98px) {
-    .energy-flow-grid,
-    .summary-tile-grid,
-    .outcomes-mini-grid {
-        grid-template-columns: 1fr;
-    }
-}
 </style>
 
-{{ energy_trends|json_script:"energyTrendData" }}
 
 <script>
 document.addEventListener("DOMContentLoaded", function() {
@@ -748,116 +593,81 @@ document.addEventListener("DOMContentLoaded", function() {
 });
 </script>
 
+
+<!-- Setup Chart.js for Session Outcomes -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script>
-document.addEventListener("DOMContentLoaded", function() {
-    const trendDataNode = document.getElementById("energyTrendData");
-    if (!trendDataNode) {
-        return;
-    }
+    document.addEventListener("DOMContentLoaded", function() {
+        var ctx = document.getElementById("energyConsumptionChart");
+        var timeRangeSelect = document.getElementById('timeRangeSelect');
+        var specificDateInput = document.getElementById('specificDateInput');
+        if (!ctx) return;
 
-    const trendData = JSON.parse(trendDataNode.textContent);
-    const baseOptions = {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: {
-            legend: { display: false }
-        },
-        scales: {
-            x: { display: false, grid: { display: false } },
-            y: { display: false, grid: { display: false } }
-        },
-        elements: {
-            point: { radius: 0 }
-        }
-    };
+        specificDateInput.style.display = timeRangeSelect.value === 'specificDay' ? 'block' : 'none';
 
-    const powerProfileCtx = document.getElementById("powerProfileChart");
-    if (powerProfileCtx) {
-        new Chart(powerProfileCtx, {
-            type: "line",
-            data: {
-                labels: trendData.labels,
-                datasets: [
-                    {
-                        label: "Load",
-                        data: trendData.load_kw,
-                        borderColor: "#0f766e",
-                        backgroundColor: "rgba(15, 118, 110, 0.12)",
-                        tension: 0.35,
-                        fill: true,
-                        borderWidth: 2
-                    },
-                    {
-                        label: "Grid",
-                        data: trendData.grid_kw,
-                        borderColor: "#64748b",
-                        backgroundColor: "rgba(100, 116, 139, 0.08)",
-                        tension: 0.35,
-                        fill: false,
-                        borderWidth: 2
-                    }
-                ]
-            },
-            options: baseOptions
-        });
-    }
+        function loadChart() {
+            const params = new URLSearchParams();
+            params.set('range', timeRangeSelect.value);
+            if (timeRangeSelect.value === 'specificDay' && specificDateInput.value) {
+                params.set('date', specificDateInput.value);
+            }
 
-    const productionConsumptionCtx = document.getElementById("productionConsumptionChart");
-    if (productionConsumptionCtx) {
-        new Chart(productionConsumptionCtx, {
-            type: "line",
-            data: {
-                labels: trendData.labels,
-                datasets: [
-                    {
-                        label: "Solar",
-                        data: trendData.solar_kw,
-                        borderColor: "#f59e0b",
-                        backgroundColor: "rgba(245, 158, 11, 0.18)",
-                        tension: 0.35,
-                        fill: true,
-                        borderWidth: 2
-                    },
-                    {
-                        label: "Consumption",
-                        data: trendData.load_kw,
-                        borderColor: "#3b82f6",
-                        backgroundColor: "rgba(59, 130, 246, 0.08)",
-                        tension: 0.35,
-                        fill: false,
-                        borderWidth: 2
-                    }
-                ]
-            },
-            options: baseOptions
-        });
-    }
-
-    const chargerUsageCtx = document.getElementById("chargerUsageChart");
-    if (chargerUsageCtx) {
-        new Chart(chargerUsageCtx, {
-            type: "bar",
-            data: {
-                labels: trendData.charger_usage.labels,
-                datasets: [
-                    {
-                        data: trendData.charger_usage.values,
-                        backgroundColor: ["#1cc88a", "#4e73df", "#858796", "#e74a3b"],
-                        borderRadius: 8
-                    }
-                ]
-            },
-            options: {
-                ...baseOptions,
-                scales: {
-                    x: { display: true, grid: { display: false } },
-                    y: { display: false, grid: { display: false }, beginAtZero: true }
+            fetch("{% url 'public:session_chart_api' %}?" + params.toString())
+            .then(res => res.json())
+            .then(data => {
+                if (window.myLineChart !== undefined) {
+                    window.myLineChart.destroy();
                 }
+
+                window.myLineChart = new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: data.labels,
+                        datasets: [
+                            {
+                                label: 'Successful',
+                                backgroundColor: '#1cc88a',
+                                data: data.datasets.success
+                            },
+                            {
+                                label: 'Failed/Aborted',
+                                backgroundColor: '#e74a3b',
+                                data: data.datasets.failed
+                            },
+                            {
+                                label: 'Partial',
+                                backgroundColor: '#f6c23e',
+                                data: data.datasets.partial
+                            }
+                        ]
+                    },
+                    options: {
+                        maintainAspectRatio: false,
+                        layout: { padding: { left: 10, right: 25, top: 25, bottom: 0 } },
+                        scales: {
+                            x: { stacked: true, grid: { display: false } },
+                            y: { stacked: true, beginAtZero: true, ticks: { precision: 0 } }
+                        }
+                    }
+                });
+            });
+        }
+
+        timeRangeSelect.addEventListener('change', function() {
+            specificDateInput.style.display = this.value === 'specificDay' ? 'block' : 'none';
+            if (this.value !== 'specificDay' || specificDateInput.value) {
+                loadChart();
             }
         });
-    }
-});
+
+        specificDateInput.addEventListener('change', function() {
+            if (timeRangeSelect.value === 'specificDay' && this.value) {
+                loadChart();
+            }
+        });
+
+        loadChart();
+    });
 </script>
 
 {% endblock %}

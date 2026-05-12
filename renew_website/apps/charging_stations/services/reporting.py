@@ -4,9 +4,6 @@ from django.db.models import Avg, Count, DecimalField, DurationField, Expression
 from django.db.models.functions import Coalesce, ExtractHour
 from django.utils import timezone
 
-from renew_website.apps.api.deye.manager import DeyeManager, DeyeManagerError
-from renew_website.apps.api.energy.models import InverterReading
-
 from .exports import _align_datetime_for_project_timezone, serialize_transaction_report
 from ..models import Connector, Station, Transaction
 
@@ -25,156 +22,6 @@ def _energy_kwh(queryset) -> float:
 
 def _format_currency(value) -> str:
     return f"${float(value or 0):.2f}"
-
-
-def _station_metric(station_data, *keys) -> float:
-    if not station_data:
-        return 0.0
-
-    for key in keys:
-        value = station_data.get(key)
-        if value not in (None, ""):
-            try:
-                return float(value)
-            except (TypeError, ValueError):
-                continue
-    return 0.0
-
-
-def _format_snapshot_time(value) -> str:
-    if not value:
-        return "No live feed"
-
-    aligned_value = _align_datetime_for_project_timezone(value)
-    if timezone.is_aware(aligned_value):
-        aligned_value = timezone.localtime(aligned_value)
-    return aligned_value.strftime("%H:%M")
-
-
-def _derive_battery_state(solar_kw: float, load_kw: float, battery_soc: float) -> str:
-    if battery_soc <= 0:
-        return "Unavailable"
-    if solar_kw > load_kw + 0.2 and battery_soc < 98:
-        return "Charging"
-    if load_kw > solar_kw + 0.2 and battery_soc > 5:
-        return "Discharging"
-    return "Standby"
-
-
-def _build_live_energy_snapshot(connectors) -> dict:
-    active_charger_power_kw = round(
-        sum(float(connector.current_power_kw or 0) for connector in connectors if connector.status == "charging"),
-        2,
-    )
-
-    snapshot = {
-        "solar_kw": 0.0,
-        "grid_kw": 0.0,
-        "grid_direction": "Import",
-        "load_kw": active_charger_power_kw,
-        "battery_soc": 0.0,
-        "battery_state": "Unavailable",
-        "active_charger_power_kw": active_charger_power_kw,
-        "daily_solar_kwh": 0.0,
-        "lifetime_solar_kwh": 0.0,
-        "renewable_ratio": 0.0,
-        "data_source": "Database",
-        "inverter_status": "Archive",
-        "updated_at": "No live feed",
-    }
-
-    try:
-        normalized_data = DeyeManager().get_latest_data()
-        solar_kw = round(float(normalized_data.get("generation_power") or 0) / 1000, 2)
-        grid_kw_raw = round(float(normalized_data.get("grid_power") or 0) / 1000, 2)
-        load_kw = round(float(normalized_data.get("load_power") or 0) / 1000, 2)
-        battery_soc = round(float(normalized_data.get("battery_soc") or 0), 1)
-
-        snapshot.update({
-            "solar_kw": solar_kw,
-            "grid_kw": abs(grid_kw_raw),
-            "grid_direction": "Export" if grid_kw_raw < 0 else "Import",
-            "load_kw": load_kw or active_charger_power_kw,
-            "battery_soc": battery_soc,
-            "battery_state": _derive_battery_state(solar_kw, load_kw or active_charger_power_kw, battery_soc),
-            "daily_solar_kwh": round(float(normalized_data.get("daily_energy") or normalized_data.get("today_from_pv") or 0), 2),
-            "lifetime_solar_kwh": round(float(normalized_data.get("total_energy") or normalized_data.get("total_from_pv") or 0), 2),
-            "data_source": str(normalized_data.get("source") or "cloud").title(),
-            "inverter_status": "Online",
-            "updated_at": _format_snapshot_time(timezone.now()),
-        })
-    except (DeyeManagerError, Exception):
-        latest_reading = InverterReading.objects.select_related("inverter").order_by("-timestamp").first()
-        if latest_reading:
-            station_data = latest_reading.station_data or {}
-            solar_kw = round(float(latest_reading.generation_power or _station_metric(station_data, "generationPower", "generation_power")) / 1000, 2)
-            grid_kw_raw = round(float(latest_reading.grid_power or _station_metric(station_data, "gridPower", "grid_power", "total_grid_power")) / 1000, 2)
-            load_kw = round(_station_metric(station_data, "loadPower", "load_power", "totalLoadPower", "total_load_power", "total_to_load") / 1000, 2)
-            battery_soc = round(float(latest_reading.battery_soc or _station_metric(station_data, "batterySOC", "battery_soc")), 1)
-            snapshot.update({
-                "solar_kw": solar_kw,
-                "grid_kw": abs(grid_kw_raw),
-                "grid_direction": "Export" if grid_kw_raw < 0 else "Import",
-                "load_kw": load_kw or active_charger_power_kw,
-                "battery_soc": battery_soc,
-                "battery_state": _derive_battery_state(solar_kw, load_kw or active_charger_power_kw, battery_soc),
-                "daily_solar_kwh": round(_station_metric(station_data, "dailyEnergy", "daily_energy"), 2),
-                "lifetime_solar_kwh": round(_station_metric(station_data, "totalEnergy", "total_energy"), 2),
-                "data_source": "Database",
-                "inverter_status": "Archive",
-                "updated_at": _format_snapshot_time(latest_reading.timestamp),
-            })
-
-    load_reference = snapshot["load_kw"] or snapshot["active_charger_power_kw"]
-    if load_reference > 0:
-        snapshot["renewable_ratio"] = round(min(100.0, (snapshot["solar_kw"] / load_reference) * 100), 1)
-    return snapshot
-
-
-def _build_energy_trends(connectors) -> dict:
-    since = timezone.now() - timedelta(hours=12)
-    readings = list(
-        InverterReading.objects.filter(timestamp__gte=since)
-        .select_related("inverter")
-        .order_by("timestamp")
-    )
-
-    if len(readings) > 24:
-        step = max(1, len(readings) // 24)
-        readings = readings[::step][-24:]
-
-    labels = []
-    solar_series = []
-    load_series = []
-    grid_series = []
-    for reading in readings:
-        station_data = reading.station_data or {}
-        aligned_timestamp = _align_datetime_for_project_timezone(reading.timestamp)
-        if timezone.is_aware(aligned_timestamp):
-            aligned_timestamp = timezone.localtime(aligned_timestamp)
-
-        labels.append(aligned_timestamp.strftime("%H:%M"))
-        solar_series.append(round(float(reading.generation_power or _station_metric(station_data, "generationPower", "generation_power")) / 1000, 2))
-        load_series.append(round(_station_metric(station_data, "loadPower", "load_power", "totalLoadPower", "total_load_power", "total_to_load") / 1000, 2))
-        grid_series.append(round(abs(float(reading.grid_power or _station_metric(station_data, "gridPower", "grid_power", "total_grid_power"))) / 1000, 2))
-
-    charger_usage = {
-        "labels": ["Charging", "Available", "Offline", "Faulted"],
-        "values": [
-            sum(1 for connector in connectors if connector.status == "charging"),
-            sum(1 for connector in connectors if connector.status == "available"),
-            sum(1 for connector in connectors if connector.status == "offline"),
-            sum(1 for connector in connectors if connector.status == "faulted"),
-        ],
-    }
-
-    return {
-        "labels": labels,
-        "solar_kw": solar_series,
-        "load_kw": load_series,
-        "grid_kw": grid_series,
-        "charger_usage": charger_usage,
-    }
 
 
 def build_quick_stats(transactions) -> dict:
@@ -314,8 +161,6 @@ def build_public_dashboard_context(request) -> dict:
     today_revenue_total = today_transactions.aggregate(total=Coalesce(Sum("cost"), zero_currency))["total"]
     month_revenue_total = month_transactions.aggregate(total=Coalesce(Sum("cost"), zero_currency))["total"]
     utilization_percent = round((charger_status_counts["charging"] / total_chargers) * 100, 1) if total_chargers else 0
-    live_energy_snapshot = _build_live_energy_snapshot(connectors)
-    energy_trends = _build_energy_trends(connectors)
 
     return {
         "active_sessions_count": active_sessions_count,
@@ -334,8 +179,6 @@ def build_public_dashboard_context(request) -> dict:
         "energy_month_kwh": _energy_kwh(month_transactions),
         "month_revenue": _format_currency(month_revenue_total),
         "avg_revenue_per_session": _format_currency((month_revenue_total or 0) / month_transactions.count()) if month_transactions.exists() else _format_currency(0),
-        "live_energy_snapshot": live_energy_snapshot,
-        "energy_trends": energy_trends,
         "quick_stats": quick_stats,
         "recent_transactions": recent_transactions,
         "recent_transaction_rows": recent_transaction_rows,

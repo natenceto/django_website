@@ -224,6 +224,7 @@ def dashboard_data(request):
     """Get comprehensive dashboard data for monitoring."""
     try:
         service = InverterDataService()
+        from renew_website.apps.charging_stations.models import Connector
         
         # Current generation summary
         current_data = service.get_current_generation_summary()
@@ -231,6 +232,7 @@ def dashboard_data(request):
         # Recent readings
         recent_readings = service.get_latest_readings()
 
+        normalized_data = {}
         # Get today's energy from Deye API directly (more accurate)
         data_source = 'database_fallback'
         try:
@@ -266,6 +268,33 @@ def dashboard_data(request):
             total_energy = 0.0  # Would need historical data for this
 
         today = timezone.now().date()
+        work_mode = WorkMode.get_current_config()
+        latest_recommendation = EnergyRecommendation.get_latest_pending()
+        charging_connectors = list(Connector.objects.filter(status='charging'))
+        charger_load_watts = round(sum(float(connector.current_power_kw or 0) * 1000 for connector in charging_connectors), 2)
+        active_chargers = len(charging_connectors)
+
+        generation_power = float(normalized_data.get('generation_power', 0) or 0)
+        grid_power = float(normalized_data.get('grid_power', 0) or 0)
+        load_power = float(normalized_data.get('load_power', 0) or 0)
+        battery_soc = float(normalized_data.get('battery_soc', current_data.get('average_battery_soc', 0)) or 0)
+
+        if (generation_power == 0 or load_power == 0 or grid_power == 0) and recent_readings:
+            station_data = recent_readings[0].station_data or {}
+            generation_power = generation_power or float(station_data.get('generationPower', recent_readings[0].generation_power or 0) or 0)
+            grid_power = grid_power or float(station_data.get('gridPower', recent_readings[0].grid_power or 0) or 0)
+            load_power = load_power or float(station_data.get('loadPower', station_data.get('load_power', station_data.get('totalLoadPower', station_data.get('total_to_load', 0)))) or 0)
+
+        effective_load = load_power or charger_load_watts
+        renewable_ratio = round(min(100, (generation_power / effective_load) * 100), 1) if effective_load > 0 else 0
+        if battery_soc <= 0:
+            battery_state = 'Unavailable'
+        elif generation_power > effective_load + 100:
+            battery_state = 'Charging'
+        elif effective_load > generation_power + 100:
+            battery_state = 'Discharging'
+        else:
+            battery_state = 'Standby'
         
         # Get all readings for today to calculate energy and peak
         today_readings = InverterReading.objects.filter(
@@ -286,6 +315,30 @@ def dashboard_data(request):
         dashboard = {
             'connection_source': data_source,
             'current': current_data,
+            'flow': {
+                'solar_watts': round(generation_power, 2),
+                'grid_watts': round(abs(grid_power), 2),
+                'grid_direction': 'Export' if grid_power < 0 else 'Import',
+                'load_watts': round(effective_load, 2),
+                'charger_load_watts': round(charger_load_watts, 2),
+                'active_chargers': active_chargers,
+                'battery_soc': round(battery_soc, 1),
+                'battery_state': battery_state,
+                'renewable_ratio': renewable_ratio,
+                'updated_at': timezone.now().isoformat(),
+            },
+            'work_mode': {
+                'mode': work_mode.mode,
+                'control_mode': work_mode.control_mode,
+                'algorithm_selected_mode': work_mode.algorithm_selected_mode,
+            },
+            'recommendation': {
+                'pending': bool(latest_recommendation),
+                'mode': latest_recommendation.mode if latest_recommendation else None,
+                'ev_power_limit_kw': latest_recommendation.ev_power_limit_kw if latest_recommendation else None,
+                'power_per_station_kw': latest_recommendation.power_per_station_kw if latest_recommendation else None,
+                'created_at': latest_recommendation.created_at.isoformat() if latest_recommendation else None,
+            },
             'daily_stats': {
                 'total_energy_kwh': round(total_energy_today, 2),
                 'lifetime_energy_kwh': round(total_energy, 2) if 'total_energy' in locals() else 0.0,
