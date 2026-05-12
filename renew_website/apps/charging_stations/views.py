@@ -3,9 +3,11 @@ from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.contrib import messages
 from .forms import StationForm
 from .models import Station
+from django.template.loader import render_to_string
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
-from django.template.loader import render_to_string
+
+from .services import CommandDispatchError, StartChargingCommand, StopChargingCommand, command_bus
 
 def stations(request: HttpRequest) -> HttpResponse:
     """
@@ -160,32 +162,21 @@ def stations(request: HttpRequest) -> HttpResponse:
                         print(f"Sending RemoteStartTransaction to station {station_id}: connector={connector.connector_id}, id_tag={valid_rfid.tag}, power={power_msg}")
                         
                         try:
-                            # Use channel layer to send command to station consumer
-                            from channels.layers import get_channel_layer
-                            channel_layer = get_channel_layer()
-                            
-                            message = {
-                                "type": "remote_start_transaction",
-                                "connector_id": connector.connector_id,
-                                "id_tag": valid_rfid.tag,
-                                "requested_power": power_limit,
-                                "station_id": station_id,
-                            }
-                            
-                            print(f"Sending message via channel layer to group charging_stations_group_{station_id}: {message}")
-                            
-                            # Send command via channel layer
-                            async_to_sync(channel_layer.group_send)(
-                                f"charging_stations_group_{station_id}",
-                                message
+                            command_bus.dispatch(
+                                StartChargingCommand(
+                                    station_id=station_id,
+                                    connector_id=connector.connector_id,
+                                    id_tag=valid_rfid.tag,
+                                    requested_power_kw=power_limit,
+                                )
                             )
                             
-                            print(f"Message sent successfully")
+                            print(f"RemoteStartTransaction dispatched successfully for station {station_id}")
                             
                             results.append(f"Station {station_id}: RemoteStartTransaction sent successfully")
                             success_count += 1
                             
-                        except Exception as e:
+                        except CommandDispatchError as e:
                             print(f"RemoteStartTransaction failed: {e}")
                             import traceback
                             traceback.print_exc()
@@ -203,30 +194,19 @@ def stations(request: HttpRequest) -> HttpResponse:
                             print(f"Stopping transaction {active_transaction.id} for station {station_id}")
                             
                             try:
-                                # Use channel layer to send command to station consumer
-                                from channels.layers import get_channel_layer
-                                channel_layer = get_channel_layer()
-                                
-                                message = {
-                                    "type": "remote_stop_transaction",
-                                    "transaction_id": active_transaction.id,
-                                    "station_id": station_id,
-                                }
-                                
-                                print(f"Sending stop message via channel layer to group charging_stations_group_{station_id}: {message}")
-                                
-                                # Send command via channel layer
-                                async_to_sync(channel_layer.group_send)(
-                                    f"charging_stations_group_{station_id}",
-                                    message
+                                command_bus.dispatch(
+                                    StopChargingCommand(
+                                        station_id=station_id,
+                                        transaction_id=active_transaction.id,
+                                    )
                                 )
                                 
-                                print(f"Stop message sent successfully")
+                                print(f"RemoteStopTransaction dispatched successfully for station {station_id}")
                                 
                                 results.append(f"Station {station_id}: Stop command sent")
                                 success_count += 1
                                 
-                            except Exception as e:
+                            except CommandDispatchError as e:
                                 print(f"Stop transaction failed: {e}")
                                 import traceback
                                 traceback.print_exc()

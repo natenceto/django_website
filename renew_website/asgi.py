@@ -7,26 +7,13 @@ os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'renew_website.settings')
 from django.core.asgi import get_asgi_application
 django_asgi_app = get_asgi_application()
 
-import threading
-
-# Reset all station statuses to inactive on server startup
-# This ensures stale "active" statuses from previous sessions are cleared
-def reset_station_statuses():
+if os.environ.get('RESET_STATION_STATE_ON_STARTUP', '').lower() in {'1', 'true', 'yes'}:
     try:
-        from renew_website.apps.charging_stations.models import Station, Connector
-        # Reset all stations to inactive
-        updated_stations = Station.objects.filter(status='active').update(status='inactive')
-        # Reset all connectors to offline
-        updated_connectors = Connector.objects.exclude(status='available').update(status='offline')
-        if updated_stations or updated_connectors:
-            print(f"Server startup: Reset {updated_stations} stations to inactive, {updated_connectors} connectors to offline")
-    except Exception as e:
-        print(f"Warning: Could not reset station statuses on startup: {e}")
+        from renew_website.tasks import reset_station_runtime_state
 
-# Run in a separate thread to avoid "SynchronousOnlyOperation" when running under ASGI
-startup_thread = threading.Thread(target=reset_station_statuses)
-startup_thread.start()
-startup_thread.join()
+        reset_station_runtime_state.delay()
+    except Exception as exc:
+        print(f"Warning: Could not enqueue station runtime reset on startup: {exc}")
 
 # Now it's safe to import Django app modules (after Django is initialized)
 from channels.routing import ProtocolTypeRouter, URLRouter

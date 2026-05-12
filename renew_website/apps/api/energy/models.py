@@ -212,47 +212,19 @@ class EnergyRecommendation(models.Model):
             return False, "Already processed"
 
         try:
-            from renew_website.apps.charging_stations.tasks import set_charging_power_limit
-            from renew_website.apps.charging_stations.models import Station, Transaction
+            from .execution_service import EMSExecutionService
 
             with transaction.atomic():
-                active_transactions = Transaction.objects.filter(
-                    stopped_at__isnull=True
-                )
-
-                station_ids = active_transactions.values_list(
-                    'connector__station_id',
-                    flat=True
-                )
-
-                active_stations = Station.objects.filter(
-                    id__in=station_ids
-                ).distinct()
-
-                power_watts = int(self.power_per_station_kw * 1000)
-
-                for station in active_stations:
-                    set_charging_power_limit.delay(station.id, power_watts)
-
-                # NEW: Apply the recommended mode directly to the Deye Inverter using Modbus
-                from renew_website.apps.api.deye.manager import DeyeManager
-                from renew_website.apps.api.deye.control import get_modbus_commands_for_mode
-                
-                try:
-                    modbus_commands = get_modbus_commands_for_mode(self.mode)
-                    if modbus_commands:
-                        deye_mgr = DeyeManager()
-                        is_applied = deye_mgr.apply_modbus_commands(modbus_commands)
-                        if not is_applied:
-                            return False, "Failed to send Modbus commands to Inverter"
-                except Exception as ex:
-                    return False, f"Modbus Invocation Error: {str(ex)}"
+                allocation_plan = self.algorithm_data.get('allocation_plan', {}) if isinstance(self.algorithm_data, dict) else {}
+                result = EMSExecutionService().apply_allocation_plan(allocation_plan)
+                if not result.success:
+                    return False, result.message
 
                 self.status = self.Status.APPLIED
                 self.applied_at = timezone.now()
                 self.save(update_fields=['status', 'applied_at'])
 
-                return True, f"Applied to {active_stations.count()} stations"
+                return True, f"Applied to {result.stations_updated} stations"
 
         except Exception as e:
             return False, str(e)

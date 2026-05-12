@@ -71,13 +71,14 @@ class TransactionSerializer(serializers.ModelSerializer):
     connector_number = serializers.IntegerField(source='connector.connector_id', read_only=True)
     energy_kwh = serializers.SerializerMethodField()
     duration_minutes = serializers.SerializerMethodField()
+    session_context = serializers.SerializerMethodField()
     
     class Meta:
         model = Transaction
         fields = [
             'id', 'station_id', 'station_address', 'connector_number',
             'id_tag', 'started_at', 'stopped_at', 'meter_start', 'meter_stop',
-            'requested_power_kw', 'status', 'energy_kwh', 'duration_minutes'
+            'requested_power_kw', 'status', 'energy_kwh', 'duration_minutes', 'session_context'
         ]
         read_only_fields = ['id', 'started_at']
     
@@ -91,6 +92,12 @@ class TransactionSerializer(serializers.ModelSerializer):
             delta = obj.stopped_at - obj.started_at
             return int(delta.total_seconds() / 60)
         return None
+
+    def get_session_context(self, obj):
+        latest_meter = obj.meter_values.order_by('-timestamp', '-id').first()
+        if not latest_meter or not isinstance(latest_meter.data, dict):
+            return {}
+        return latest_meter.data.get('session_context', {})
 
 
 class MeterValueSerializer(serializers.ModelSerializer):
@@ -126,6 +133,12 @@ class ChargingSessionStartSerializer(serializers.Serializer):
     connector_id = serializers.IntegerField(default=1)
     rfid_tag = serializers.CharField(max_length=50, required=False)
     power_kw = serializers.IntegerField(required=False, min_value=1, max_value=350)
+    vehicle_soc = serializers.FloatField(required=False, min_value=0, max_value=100)
+    target_soc = serializers.FloatField(required=False, min_value=1, max_value=100)
+    estimated_departure_hours = serializers.FloatField(required=False, min_value=0.1, max_value=168)
+    priority_weight = serializers.FloatField(required=False, min_value=0.1, max_value=10)
+    battery_capacity_kwh = serializers.FloatField(required=False, min_value=1, max_value=300)
+    max_acceptance_kw = serializers.FloatField(required=False, min_value=1, max_value=350)
 
 
 class ChargingSessionStopSerializer(serializers.Serializer):

@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Station, Connector, Transaction, MeterValue, UserRFID
+from .models import Station, Connector, Transaction, MeterValue, UserRFID, CommandLog
 
 
 from django.utils.html import format_html
@@ -144,6 +144,15 @@ class MeterValueAdmin(admin.ModelAdmin):
     list_display = ['transaction', 'timestamp', 'value']
     list_filter = ['timestamp']
     date_hierarchy = 'timestamp'
+
+
+@admin.register(CommandLog)
+class CommandLogAdmin(admin.ModelAdmin):
+    list_display = ['command_id', 'command_type', 'station', 'status', 'created_at', 'executed_at']
+    list_filter = ['command_type', 'status', 'created_at']
+    search_fields = ['command_id', 'station__address', 'detail', 'error_message']
+    readonly_fields = ['command_id', 'created_at', 'executed_at', 'payload']
+    date_hierarchy = 'created_at'
 
 
 from django.urls import path

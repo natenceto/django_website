@@ -1,19 +1,18 @@
-"""
-Energy management utility functions.
-"""
+"""Energy management utility functions."""
 import logging
-from django.utils import timezone
-from .models import WorkMode
+
+from .decision_service import EnergyOrchestrator
 
 logger = logging.getLogger(__name__)
 
 def run_work_mode_algorithm(inverter=None):
     """
-    Determines the optimal work mode based on current conditions.
-    
-    Returns:
-        str: one of ['selling_first', 'zero_export_load', 'zero_export_ct']
+    Determines the optimal EMS strategy and execution plan based on current conditions.
     """
-    # Simple logic for now: default to selling_first
-    # In a real implementation, this would check battery SOC, grid price, weather, etc.
-    return 'selling_first'
+    decision = EnergyOrchestrator().evaluate_current_decision()
+    return {
+        'strategy': decision.strategy,
+        'allocation_plan': decision.allocation_plan,
+        'constraint_state': decision.constraint_state,
+        'state': decision.state,
+    }

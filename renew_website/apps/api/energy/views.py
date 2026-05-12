@@ -21,12 +21,43 @@ from .serializers import (
 )
 from renew_website.apps.api.deye.cloud_client import DeyeCloudClient, DeyeCloudError, WORK_MODE_MAP
 from renew_website.apps.api.deye.manager import DeyeManager, DeyeManagerError
+from .decision_service import EnergyOrchestrator
+from .execution_service import EMSExecutionService
 from .utils import run_work_mode_algorithm
 
 logger = logging.getLogger(__name__)
 
 # Global cache for websocket performance
 _ws_performance_stats = {}
+
+
+def _strategy_to_str(strategy):
+    return strategy.name if hasattr(strategy, 'name') else str(strategy)
+
+
+def _serialize_strategy_decision(state, decision, target_ev_sessions, target_ev_demand_kw):
+    strategy = decision.strategy
+    plan = decision.allocation_plan
+    return {
+        'strategy': _strategy_to_str(strategy),
+        'strategy_label': str(strategy.label) if hasattr(strategy, 'label') else _strategy_to_str(strategy),
+        'active_ev_sessions': target_ev_sessions,
+        'requested_ev_demand_kw': round(target_ev_demand_kw, 2),
+        'ev_power_limit_kw': round(float(plan.get('ev_charge_limit_kw', 0.0) or 0.0), 2),
+        'allocation_plan': plan,
+        'current_snapshot': {
+            'battery_soc': state.battery_soc,
+            'pv_power_kw': state.pv_production_kw,
+            'load_power_kw': state.building_load_kw,
+            'weather_condition': state.weather_condition,
+            'cloud_cover_percent': state.cloud_cover_percent,
+            'weather_solar_score': state.weather_solar_score,
+            'weather_risk_score': state.weather_risk_score,
+            'is_night_tariff': state.is_night_tariff,
+            'active_ev_sessions': state.active_ev_sessions,
+            'total_ev_demand_kw': state.total_ev_demand_kw,
+        },
+    }
 
 # -----------------------
 # Views
@@ -93,63 +124,18 @@ def charging_recommendation(request):
     """
     Get EV charging recommendation based on real-time conditions (mocked 1 and 2 EV scenarios).
     """
-    from django.utils import timezone
-    from renew_website.apps.api.energy.models import InverterReading
-    from renew_website.apps.api.weather.models import WeatherLog
-    from renew_website.apps.algorithm.conditions import SystemState
-    from renew_website.apps.algorithm.engine import DecisionEngine
-    from renew_website.apps.algorithm.work_modes import SystemWorkMode
-
     try:
-        latest_reading = InverterReading.objects.order_by('-timestamp').first()
-        pv_power_kw = (latest_reading.generation_power or 0) / 1000.0 if latest_reading else 0.0
-        battery_soc = float(latest_reading.battery_soc or 0) if latest_reading else 0.0
-        station_data = latest_reading.station_data or {} if latest_reading else {}
-        
-        load_power_kw = station_data.get('load_power', 0) / 1000.0
-        grid_voltage = station_data.get('grid_voltage', 230.0)
-        is_grid_available = bool(grid_voltage > 190.0)
+        orchestrator = EnergyOrchestrator()
+        current_decision = orchestrator.evaluate_current_decision()
+        decision_1 = orchestrator.evaluate_capacity_scenario(1, 11.0)
+        decision_2 = orchestrator.evaluate_capacity_scenario(2, 22.0)
+        current_state = current_decision.state or decision_1.state
 
-        latest_weather = WeatherLog.objects.order_by('-timestamp').first()
-        cloud_cover = float(latest_weather.cloud_cover) if latest_weather else 0.0
-        precipitation = float(latest_weather.precipitation_mm) if latest_weather else 0.0
-        is_raining = precipitation > 0
-
-        current_hour = timezone.localtime().hour
-        is_night_tariff = (current_hour >= 22 or current_hour < 6)
-
-        # Baseline common attributes
-        base_kwargs = {
-            'battery_soc': battery_soc,
-            'is_grid_available': is_grid_available,
-            'pv_production_kw': pv_power_kw,
-            'building_load_kw': load_power_kw,
-            'cloud_cover_percent': cloud_cover,
-            'is_raining': is_raining,
-            'weather_condition': 'clear',
-            'is_night_tariff': is_night_tariff,
+        snapshot = {
+            'pv_power_kw': round(current_state.pv_production_kw, 2) if current_state else 0.0,
+            'building_load_kw': round(current_state.building_load_kw, 2) if current_state else 0.0,
+            'battery_soc': round(current_state.battery_soc, 1) if current_state else 0.0,
         }
-
-        # Scenario 1: 1 EV (Demand = 11kW)
-        state_1 = SystemState(
-            active_ev_sessions=1,
-            total_ev_demand_kw=11.0,
-            **base_kwargs
-        )
-        decision_1 = DecisionEngine.evaluate(state_1)
-        
-        # Scenario 2: 2 EVs (Demand = 22kW)
-        state_2 = SystemState(
-            active_ev_sessions=2,
-            total_ev_demand_kw=22.0,
-            **base_kwargs
-        )
-        decision_2 = DecisionEngine.evaluate(state_2)
-
-        def mode_to_str(m):
-            if isinstance(m, SystemWorkMode):
-                return m.name
-            return str(m)
 
         def get_advice(power_allowed, target):
             if power_allowed >= target:
@@ -159,22 +145,37 @@ def charging_recommendation(request):
             else:
                 return "Липса на излишък. Зареждането ще бъде изчакване."
 
-        info_context = (f"Текуща PV мощност: {pv_power_kw:.2f}kW, "
-                        f"Консумация: {load_power_kw:.2f}kW, "
-                        f"Батерия: {battery_soc:.1f}%")
+        info_context = (
+            f"Текуща PV мощност: {snapshot['pv_power_kw']:.2f}kW, "
+            f"Консумация: {snapshot['building_load_kw']:.2f}kW, "
+            f"Батерия: {snapshot['battery_soc']:.1f}%"
+        )
+
+        recommended = decision_1 if decision_1.get('ev_power_limit_kw', 0) >= decision_2.get('ev_power_limit_kw', 0) else decision_2
+        recommended_state = state_1 if recommended is decision_1 else state_2
+        recommended_sessions = 1 if recommended is decision_1 else 2
+        recommended_demand = 11.0 if recommended is decision_1 else 22.0
 
         response_data = {
             "context": info_context,
             "scenario_1_ev": {
-                "mode": mode_to_str(decision_1.get("mode")),
-                "power_allowed": round(decision_1.get("ev_power_limit_kw", 0), 2),
-                "advice": get_advice(decision_1.get("ev_power_limit_kw", 0), 11.0)
+                "strategy": _strategy_to_str(decision_1.strategy),
+                "power_allowed": round(decision_1.allocation_plan.get("ev_charge_limit_kw", 0), 2),
+                "advice": get_advice(decision_1.allocation_plan.get("ev_charge_limit_kw", 0), 11.0),
+                "allocation_plan": decision_1.allocation_plan,
             },
             "scenario_2_ev": {
-                "mode": mode_to_str(decision_2.get("mode")),
-                "power_allowed": round(decision_2.get("ev_power_limit_kw", 0), 2),
-                "advice": get_advice(decision_2.get("ev_power_limit_kw", 0), 22.0)
-            }
+                "strategy": _strategy_to_str(decision_2.strategy),
+                "power_allowed": round(decision_2.allocation_plan.get("ev_charge_limit_kw", 0), 2),
+                "advice": get_advice(decision_2.allocation_plan.get("ev_charge_limit_kw", 0), 22.0),
+                "allocation_plan": decision_2.allocation_plan,
+            },
+            "recommended_plan": _serialize_strategy_decision(
+                current_decision.state,
+                current_decision,
+                current_decision.state.active_ev_sessions if current_decision.state else 0,
+                current_decision.state.total_ev_demand_kw if current_decision.state else 0.0,
+            ),
         }
         
         return Response(response_data)
@@ -523,22 +524,26 @@ def run_algorithm(request):
         if config.control_mode != "automatic":
             return Response({"error": "Algorithm can only run in automatic mode"}, status=status.HTTP_400_BAD_REQUEST)
 
-        algorithm_selected = run_work_mode_algorithm()
-        if algorithm_selected not in WORK_MODE_MAP:
-            return Response({"error": f"Algorithm returned invalid mode: {algorithm_selected}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        algorithm_result = EnergyOrchestrator().evaluate_current_decision()
+        algorithm_selected = algorithm_result.strategy
+        allocation_plan = algorithm_result.allocation_plan
+        if not algorithm_selected:
+            return Response({"error": "Algorithm could not determine an EMS strategy"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-        config.algorithm_selected_mode = algorithm_selected
+        config.algorithm_selected_mode = _strategy_to_str(algorithm_selected)
         config.save(update_fields=["algorithm_selected_mode"])
-
-        manager = DeyeManager()
-        sync_success = manager.set_work_mode(algorithm_selected)
 
         return Response(
             {
-                "message": "Algorithm executed successfully",
-                "selected_mode": algorithm_selected,
+                "message": "EMS strategy computed successfully",
+                "selected_mode": _strategy_to_str(algorithm_selected),
                 "selected_mode_display": config.get_algorithm_selected_mode_display(),
-                "deye_sync": {"synced": bool(sync_success), "timestamp": timezone.now().isoformat()},
+                "allocation_plan": allocation_plan,
+                "deye_sync": {
+                    "synced": False,
+                    "timestamp": timezone.now().isoformat(),
+                    "note": "Strategy computed only. Apply sends charger limits without changing inverter operating mode.",
+                },
             }
         )
 
@@ -690,33 +695,23 @@ def start_charging_session(request):
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def direct_apply_inverter_mode(request):
-    """Directly sends the recommended mode's Modbus commands to the inverter without needing a pending DB recommendation."""
+    """Apply an EMS allocation plan without changing the fixed inverter operating policy."""
     try:
-        from renew_website.apps.api.deye.manager import DeyeManager
-        from renew_website.apps.api.deye.control import get_modbus_commands_for_mode
-        
-        mode = request.data.get('mode')
-        if not mode:
-            return Response({'success': False, 'message': 'Missing mode parameter'}, status=400)
-            
-        modbus_commands = get_modbus_commands_for_mode(mode)
-        
-        if not modbus_commands:
-            return Response({
-                'success': True, 
-                'message': f'Режимът {mode} не изисква промени по регистрите на инвертора.'
-            })
-            
-        deye_mgr = DeyeManager()
-        is_applied = deye_mgr.apply_modbus_commands(modbus_commands)
-        
-        if is_applied:
-            return Response({'success': True, 'message': 'Командите бяха изпратени успешно по Modbus.'})
-        else:
-            return Response({'success': False, 'message': 'Комуникацията с Deye пропадна.'})
+        allocation_plan = request.data.get('allocation_plan') or {}
+        if not allocation_plan:
+            mode = request.data.get('mode')
+            if mode:
+                algorithm_result = run_work_mode_algorithm()
+                allocation_plan = algorithm_result.get('allocation_plan', {})
+
+        if not allocation_plan:
+            return Response({'success': False, 'message': 'Missing allocation_plan payload'}, status=400)
+
+        result = EMSExecutionService().apply_allocation_plan(allocation_plan)
+        return Response(result.to_dict())
             
     except Exception as e:
-        logger.error(f"Failed to directly apply inverter mode: {e}")
+        logger.error(f"Failed to directly apply EMS allocation: {e}")
         return Response({'success': False, 'message': str(e)}, status=500)
 
 @api_view(['GET'])
