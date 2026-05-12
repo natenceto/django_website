@@ -228,6 +228,9 @@ class Transaction(models.Model):
     ]
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="active")
     
+    # OCPP Stop Reason
+    stop_reason = models.CharField(max_length=50, null=True, blank=True, help_text="Reason from OCPP StopTransaction.req")
+    
     # Cost and Billing
     cost = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True,
                              help_text="Total cost of charging session")
@@ -246,6 +249,88 @@ class Transaction(models.Model):
         if self.started_at and self.stopped_at:
             return self.stopped_at - self.started_at
         return None
+
+    @property
+    def duration_seconds(self):
+        """Clean abstraction for duration in seconds."""
+        if self.duration:
+            return self.duration.total_seconds()
+        return 0
+
+    @property
+    def formatted_duration(self):
+        """Readability formatter for UI."""
+        duration_sec = self.duration_seconds
+        if duration_sec == 0:
+            return "—"
+        h = int(duration_sec // 3600)
+        m = int((duration_sec % 3600) // 60)
+        s = int(duration_sec % 60)
+        if h > 0:
+            return f"{h}h {m}m"
+        elif m > 0:
+            return f"{m}m {s}s"
+        return f"{s}s"
+
+    @property
+    def avg_power_kw(self):
+        """Derived metric: Average power delivered."""
+        duration_sec = self.duration_seconds
+        energy = float(self.energy_kwh) if self.energy_kwh else 0.0
+        if energy > 0 and duration_sec > 0:
+            return round((energy / (duration_sec / 3600)), 2)
+        return "—"
+
+    @property
+    def formatted_energy(self):
+        """Consistent decimals for energy UI."""
+        energy = float(self.energy_kwh) if self.energy_kwh else 0.0
+        return f"{energy:.2f}"
+
+    @property
+    def session_result(self):
+        """Classification Engine: Returns the business-meaningful result of the session."""
+        duration_sec = self.duration_seconds
+        energy = float(self.energy_kwh) if self.energy_kwh else 0.0
+
+        if self.status == "active":
+            return "Active"
+        if self.status == "error":
+            return "Failed"
+            
+        # Rules for stopped/completed
+        if duration_sec < 30 and energy < 0.01:
+            return "Aborted"
+        if duration_sec > 300 and energy < 0.1:
+            return "No Energy"
+        
+        # Consider a valid charge above minimum energy
+        if energy >= 0.05:
+            return "Successful"
+            
+        # Between 30s and 300s, and insufficient energy means it started but didn't deliver meaningful charge
+        return "Partial"
+
+    @property
+    def result_class(self):
+        """UI Helper: Bootstrap class associated with the session result."""
+        res = self.session_result
+        if res == "Active": return "primary"
+        if res in ["Failed", "Aborted"]: return "danger"
+        if res == "Successful": return "success"
+        if res == "Partial": return "warning"
+        return "secondary"
+
+    @property
+    def session_stop_reason(self):
+        """Operational Insight: Educated guess on why the session exited."""
+        res = self.session_result
+        if res == "Failed": return "Fault"
+        if res == "Aborted": return "User stopped early/Interrupted"
+        if res == "No Energy": return "Idle / No charge"
+        if res == "Successful": return "LocalStop/RemoteStop"
+        if res == "Partial": return "Unknown"
+        return ""
     
     @property
     def energy_consumed(self):

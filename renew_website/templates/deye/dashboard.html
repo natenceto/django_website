@@ -259,17 +259,19 @@ async function loadDashboardData() {
         const badge = document.getElementById('data-source-badge');
         if (badge) {
             badge.classList.remove('d-none', 'badge-secondary', 'badge-success', 'badge-info');
-            if (data.connection_source === 'local') {
+                        if (data.connection_source === 'local') {
                 badge.classList.add('badge-success');
                 badge.innerHTML = '<i class="fas fa-network-wired mr-1"></i> Local (Modbus)';
             } else if (data.connection_source === 'cloud') {
                 badge.classList.add('badge-info');
                 badge.innerHTML = '<i class="fas fa-cloud mr-1"></i> Cloud (API)';
+            } else if (data.connection_source === 'database_fallback' || data.connection_source === 'database') {
+                badge.classList.add('badge-primary');
+                badge.innerHTML = '<i class="fas fa-database mr-1"></i> Database Archive';
             } else {
                 badge.classList.add('badge-secondary');
-                badge.innerHTML = '<i class="fas fa-question-circle mr-1"></i> Unknown Source';
-            }
-        }
+                badge.innerHTML = '<i class="fas fa-question-circle mr-1"></i> No Source / Offline';
+ }
         
         // Update metrics
         document.getElementById('generation-power').textContent = 

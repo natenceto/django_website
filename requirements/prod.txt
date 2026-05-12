@@ -54,3 +54,6 @@ hiredis>=2.3.2
 
 # Modbus
 pymodbus==3.12.1
+
+# Timezone
+timezonefinder

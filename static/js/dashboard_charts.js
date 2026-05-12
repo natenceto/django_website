@@ -2,8 +2,27 @@ document.addEventListener('DOMContentLoaded', function() {
     const ctx = document.getElementById('energyConsumptionChart');
     if (!ctx) return;
 
-    // Get time range selector
     const timeRangeSelect = document.getElementById('timeRangeSelect');
+    const specificDateInput = document.getElementById('specificDateInput');
+
+    if(timeRangeSelect) {
+        timeRangeSelect.addEventListener('change', function() {
+            if(this.value === 'specificDay') {
+                specificDateInput.style.display = 'block';
+                // Trigger fetch if date is already set
+                if (specificDateInput.value) {
+                    fetchChartData();
+                }
+            } else {
+                specificDateInput.style.display = 'none';
+                fetchChartData();
+            }
+        });
+    }
+
+    if(specificDateInput) {
+        specificDateInput.addEventListener('change', fetchChartData);
+    }
 
     // Create export buttons dynamically, or hook onto existing ones
     // We will append buttons next to the selector
@@ -22,8 +41,22 @@ document.addEventListener('DOMContentLoaded', function() {
     `;
     chartHeader.appendChild(btnContainer);
 
+    // Plugins
+    const customCanvasBackgroundColor = {
+        id: 'customCanvasBackgroundColor',
+        beforeDraw: (chart, args, options) => {
+            const {ctx} = chart;
+            ctx.save();
+            ctx.globalCompositeOperation = 'destination-over';
+            ctx.fillStyle = options.color || '#ffffff';
+            ctx.fillRect(0, 0, chart.width, chart.height);
+            ctx.restore();
+        }
+    };
+
     let energyChart = new Chart(ctx, {
         type: 'line',
+        plugins: [customCanvasBackgroundColor],
         data: {
             labels: [],
             datasets: [
@@ -108,8 +141,15 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 
     function fetchChartData() {
-        const range = timeRangeSelect ? timeRangeSelect.value : '24h';
-        fetch(`/api/energy/chart-data/?range=${range}`)
+        let range = '24h';
+        let dateQuery = '';
+        if (timeRangeSelect) {
+            range = timeRangeSelect.value;
+            if (range === 'specificDay' && specificDateInput && specificDateInput.value) {
+                dateQuery = `&date=${specificDateInput.value}`;
+            }
+        }
+        fetch(`/api/energy/chart-data/?range=${range}${dateQuery}`)
             .then(res => res.json())
             .then(data => {
                 if(data.error) {
@@ -131,23 +171,27 @@ document.addEventListener('DOMContentLoaded', function() {
     // Auto-refresh every 30 seconds
     setInterval(fetchChartData, 30000);
 
-    // Event listeners for UI
-    if(timeRangeSelect) {
-        timeRangeSelect.addEventListener('change', fetchChartData);
-    }
+    // (Old event listener for timeRangeSelect removed as it's handled above)
 
     document.getElementById('exportCsvBtn').addEventListener('click', function(e) {
         e.preventDefault();
-        const range = timeRangeSelect ? timeRangeSelect.value : '24h';
-        window.location.href = `/api/energy/chart-data/export/?range=${range}`;
+        let range = '24h';
+        let dateQuery = '';
+        if (timeRangeSelect) {
+            range = timeRangeSelect.value;
+            if (range === 'specificDay' && specificDateInput && specificDateInput.value) {
+                dateQuery = `&date=${specificDateInput.value}`;
+            }
+        }
+        window.location.href = `/api/energy/chart-data/export/?range=${range}${dateQuery}`;
     });
 
     document.getElementById('exportImgBtn').addEventListener('click', function(e) {
         e.preventDefault();
-        const imgData = energyChart.toBase64Image();
+        const imgData = energyChart.toBase64Image('image/jpeg', 1.0);
         const link = document.createElement('a');
         link.href = imgData;
-        link.download = `energy_chart_${new Date().toISOString().slice(0,10)}.png`;
+        link.download = `energy_chart_${new Date().toISOString().slice(0,10)}.jpeg`;
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);

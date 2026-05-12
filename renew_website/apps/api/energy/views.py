@@ -8,6 +8,7 @@ from rest_framework.response import Response
 from rest_framework.decorators import action, api_view, permission_classes
 from django.shortcuts import render
 from django.utils import timezone
+from django.contrib.auth.decorators import login_required
 from rest_framework.views import APIView
 
 from .services import InverterDataService, EVChargingOptimizer
@@ -231,13 +232,12 @@ def dashboard_data(request):
         recent_readings = service.get_latest_readings()
 
         # Get today's energy from Deye API directly (more accurate)
-        data_source = 'unknown'
+        data_source = 'database_fallback'
         try:
             # Use Manager to get normalized data from best source (Cloud or Local)
             manager = DeyeManager()
             
-            # get_combined_inverter_data returns combined data from both master and slave inverters
-            normalized_data = manager.get_combined_inverter_data()
+            normalized_data = manager.get_latest_data()
             
             daily_energy = normalized_data.get('today_from_pv', 0.0)
             total_energy = normalized_data.get('total_from_pv', 0.0)
@@ -594,7 +594,7 @@ def run_algorithm(request):
 
 from django.http import HttpResponse
 import csv
-from datetime import timedelta
+from datetime import timedelta, datetime
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
@@ -607,8 +607,16 @@ def chart_data(request):
         end_time = timezone.now()
         if time_range == '7d':
             start_time = end_time - timedelta(days=7)
-        elif time_range == '30d':
+        elif time_range == '30d' or time_range == 'lastMonth':
             start_time = end_time - timedelta(days=30)
+        elif time_range == 'specificDay':
+            date_str = request.GET.get('date')
+            if date_str:
+                selected_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+                start_time = timezone.make_aware(datetime.combine(selected_date, datetime.min.time()))
+                end_time = start_time + timedelta(days=1)
+            else:
+                start_time = end_time - timedelta(hours=24)
         else:
             start_time = end_time - timedelta(hours=24)
             
@@ -663,8 +671,16 @@ def export_chart_csv(request):
     end_time = timezone.now()
     if time_range == '7d':
         start_time = end_time - timedelta(days=7)
-    elif time_range == '30d':
+    elif time_range == '30d' or time_range == 'lastMonth':
         start_time = end_time - timedelta(days=30)
+    elif time_range == 'specificDay':
+        date_str = request.GET.get('date')
+        if date_str:
+            selected_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+            start_time = timezone.make_aware(datetime.combine(selected_date, datetime.min.time()))
+            end_time = start_time + timedelta(days=1)
+        else:
+            start_time = end_time - timedelta(hours=24)
     else:
         start_time = end_time - timedelta(hours=24)
         

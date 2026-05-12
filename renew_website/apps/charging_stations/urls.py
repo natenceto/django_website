@@ -10,6 +10,10 @@ urlpatterns = [
     path("stations/", login_required(admin_required(views.stations)), name="stations"),
     path("statistics/", login_required(admin_required(views.statistics)), name="statistics"),
     path("tables/", login_required(admin_required(views.tables)), name="tables"),
+    path("transaction/<int:pk>/", login_required(admin_required(views.transaction_detail)), name="transaction_detail"),
+    
+    # Export endpoints
+    path('export/charging-sessions/', login_required(admin_required(views.export_charging_sessions_csv)), name='export_charging_sessions_csv'),
 
     # SoC API endpoints
     path('api/station/<int:station_id>/soc/current/', login_required(views.get_current_soc), name='get_current_soc'),

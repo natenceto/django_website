@@ -1031,7 +1031,8 @@ class ChargePoint(OCPPChargePoint):
                     tx.meter_stop = normalized_meter_stop
                     tx.stopped_at = timezone.now()
                     tx.status = "completed"
-                    tx.save(update_fields=["meter_stop", "stopped_at", "status"])
+                    tx.stop_reason = safe_reason
+                    tx.save(update_fields=["meter_stop", "stopped_at", "status", "stop_reason"])
 
                     conn = tx.connector
                     if conn:

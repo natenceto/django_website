@@ -94,7 +94,7 @@ class TransactionAdmin(admin.ModelAdmin):
     """OCPP Transaction Admin - Core charging session management."""
     list_display = [
         'id', 'transaction_id', 'id_tag', 'connector', 
-        'status', 'started_at', 'duration_display', 'energy_display'
+        'status', 'started_at', 'stopped_at', 'duration_display', 'energy_display'
     ]
     list_filter = ['status', 'started_at']
     search_fields = ['id_tag', 'connector__station__address', 'transaction_id']
