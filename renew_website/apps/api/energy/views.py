@@ -22,9 +22,79 @@ from .serializers import (
 )
 from renew_website.apps.api.deye.cloud_client import DeyeCloudClient, DeyeCloudError, WORK_MODE_MAP
 from renew_website.apps.api.deye.manager import DeyeManager, DeyeManagerError
-from .utils import run_work_mode_algorithm
+from renew_website.apps.api.deye.control import get_modbus_commands_for_mode
+from renew_website.apps.algorithm.work_modes import SystemWorkMode
+from .utils import evaluate_current_energy_strategy, run_work_mode_algorithm
 
 logger = logging.getLogger(__name__)
+
+ALGORITHM_MODE_DETAILS = {
+    SystemWorkMode.DYNAMIC_ECO_SOLAR_ONLY: {
+        "label": "Dynamic Eco Solar Only",
+        "summary": "Зарядните ползват само наличния PV излишък и пазят батерията.",
+        "flow_intent": "solar_to_ev",
+    },
+    SystemWorkMode.DYNAMIC_MAX_RENEWABLE: {
+        "label": "Dynamic Max Renewable",
+        "summary": "Алгоритъмът комбинира PV и батерия, без да разчита на мрежата.",
+        "flow_intent": "solar_battery_to_ev",
+    },
+    SystemWorkMode.FAST_CHARGE_GRID: {
+        "label": "Fast Charge Grid",
+        "summary": "Мрежата подпомага зареждането за максимална мощност.",
+        "flow_intent": "grid_solar_to_ev",
+    },
+    SystemWorkMode.PROTECT_BATTERY: {
+        "label": "Protect Battery",
+        "summary": "EV товарът се ограничава, за да се запази зарядът на батерията.",
+        "flow_intent": "solar_grid_to_battery",
+    },
+    SystemWorkMode.CHARGE_BATTERY: {
+        "label": "Charge Battery",
+        "summary": "Слънчевата енергия приоритетно отива към батерията, преди към EV.",
+        "flow_intent": "solar_to_battery",
+    },
+    SystemWorkMode.EMERGENCY_BACKUP: {
+        "label": "Emergency Backup",
+        "summary": "Системата пази енергия за сградата и спира EV зареждането.",
+        "flow_intent": "backup_only",
+    },
+}
+
+
+def _get_algorithm_mode_details(mode_key):
+    return ALGORITHM_MODE_DETAILS.get(mode_key, {
+        "label": str(mode_key).replace('_', ' ').title(),
+        "summary": "Режимът е изчислен на база текущите данни от платформата.",
+        "flow_intent": "balanced",
+    })
+
+
+def _build_projection_snapshot(mode_key, ev_power_limit_kw, pv_power_kw, current_load_kw, battery_soc):
+    uses_grid = mode_key in {SystemWorkMode.FAST_CHARGE_GRID, SystemWorkMode.PROTECT_BATTERY}
+    uses_battery = mode_key in {SystemWorkMode.DYNAMIC_MAX_RENEWABLE, SystemWorkMode.EMERGENCY_BACKUP}
+    battery_action = "charging" if mode_key in {SystemWorkMode.PROTECT_BATTERY, SystemWorkMode.CHARGE_BATTERY} else "supporting" if uses_battery else "protected"
+    projected_grid_kw = max(0.0, ev_power_limit_kw - pv_power_kw) if uses_grid else 0.0
+
+    return {
+        "projected_load_kw": round(ev_power_limit_kw, 2),
+        "projected_grid_kw": round(projected_grid_kw, 2),
+        "battery_action": battery_action,
+        "battery_support_enabled": uses_battery,
+        "grid_support_enabled": uses_grid,
+        "battery_soc": round(battery_soc, 1),
+        "current_load_kw": round(current_load_kw, 2),
+    }
+
+
+def _summarize_execution_plan(session_allocations):
+    if not session_allocations:
+        return "Няма активни EV сесии за разпределяне на мощност."
+
+    summary_parts = []
+    for allocation in session_allocations[:2]:
+        summary_parts.append(f"{allocation['station_label']}: {allocation['allocated_power_kw']:.2f} kW")
+    return "; ".join(summary_parts)
 
 # Global cache for websocket performance
 _ws_performance_stats = {}
@@ -94,31 +164,22 @@ def charging_recommendation(request):
     """
     Get EV charging recommendation based on real-time conditions (mocked 1 and 2 EV scenarios).
     """
-    from django.utils import timezone
-    from renew_website.apps.api.energy.models import InverterReading
-    from renew_website.apps.api.weather.models import WeatherLog
     from renew_website.apps.algorithm.conditions import SystemState
     from renew_website.apps.algorithm.engine import DecisionEngine
-    from renew_website.apps.algorithm.work_modes import SystemWorkMode
 
     try:
-        latest_reading = InverterReading.objects.order_by('-timestamp').first()
-        pv_power_kw = (latest_reading.generation_power or 0) / 1000.0 if latest_reading else 0.0
-        battery_soc = float(latest_reading.battery_soc or 0) if latest_reading else 0.0
-        station_data = latest_reading.station_data or {} if latest_reading else {}
-        
-        load_power_kw = station_data.get('load_power', 0) / 1000.0
-        grid_voltage = station_data.get('grid_voltage', 230.0)
-        is_grid_available = bool(grid_voltage > 190.0)
-
-        latest_weather = WeatherLog.objects.order_by('-timestamp').first()
-        cloud_cover = float(latest_weather.cloud_cover) if latest_weather else 0.0
-        precipitation = float(latest_weather.precipitation_mm) if latest_weather else 0.0
+        strategy = evaluate_current_energy_strategy()
+        pv_power_kw = strategy["pv_power_kw"]
+        battery_soc = strategy["battery_soc"]
+        load_power_kw = strategy["building_load_kw"]
+        is_grid_available = strategy["grid_available"]
+        cloud_cover = strategy["cloud_cover_percent"]
+        precipitation = strategy["precipitation_mm"]
         is_raining = precipitation > 0
-
-        now = timezone.now()
-        current_hour = timezone.localtime(now).hour if timezone.is_aware(now) else now.hour
-        is_night_tariff = (current_hour >= 22 or current_hour < 6)
+        weather_label = strategy["weather_label"]
+        active_ev_sessions = strategy["active_ev_sessions"]
+        current_ev_demand_kw = strategy["current_ev_power_kw"]
+        now = strategy["timestamp"]
 
         # Baseline common attributes
         base_kwargs = {
@@ -128,9 +189,14 @@ def charging_recommendation(request):
             'building_load_kw': load_power_kw,
             'cloud_cover_percent': cloud_cover,
             'is_raining': is_raining,
-            'weather_condition': 'clear',
-            'is_night_tariff': is_night_tariff,
+            'weather_condition': weather_label,
+            'is_night_tariff': strategy["is_night_tariff"],
         }
+
+        recommended_ev_sessions = max(active_ev_sessions, 1)
+        live_decision = strategy["decision"]
+        live_mode = strategy["mode"]
+        live_mode_details = _get_algorithm_mode_details(live_mode)
 
         # Scenario 1: 1 EV (Demand = 11kW)
         state_1 = SystemState(
@@ -167,6 +233,40 @@ def charging_recommendation(request):
 
         response_data = {
             "context": info_context,
+            "current_snapshot": {
+                "battery_soc": round(battery_soc, 1),
+                "pv_power_kw": round(pv_power_kw, 2),
+                "load_power_kw": round(load_power_kw, 2),
+                "grid_available": is_grid_available,
+                "active_ev_sessions": active_ev_sessions,
+                "current_ev_demand_kw": current_ev_demand_kw,
+                "cloud_cover_percent": round(cloud_cover, 1),
+                "precipitation_mm": round(precipitation, 2),
+                "weather_condition": weather_label,
+                "is_night_tariff": strategy["is_night_tariff"],
+                "active_station_count": strategy["active_station_count"],
+                "urgent_session_count": strategy["urgent_session_count"],
+                "session_profiles": strategy["session_profiles"],
+                "timestamp": now.isoformat(),
+            },
+            "recommended_plan": {
+                "algorithm_mode": live_mode,
+                "algorithm_label": live_mode_details["label"],
+                "summary": live_mode_details["summary"],
+                "flow_intent": live_mode_details["flow_intent"],
+                "ev_power_limit_kw": round(live_decision.get("ev_power_limit_kw", 0), 2),
+                "execution_label": "Modbus energy flow allocation",
+                "modbus_command_count": len(get_modbus_commands_for_mode(live_mode)),
+                "session_allocations": strategy["session_allocations"],
+                "allocation_summary": _summarize_execution_plan(strategy["session_allocations"]),
+                "projection": _build_projection_snapshot(
+                    live_mode,
+                    float(live_decision.get("ev_power_limit_kw", 0) or 0),
+                    pv_power_kw,
+                    current_ev_demand_kw,
+                    battery_soc,
+                ),
+            },
             "scenario_1_ev": {
                 "mode": mode_to_str(decision_1.get("mode")),
                 "power_allowed": round(decision_1.get("ev_power_limit_kw", 0), 2),
@@ -182,19 +282,10 @@ def charging_recommendation(request):
         return Response(response_data)
         
     except Exception as e:
-        import traceback
-        import logging
-        logger = logging.getLogger(__name__)
-        logger.error(f"Charging recommendation error: {e}\\n{traceback.format_exc()}")
+        logger.error("Charging recommendation error: %s", e, exc_info=True)
         return Response(
             {"error": f"Грешка при генериране на препоръка: {e}"},
             status=500
-        )
-    except Exception as e:
-        logger.error(f"Failed to get charging recommendation: {e}")
-        return Response(
-            {"error": str(e)}, 
-            status=status.HTTP_503_SERVICE_UNAVAILABLE
         )
 
 
@@ -270,6 +361,7 @@ def dashboard_data(request):
         today = timezone.now().date()
         work_mode = WorkMode.get_current_config()
         latest_recommendation = EnergyRecommendation.get_latest_pending()
+        strategy = evaluate_current_energy_strategy()
         charging_connectors = list(Connector.objects.filter(status='charging'))
         charger_load_watts = round(sum(float(connector.current_power_kw or 0) * 1000 for connector in charging_connectors), 2)
         active_chargers = len(charging_connectors)
@@ -328,9 +420,13 @@ def dashboard_data(request):
                 'updated_at': timezone.now().isoformat(),
             },
             'work_mode': {
-                'mode': work_mode.mode,
+                'mode': strategy['mode'],
+                'strategy_label': _get_algorithm_mode_details(strategy['mode'])['label'],
+                'strategy_summary': _get_algorithm_mode_details(strategy['mode'])['summary'],
                 'control_mode': work_mode.control_mode,
                 'algorithm_selected_mode': work_mode.algorithm_selected_mode,
+                'active_station_count': strategy['active_station_count'],
+                'urgent_session_count': strategy['urgent_session_count'],
             },
             'recommendation': {
                 'pending': bool(latest_recommendation),
@@ -338,6 +434,7 @@ def dashboard_data(request):
                 'ev_power_limit_kw': latest_recommendation.ev_power_limit_kw if latest_recommendation else None,
                 'power_per_station_kw': latest_recommendation.power_per_station_kw if latest_recommendation else None,
                 'created_at': latest_recommendation.created_at.isoformat() if latest_recommendation else None,
+                'session_allocations': strategy['session_allocations'],
             },
             'daily_stats': {
                 'total_energy_kwh': round(total_energy_today, 2),
@@ -623,21 +720,21 @@ def run_algorithm(request):
             return Response({"error": "Algorithm can only run in automatic mode"}, status=status.HTTP_400_BAD_REQUEST)
 
         algorithm_selected = run_work_mode_algorithm()
-        if algorithm_selected not in WORK_MODE_MAP:
+        if algorithm_selected not in SystemWorkMode.values:
             return Response({"error": f"Algorithm returned invalid mode: {algorithm_selected}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         config.algorithm_selected_mode = algorithm_selected
         config.save(update_fields=["algorithm_selected_mode"])
 
         manager = DeyeManager()
-        sync_success = manager.set_work_mode(algorithm_selected)
+        sync_success = manager.apply_modbus_commands(get_modbus_commands_for_mode(algorithm_selected))
 
         return Response(
             {
                 "message": "Algorithm executed successfully",
                 "selected_mode": algorithm_selected,
-                "selected_mode_display": config.get_algorithm_selected_mode_display(),
-                "deye_sync": {"synced": bool(sync_success), "timestamp": timezone.now().isoformat()},
+                "selected_mode_display": _get_algorithm_mode_details(algorithm_selected)["label"],
+                "modbus_sync": {"synced": bool(sync_success), "timestamp": timezone.now().isoformat()},
             }
         )
 
