@@ -389,6 +389,130 @@
         color: #0f172a;
     }
 
+    .control-card,
+    .input-card,
+    .status-card,
+    .trend-card {
+        border: 1px solid #e2e8f0;
+        border-radius: 20px;
+        box-shadow: 0 12px 32px rgba(15, 23, 42, 0.08);
+    }
+
+    .section-title {
+        font-size: 0.8rem;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: #64748b;
+        font-weight: 700;
+        margin-bottom: 0.35rem;
+    }
+
+    .compact-metric-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0.9rem;
+    }
+
+    .compact-metric {
+        padding: 0.85rem 0.95rem;
+        border-radius: 16px;
+        background: #f8fafc;
+        border: 1px solid #e2e8f0;
+    }
+
+    .compact-metric .label {
+        display: block;
+        font-size: 0.72rem;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: #64748b;
+        font-weight: 700;
+        margin-bottom: 0.3rem;
+    }
+
+    .compact-metric .value {
+        display: block;
+        font-size: 1.05rem;
+        font-weight: 700;
+        color: #0f172a;
+    }
+
+    .strategy-stack {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.6rem;
+    }
+
+    .strategy-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.45rem;
+        padding: 0.45rem 0.8rem;
+        border-radius: 999px;
+        background: #eff6ff;
+        color: #1d4ed8;
+        border: 1px solid #bfdbfe;
+        font-size: 0.82rem;
+        font-weight: 600;
+    }
+
+    .strategy-chip.is-muted {
+        background: #f8fafc;
+        color: #475569;
+        border-color: #cbd5e1;
+    }
+
+    .algorithm-output {
+        border-radius: 18px;
+        background: linear-gradient(180deg, #eff6ff, #f8fbff);
+        border: 1px solid #bfdbfe;
+        padding: 1rem;
+    }
+
+    .algorithm-output .mode {
+        font-size: 1.1rem;
+        font-weight: 700;
+        color: #0f172a;
+    }
+
+    .algorithm-actions {
+        display: flex;
+        gap: 0.75rem;
+        flex-wrap: wrap;
+    }
+
+    .status-list-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0.9rem;
+    }
+
+    .status-tile {
+        padding: 0.95rem 1rem;
+        border-radius: 16px;
+        background: #fff;
+        border: 1px solid #e2e8f0;
+        box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
+    }
+
+    .status-tile .serial {
+        font-size: 0.84rem;
+        font-weight: 700;
+        color: #0f172a;
+    }
+
+    .status-tile .reading {
+        font-size: 0.8rem;
+        color: #475569;
+        margin-top: 0.35rem;
+    }
+
+    .chart-shell {
+        position: relative;
+        height: 220px;
+        width: 100%;
+    }
+
     @media (max-width: 991.98px) {
         .flow-shell {
             min-height: 560px;
@@ -413,33 +537,23 @@
             width: 160px;
         }
 
+        .compact-metric-grid,
+        .status-list-grid {
+            grid-template-columns: 1fr;
+        }
+
         .flow-wire, .flow-pulse { display: none; }
     }
 </style>
 
 <!-- Page Heading -->
-<div class="d-sm-flex align-items-center justify-content-between mb-4">
-    <h1 class="h3 mb-0 text-gray-800">
-        Energy Management
-        <span id="data-source-badge" class="badge badge-secondary ml-2 d-none" style="font-size: 0.5em; vertical-align: middle;">
-            <i class="fas fa-spinner fa-spin mr-1"></i> Checking connection...
-        </span>
-    </h1>
-    <div>
-        <button onclick="collectData()" class="btn btn-sm btn-success shadow-sm mr-2">
-            <i class="fas fa-sync fa-sm text-white-50"></i> Refresh
-        </button>
-        <a href="/admin/energy/" class="btn btn-sm btn-info shadow-sm mr-2">
-            <i class="fas fa-cog fa-sm text-white-50"></i> Manage
-        </a>
-        <a href="/admin/energy/inverterreading/" class="btn btn-sm btn-primary shadow-sm">
-            <i class="fas fa-history fa-sm text-white-50"></i> View History
-        </a>
-    </div>
+<div class="mb-4">
+    <h1 class="h3 mb-1 text-gray-800">Energy Management</h1>
+    <p class="text-muted mb-0">Control page for telemetry, algorithm decision and Modbus apply.</p>
 </div>
 
 <div class="row mb-4">
-    <div class="col-xl-8 mb-4">
+    <div class="col-12 mb-4">
         <div class="card shadow flow-hero-card h-100">
             <div class="card-header py-3 bg-transparent border-0 d-flex justify-content-between align-items-center">
                 <div>
@@ -448,17 +562,12 @@
                         Strategy Graph
                     </div>
                     <h6 class="m-0 font-weight-bold flow-hero-title">Energy Operations</h6>
-                    <small class="flow-hero-subtitle">Live Energy Flow aligned with our algorithm and session-aware energy strategy</small>
+                    <small class="flow-hero-subtitle">Real-time distribution based on current telemetry and active strategy.</small>
                 </div>
-                <div class="d-flex align-items-center">
-                    <button onclick="getChargingRecommendation()" class="btn btn-sm btn-outline-primary mr-2" id="btn-flow-read">
-                        <i class="fas fa-brain"></i> Read & Suggest
-                    </button>
-                    <span class="flow-apply-badge" id="flow-status-badge">
-                        <i class="fas fa-satellite-dish"></i>
-                        <span id="flow-updated-at">Waiting for live data</span>
-                    </span>
-                </div>
+                <span class="flow-apply-badge" id="flow-status-badge">
+                    <i class="fas fa-satellite-dish"></i>
+                    <span id="flow-updated-at">Waiting for live data</span>
+                </span>
             </div>
             <div class="card-body pt-0">
                 <div class="flow-shell">
@@ -506,242 +615,128 @@
                 </div>
                 <div class="flow-detail-strip">
                     <div class="flow-detail-item">
-                        <span class="label">Current Source</span>
-                        <span class="value" id="flow-source-detail">Waiting for source</span>
+                        <span class="label">Current Strategy</span>
+                        <span class="value" id="flow-algorithm-detail">Read algorithm</span>
                     </div>
                     <div class="flow-detail-item">
-                        <span class="label">Algorithm Decision</span>
-                        <span class="value" id="flow-algorithm-detail">Read current conditions</span>
+                        <span class="label">Execution</span>
+                        <span class="value" id="flow-inverter-target">No active allocation</span>
                     </div>
                     <div class="flow-detail-item">
-                        <span class="label">Execution Plan</span>
-                        <span class="value" id="flow-inverter-target">No Modbus plan yet</span>
+                        <span class="label">Telemetry</span>
+                        <span class="value" id="flow-source-detail">Waiting for read</span>
                     </div>
                     <div class="flow-detail-item">
-                        <span class="label">Weather Input</span>
-                        <span class="value" id="flow-weather-detail">Weather widget remains active</span>
+                        <span class="label">Weather</span>
+                        <span class="value" id="flow-weather-detail">Waiting for read</span>
                     </div>
                 </div>
             </div>
         </div>
     </div>
-    <div class="col-xl-4 mb-4">
-        <div class="mode-panel p-3 p-lg-4 mb-3">
-            <div class="d-flex justify-content-between align-items-start mb-3">
+</div>
+
+<div class="row mb-4">
+    <div class="col-lg-6 mb-4">
+        <div class="card input-card h-100">
+            <div class="card-header bg-white border-0 d-flex justify-content-between align-items-center py-3">
                 <div>
-                    <p class="text-uppercase text-xs text-muted font-weight-bold mb-1">Strategy State</p>
-                    <h5 class="mb-0">Current algorithm control</h5>
+                    <div class="section-title mb-0">Inputs</div>
+                    <h6 class="mb-0 font-weight-bold text-dark">Inverter Data</h6>
                 </div>
-                <span class="badge badge-light border" id="work-mode-source">Database</span>
+                <button class="btn btn-sm btn-outline-primary" onclick="readInverterData()">
+                    <i class="fas fa-sync"></i> Read
+                </button>
             </div>
-            <div class="mini-kpi-grid">
-                <div class="mini-kpi">
-                    <span class="label">Current Mode</span>
-                    <span class="value" id="mode-current-value">-</span>
-                </div>
-                <div class="mini-kpi">
-                    <span class="label">Control Mode</span>
-                    <span class="value" id="mode-control-value">-</span>
-                </div>
-                <div class="mini-kpi">
-                    <span class="label">Renewable Share</span>
-                    <span class="value" id="mode-renewable-share">0%</span>
-                </div>
-                <div class="mini-kpi">
-                    <span class="label">Active Stations</span>
-                    <span class="value" id="mode-charger-load">0 active</span>
+            <div class="card-body pt-0">
+                <div class="compact-metric-grid" id="inverter-input-card">
+                    <div class="compact-metric"><span class="label">Status</span><span class="value">Waiting for read</span></div>
+                    <div class="compact-metric"><span class="label">PV Output</span><span class="value">-</span></div>
+                    <div class="compact-metric"><span class="label">Battery</span><span class="value">-</span></div>
+                    <div class="compact-metric"><span class="label">Today's Energy</span><span class="value">-</span></div>
                 </div>
             </div>
         </div>
-
-        <div class="projection-panel p-3 p-lg-4">
-            <div class="d-flex justify-content-between align-items-start mb-3">
+    </div>
+    <div class="col-lg-6 mb-4">
+        <div class="card input-card h-100">
+            <div class="card-header bg-white border-0 d-flex justify-content-between align-items-center py-3">
                 <div>
-                    <p class="text-uppercase text-xs text-muted font-weight-bold mb-1">Projected After Apply</p>
-                    <h5 class="mb-0">Algorithm impact preview</h5>
+                    <div class="section-title mb-0">Inputs</div>
+                    <h6 class="mb-0 font-weight-bold text-dark">Weather Data</h6>
                 </div>
-                <span class="badge badge-secondary" id="projection-state-badge">Idle</span>
-            </div>
-            <div class="projection-state p-3" id="projection-state-card">
-                <div class="d-flex justify-content-between align-items-start mb-2">
-                    <div>
-                    <div class="small text-muted mb-3" id="projection-weather">Weather, tariff and EV session inputs will appear after Read.</div>
-                        <div class="small text-muted text-uppercase font-weight-bold">Recommended mode</div>
-                        <div class="h6 mb-0" id="projection-mode">Run recommendation</div>
-                    </div>
-                    <span class="badge badge-pill badge-light border" id="projection-apply-status">No preview</span>
-                </div>
-                <p class="small text-muted mb-3" id="projection-summary">The flow graph will preview charger and grid impact after the algorithm reads the active sessions and suggests a strategy.</p>
-                <div class="mini-kpi-grid">
-                    <div class="mini-kpi">
-                        <span class="label">1 EV budget</span>
-                        <span class="value" id="projection-ev1">-</span>
-                    </div>
-                    <div class="mini-kpi">
-                        <span class="label">2 EV budget</span>
-                        <span class="value" id="projection-ev2">-</span>
-                    </div>
-                    <div class="mini-kpi">
-                        <span class="label">Projected Load</span>
-                        <span class="value" id="projection-load">-</span>
-                    </div>
-                    <div class="mini-kpi">
-                        <span class="label">Projected Grid</span>
-                        <span class="value" id="projection-grid">-</span>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- Weather Status Row -->
-<div class="row" id="weather-cards">
-    <!-- Weather Widget will be injected here via JS -->
-</div>
-
-<!-- Energy Status Cards Row -->
-<div class="row" id="energy-cards">
-    <!-- Solar Generation Card -->
-    <div class="col-xl-3 col-md-6 mb-4">
-        <div class="card border-left-warning shadow h-100 py-2">
-            <div class="card-body">
-                <div class="row no-gutters align-items-center">
-                    <div class="col mr-2">
-                        <div class="text-xs font-weight-bold text-warning text-uppercase mb-1">
-                            Solar Generation</div>
-                        <div class="h5 mb-0 font-weight-bold text-gray-800" id="generation-power">0 W</div>
-                        <div class="text-xs text-muted mt-1">Real-time output</div>
-                    </div>
-                    <div class="col-auto">
-                        <i class="fas fa-solar-panel fa-2x text-gray-300"></i>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Battery Level Card -->
-    <div class="col-xl-3 col-md-6 mb-4">
-        <div class="card border-left-info shadow h-100 py-2">
-            <div class="card-body">
-                <div class="row no-gutters align-items-center">
-                    <div class="col mr-2">
-                        <div class="text-xs font-weight-bold text-info text-uppercase mb-1">
-                            Battery Level</div>
-                        <div class="h5 mb-0 font-weight-bold text-gray-800" id="battery-soc">0%</div>
-                        <div class="text-xs text-muted mt-1">Average SOC</div>
-                    </div>
-                    <div class="col-auto">
-                        <i class="fas fa-battery-three-quarters fa-2x text-gray-300"></i>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Active Inverters Card -->
-    <div class="col-xl-3 col-md-6 mb-4">
-        <div class="card border-left-success shadow h-100 py-2">
-            <div class="card-body">
-                <div class="row no-gutters align-items-center">
-                    <div class="col mr-2">
-                        <div class="text-xs font-weight-bold text-success text-uppercase mb-1">
-                            Active Inverters</div>
-                        <div class="h5 mb-0 font-weight-bold text-gray-800" id="active-inverters">0/2</div>
-                        <div class="text-xs text-muted mt-1">Devices online</div>
-                    </div>
-                    <div class="col-auto">
-                        <i class="fas fa-plug fa-2x text-gray-300"></i>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Today's Energy Card -->
-    <div class="col-xl-3 col-md-6 mb-4">
-        <div class="card border-left-primary shadow h-100 py-2">
-            <div class="card-body">
-                <div class="row no-gutters align-items-center">
-                    <div class="col mr-2">
-                        <div class="text-xs font-weight-bold text-primary text-uppercase mb-1">
-                            Today's Energy</div>
-                        <div class="h5 mb-0 font-weight-bold text-gray-800" id="daily-energy">0 kWh</div>
-                        <div class="text-xs text-muted mt-1" id="lifetime-energy">Total generated: 0</div>
-                    </div>
-                    <div class="col-auto">
-                        <i class="fas fa-chart-line fa-2x text-gray-300"></i>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- EV Charging Recommendation -->
-<div class="row">
-    <div class="col-12 mb-4">
-        <div class="card shadow border-left-info">
-            <div class="card-header py-3 d-flex flex-row align-items-center justify-content-between">
-                <h6 class="m-0 font-weight-bold text-info">Energy Management & Recommendation</h6>
-                <button onclick="getChargingRecommendation()" class="btn btn-sm btn-info" id="btn-get-rec">
-                    <i class="fas fa-brain"></i> Read Current Conditions
+                <button class="btn btn-sm btn-outline-primary" onclick="readWeatherData()">
+                    <i class="fas fa-cloud-sun"></i> Read
                 </button>
             </div>
-            <div class="card-body" id="charging-content">
-                <div class="text-center py-4">
-                    <i class="fas fa-brain fa-3x text-gray-300 mb-3"></i>
-                    <p class="text-gray-600">Запазваме текущия Energy Management изглед и добавяме графика, която визуализира как алгоритъмът предлага режим и какво ще се промени след Apply.</p>
+            <div class="card-body pt-0">
+                <div class="compact-metric-grid" id="weather-input-card">
+                    <div class="compact-metric"><span class="label">Temperature</span><span class="value">Waiting for read</span></div>
+                    <div class="compact-metric"><span class="label">Condition</span><span class="value">-</span></div>
+                    <div class="compact-metric"><span class="label">Solar Irradiance</span><span class="value">-</span></div>
+                    <div class="compact-metric"><span class="label">Wind</span><span class="value">-</span></div>
                 </div>
-            </div>
-            <!-- Action Footer (Hidden by Default) -->
-            <div class="card-footer text-right d-none" id="recommendation-actions">
-                <button class="btn btn-outline-secondary btn-sm mr-2" onclick="document.getElementById('recommendation-actions').classList.add('d-none');">
-                    Dismiss
-                </button>
-                <button class="btn btn-success btn-sm" id="btn-apply-inverter" onclick="applyInverterMode()">
-                    <i class="fas fa-bolt"></i> <strong>Apply Strategy</strong>
-                </button>
             </div>
         </div>
     </div>
 </div>
 
-<!-- Inverter Status -->
-<div class="row">
+<div class="row mb-4">
     <div class="col-12">
-        <div class="card shadow mb-4">
-            <div class="card-header py-3 d-flex flex-row align-items-center justify-content-between">
-                <h6 class="m-0 font-weight-bold text-primary">Inverter Status</h6>
-                <div class="dropdown no-arrow">
-                    <button onclick="collectData()" class="btn btn-sm btn-outline-primary">
-                        <i class="fas fa-sync"></i> Refresh
+        <div class="card control-card">
+            <div class="card-header bg-white border-0 d-flex justify-content-between align-items-center py-3">
+                <div>
+                    <div class="section-title mb-0">Algorithm Control</div>
+                    <h6 class="mb-0 font-weight-bold text-dark">Read strategy and apply allocation</h6>
+                </div>
+                <div class="algorithm-actions">
+                    <button onclick="readAlgorithm()" class="btn btn-sm btn-primary" id="btn-get-rec">
+                        <i class="fas fa-brain"></i> Read Algorithm
+                    </button>
+                    <button class="btn btn-sm btn-success d-none" id="btn-apply-inverter" onclick="applyInverterMode()">
+                        <i class="fas fa-bolt"></i> Apply
                     </button>
                 </div>
             </div>
-            <div class="card-body">
-                <div class="row" id="inverter-list">
-                    <!-- Inverters will be loaded here -->
-                    <div class="col-12 text-center text-gray-500 py-4">
-                        <i class="fas fa-plug fa-2x mb-2"></i>
-                        <p>No inverter data available. Click refresh to collect data.</p>
+            <div class="card-body pt-0">
+                <div class="algorithm-output mb-3">
+                    <div class="section-title mb-1">Current Mode</div>
+                    <div class="mode mb-2" id="algorithm-current-mode">Waiting for algorithm read</div>
+                    <div class="strategy-stack" id="algorithm-chip-stack">
+                        <span class="strategy-chip is-muted">No recommendation</span>
                     </div>
                 </div>
+                <div id="charging-content"></div>
             </div>
         </div>
     </div>
 </div>
 
-<!-- Historical Data -->
 <div class="row">
-    <div class="col-12">
-        <div class="card shadow mb-4">
-            <div class="card-header py-3">
-                <h6 class="m-0 font-weight-bold text-primary">24-Hour Generation Chart</h6>
+    <div class="col-lg-7 mb-4">
+        <div class="card status-card h-100">
+            <div class="card-header bg-white border-0 py-3">
+                <div class="section-title mb-0">Inverter Status</div>
+                <h6 class="mb-0 font-weight-bold text-dark">Live inverter telemetry</h6>
             </div>
-            <div class="card-body">
-                <div class="chart-area" style="position: relative; height: 300px; width: 100%;">
+            <div class="card-body pt-0">
+                <div class="status-list-grid" id="inverter-list">
+                    <div class="status-tile">
+                        <div class="serial">No inverter data</div>
+                        <div class="reading">Run inverter read to load telemetry.</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-5 mb-4">
+        <div class="card trend-card h-100">
+            <div class="card-header bg-white border-0 py-3">
+                <div class="section-title mb-0">Energy Trend</div>
+                <h6 class="mb-0 font-weight-bold text-dark">24h output</h6>
+            </div>
+            <div class="card-body pt-0">
+                <div class="chart-shell">
                     <canvas id="generation-chart"></canvas>
                 </div>
             </div>
@@ -753,10 +748,10 @@
 {% block extra_js %}
 <script src="{% static 'js/api-client.js' %}"></script>
 <script>
-    // Global variable to hold recommendation result temporarily in memory
     let lastRecommendationMode = null;
     let lastRecommendationPayload = null;
     let currentFlowState = null;
+    let currentStrategyMode = null;
 
     const FLOW_ROUTE_MAP = {
         solar_to_ev: ['solar', 'load'],
@@ -818,6 +813,7 @@
 
     function updateFlowGraph(flow, workMode) {
         currentFlowState = flow;
+        currentStrategyMode = workMode.mode;
 
         document.getElementById('flow-solar-power').textContent = formatKilowattsFromWatts(flow.solar_watts);
         document.getElementById('flow-grid-power').textContent = formatKilowattsFromWatts(flow.grid_watts);
@@ -827,13 +823,11 @@
         document.getElementById('flow-load-power').textContent = formatKilowattsFromWatts(flow.charger_load_watts || flow.load_watts);
         document.getElementById('flow-load-meta').textContent = `${flow.active_chargers || 0} active chargers`;
         document.getElementById('flow-current-mode').textContent = workMode.strategy_label || prettifyMode(workMode.mode);
-        document.getElementById('flow-control-mode').textContent = workMode.strategy_summary || prettifyMode(workMode.control_mode);
+        document.getElementById('flow-control-mode').textContent = workMode.strategy_summary || 'Strategy active';
         document.getElementById('flow-updated-at').textContent = `Updated ${window.EVPlatformAPI.formatTime(flow.updated_at)}`;
 
-        document.getElementById('mode-current-value').textContent = workMode.strategy_label || prettifyMode(workMode.mode);
-        document.getElementById('mode-control-value').textContent = prettifyMode(workMode.control_mode);
-        document.getElementById('mode-renewable-share').textContent = `${Number(flow.renewable_ratio || 0).toFixed(1)}%`;
-        document.getElementById('mode-charger-load').textContent = `${Number(workMode.active_station_count || 0)} active`;
+        document.getElementById('flow-algorithm-detail').textContent = workMode.strategy_label || prettifyMode(workMode.mode);
+        document.getElementById('flow-inverter-target').textContent = `${Number(workMode.active_station_count || 0)} active station(s)`;
         setFlowRoute(getLiveFlowIntent(flow));
     }
 
@@ -847,20 +841,93 @@
         document.getElementById('flow-source-detail').textContent = labels[connectionSource] || 'Offline / unknown source';
     }
 
+    function renderInverterInputCard(data) {
+        document.getElementById('inverter-input-card').innerHTML = `
+            <div class="compact-metric">
+                <span class="label">Status</span>
+                <span class="value">${data.current.active_inverters}/2 Online</span>
+            </div>
+            <div class="compact-metric">
+                <span class="label">PV Output</span>
+                <span class="value">${formatKilowattsFromWatts(data.current.total_generation_watts)}</span>
+            </div>
+            <div class="compact-metric">
+                <span class="label">Battery</span>
+                <span class="value">${Number(data.current.average_battery_soc || 0).toFixed(1)}%</span>
+            </div>
+            <div class="compact-metric">
+                <span class="label">Today's Energy</span>
+                <span class="value">${Number(data.daily_stats.total_energy_kwh || 0).toFixed(2)} kWh</span>
+            </div>
+        `;
+        document.getElementById('flow-source-detail').textContent = data.connection_source === 'local' ? 'Live Modbus telemetry' : 'Last synced telemetry';
+    }
+
+    function renderWeatherInputCard(weather) {
+        const condition = Number(weather.cloud_cover || 0) > 50 ? 'Cloudy' : 'Sunny';
+        document.getElementById('weather-input-card').innerHTML = `
+            <div class="compact-metric">
+                <span class="label">Temperature</span>
+                <span class="value">${Number(weather.temp_c || 0).toFixed(1)}°C</span>
+            </div>
+            <div class="compact-metric">
+                <span class="label">Condition</span>
+                <span class="value">${condition}</span>
+            </div>
+            <div class="compact-metric">
+                <span class="label">Solar Irradiance</span>
+                <span class="value">${Number(weather.irradiance_wm2 || 0).toFixed(0)} W/m²</span>
+            </div>
+            <div class="compact-metric">
+                <span class="label">Wind</span>
+                <span class="value">${Number(weather.wind_kph || 0).toFixed(1)} km/h</span>
+            </div>
+        `;
+        document.getElementById('flow-weather-detail').textContent = `${condition} | ${Number(weather.temp_c || 0).toFixed(1)}°C`;
+    }
+
+    function renderAlgorithmIdleState() {
+        document.getElementById('algorithm-current-mode').textContent = 'Waiting for algorithm read';
+        document.getElementById('algorithm-chip-stack').innerHTML = '<span class="strategy-chip is-muted">No recommendation</span>';
+        document.getElementById('charging-content').innerHTML = '';
+        document.getElementById('btn-apply-inverter').classList.add('d-none');
+    }
+
+    function buildRecommendationChips(data) {
+        const plan = data.recommended_plan || {};
+        const snapshot = data.current_snapshot || {};
+        const chips = [
+            `<span class="strategy-chip">Recommended: ${plan.algorithm_label || prettifyMode(plan.algorithm_mode)}</span>`,
+        ];
+
+        if (Number(snapshot.active_ev_sessions || 0) === 0) {
+            chips.push('<span class="strategy-chip is-muted">No active EV sessions</span>');
+        }
+        if (Number(snapshot.pv_power_kw || 0) > Number(snapshot.load_power_kw || 0)) {
+            chips.push('<span class="strategy-chip is-muted">PV surplus detected</span>');
+        }
+        if (Number(snapshot.battery_soc || 0) < 40) {
+            chips.push('<span class="strategy-chip is-muted">Battery protection</span>');
+        }
+        if (snapshot.is_night_tariff) {
+            chips.push('<span class="strategy-chip is-muted">Night tariff</span>');
+        }
+
+        return chips.join('');
+    }
+
+    function hasActionableRecommendation(data) {
+        const plan = data.recommended_plan || {};
+        const hasAllocation = Array.isArray(plan.session_allocations) && plan.session_allocations.some(item => Number(item.allocated_power_kw || 0) > 0);
+        const hasModeDelta = Boolean(plan.algorithm_mode) && plan.algorithm_mode !== currentStrategyMode;
+        return hasAllocation || hasModeDelta;
+    }
+
     function clearProjectionState() {
-        document.getElementById('projection-state-badge').textContent = 'Idle';
-        document.getElementById('projection-apply-status').textContent = 'No preview';
-        document.getElementById('projection-mode').textContent = 'Run recommendation';
-        document.getElementById('projection-summary').textContent = 'The flow graph will preview charger and grid impact after the algorithm reads the active sessions and suggests a strategy.';
-        document.getElementById('projection-weather').textContent = 'Weather, tariff and EV session inputs will appear after Read.';
-        document.getElementById('projection-ev1').textContent = '-';
-        document.getElementById('projection-ev2').textContent = '-';
-        document.getElementById('projection-load').textContent = '-';
-        document.getElementById('projection-grid').textContent = '-';
-        document.getElementById('projection-state-card').classList.remove('active');
-        document.getElementById('flow-algorithm-detail').textContent = 'Read current conditions';
-        document.getElementById('flow-inverter-target').textContent = 'No Modbus plan yet';
-        document.getElementById('flow-weather-detail').textContent = 'Weather widget remains active';
+        renderAlgorithmIdleState();
+        document.getElementById('flow-algorithm-detail').textContent = 'Read algorithm';
+        document.getElementById('flow-inverter-target').textContent = 'No active allocation';
+        document.getElementById('flow-weather-detail').textContent = 'Waiting for weather read';
         if (currentFlowState) {
             setFlowRoute(getLiveFlowIntent(currentFlowState));
         }
@@ -877,24 +944,32 @@
         const plan = recommendationData.recommended_plan || {};
         const projection = plan.projection || {};
         const projectedLoadKw = Number(projection.projected_load_kw || ev1);
-        const projectedGridKw = Number(projection.projected_grid_kw || 0);
-        const currentLoadKw = Number(projection.current_load_kw || 0);
         const weather = recommendationData.current_snapshot || {};
 
-        document.getElementById('projection-state-card').classList.add('active');
-        document.getElementById('projection-state-badge').textContent = isApplied ? 'Applied' : 'Preview';
-        document.getElementById('projection-apply-status').textContent = isApplied ? 'Modbus execution sent' : 'Waiting for Apply';
-        document.getElementById('projection-mode').textContent = plan.algorithm_label || prettifyMode(recommendationData.scenario_1_ev?.mode || lastRecommendationMode);
-        document.getElementById('projection-summary').textContent = isApplied
-            ? 'The Modbus strategy command was sent. Refresh will align the live flow with the new allocation state.'
-            : (plan.summary || `Projected charger budget shifts from ${currentLoadKw.toFixed(2)} kW to ${projectedLoadKw.toFixed(2)} kW under the recommended mode.`);
-        document.getElementById('projection-weather').textContent = `Weather: ${weather.weather_condition || '-'}, clouds ${Number(weather.cloud_cover_percent || 0).toFixed(0)}%, rain ${Number(weather.precipitation_mm || 0).toFixed(1)} mm, tariff ${weather.is_night_tariff ? 'night' : 'day'}, EV sessions ${Number(weather.active_ev_sessions || 0)}.`;
-        document.getElementById('projection-ev1').textContent = `${ev1.toFixed(2)} kW`;
-        document.getElementById('projection-ev2').textContent = `${ev2.toFixed(2)} kW`;
-        document.getElementById('projection-load').textContent = `${projectedLoadKw.toFixed(2)} kW`;
-        document.getElementById('projection-grid').textContent = `${projectedGridKw.toFixed(2)} kW`;
+        document.getElementById('algorithm-current-mode').textContent = plan.algorithm_label || prettifyMode(recommendationData.scenario_1_ev?.mode || lastRecommendationMode);
+        document.getElementById('algorithm-chip-stack').innerHTML = buildRecommendationChips(recommendationData);
+        document.getElementById('charging-content').innerHTML = `
+            <div class="compact-metric-grid">
+                <div class="compact-metric">
+                    <span class="label">Algorithm Output</span>
+                    <span class="value">${plan.summary || 'Recommendation ready'}</span>
+                </div>
+                <div class="compact-metric">
+                    <span class="label">Allocation</span>
+                    <span class="value">${plan.allocation_summary || 'No active allocation'}</span>
+                </div>
+                <div class="compact-metric">
+                    <span class="label">1 EV Budget</span>
+                    <span class="value">${ev1.toFixed(2)} kW</span>
+                </div>
+                <div class="compact-metric">
+                    <span class="label">2 EV Budget</span>
+                    <span class="value">${ev2.toFixed(2)} kW</span>
+                </div>
+            </div>
+        `;
         document.getElementById('flow-algorithm-detail').textContent = plan.algorithm_label || prettifyMode(lastRecommendationMode);
-        document.getElementById('flow-inverter-target').textContent = plan.allocation_summary || plan.execution_label || 'Modbus plan prepared';
+        document.getElementById('flow-inverter-target').textContent = plan.allocation_summary || 'No active allocation';
         document.getElementById('flow-weather-detail').textContent = `${weather.weather_condition || 'clear'} | Battery ${Number(weather.battery_soc || 0).toFixed(1)}% | PV ${Number(weather.pv_power_kw || 0).toFixed(2)} kW | Stations ${Number(weather.active_station_count || 0)}`;
 
         document.getElementById('flow-load-power').textContent = `${projectedLoadKw.toFixed(2)} kW`;
@@ -902,6 +977,35 @@
         document.getElementById('flow-current-mode').textContent = plan.algorithm_label || prettifyMode(recommendationData.scenario_1_ev?.mode || lastRecommendationMode);
         document.getElementById('flow-control-mode').textContent = isApplied ? 'Strategy applied via Modbus' : 'Algorithm preview';
         setFlowRoute(plan.flow_intent || 'balanced');
+
+        document.getElementById('btn-apply-inverter').classList.toggle('d-none', !hasActionableRecommendation(recommendationData));
+    }
+
+    async function readInverterData() {
+        await window.EVPlatformAPI.collectEnergyData();
+        await loadDashboardData();
+    }
+
+    async function readWeatherData() {
+        try {
+            await window.EVPlatformAPI.fetchWeather();
+        } catch (error) {
+            console.error('Failed to fetch latest weather:', error);
+        }
+        await loadWeatherInput();
+    }
+
+    async function loadWeatherInput() {
+        try {
+            const weather = await window.EVPlatformAPI.getCurrentWeather();
+            renderWeatherInputCard(weather);
+        } catch (error) {
+            console.error('Failed to load weather input:', error);
+        }
+    }
+
+    async function readAlgorithm() {
+        await getChargingRecommendation();
     }
 
     async function applyInverterMode() {
@@ -921,7 +1025,6 @@
             if (response.success) {
                 updateProjectionState(lastRecommendationPayload, true);
                 alert("Успешно приложена стратегия по Modbus!");
-                document.getElementById('recommendation-actions').classList.add('d-none');
                 loadDashboardData();
             } else {
                 alert("Грешка при прилагане: " + response.message);
@@ -930,7 +1033,7 @@
             alert("Failed to communicate with inverter: " + error.message);
         } finally {
             btn.disabled = false;
-            btn.innerHTML = '<i class="fas fa-bolt"></i> <strong>Apply Strategy</strong>';
+            btn.innerHTML = '<i class="fas fa-bolt"></i> Apply';
         }
     }
 </script>
@@ -940,58 +1043,14 @@ let chart = null;
 
 async function loadDashboardData() {
     try {
-        // Load weather in parallel
-        loadWeatherWidget('weather-cards');
-
         const data = await window.EVPlatformAPI.getDashboardData();
-        
-        // Update connection source badge
-        const badge = document.getElementById('data-source-badge');
-        if (badge) {
-            badge.classList.remove('d-none', 'badge-secondary', 'badge-success', 'badge-info');
-                        if (data.connection_source === 'local') {
-                badge.classList.add('badge-success');
-                badge.innerHTML = '<i class="fas fa-network-wired mr-1"></i> Local (Modbus)';
-            } else if (data.connection_source === 'cloud') {
-                badge.classList.add('badge-info');
-                badge.innerHTML = '<i class="fas fa-cloud mr-1"></i> Cloud (API)';
-            } else if (data.connection_source === 'database_fallback' || data.connection_source === 'database') {
-                badge.classList.add('badge-primary');
-                badge.innerHTML = '<i class="fas fa-database mr-1"></i> Database Archive';
-            } else {
-                badge.classList.add('badge-secondary');
-                badge.innerHTML = '<i class="fas fa-question-circle mr-1"></i> No Source / Offline';
-            }
-        }
-        updateFlowSourceDetails(data.connection_source);
-        
-        // Update metrics
-        document.getElementById('generation-power').textContent = 
-            `${data.current.total_generation_watts} W`;
-        document.getElementById('battery-soc').textContent = 
-            `${data.current.average_battery_soc.toFixed(1)}%`;
-        document.getElementById('active-inverters').textContent = 
-            `${data.current.active_inverters}/2`;
-        document.getElementById('daily-energy').textContent = 
-            `${data.daily_stats.total_energy_kwh} kWh`;
-        if (data.daily_stats.lifetime_energy_kwh && data.daily_stats.lifetime_energy_kwh > 0) {
-            document.getElementById('lifetime-energy').textContent = 
-                `Total: ${data.daily_stats.lifetime_energy_kwh} kWh`;
-        }
 
+        updateFlowSourceDetails(data.connection_source);
+
+        renderInverterInputCard(data);
         updateFlowGraph(data.flow, data.work_mode);
-        document.getElementById('work-mode-source').textContent = data.connection_source === 'local' ? 'Live telemetry' : 'Platform sync';
-        if (data.recommendation && data.recommendation.pending) {
-            document.getElementById('projection-state-badge').textContent = 'Pending';
-            document.getElementById('projection-mode').textContent = prettifyMode(data.recommendation.mode);
-            document.getElementById('projection-summary').textContent = `Pending recommendation available with ${Number(data.recommendation.ev_power_limit_kw || 0).toFixed(2)} kW EV limit.`;
-            document.getElementById('projection-apply-status').textContent = 'Stored by algorithm';
-        }
         
-        // Update inverter list
         updateInverterList(data.current.readings);
-        
-        // Update chart
         await updateChart();
         
     } catch (error) {
@@ -1017,28 +1076,13 @@ function updateInverterList(readings) {
         const status = reading.connect_status === 1 ? 'success' : 'danger';
         const statusText = reading.connect_status === 1 ? 'Online' : 'Offline';
         const col = document.createElement('div');
-        col.className = 'col-xl-4 col-md-6 mb-4';
+        col.className = 'status-tile';
         col.innerHTML = `
-            <div class="card border-left-${status} shadow h-100 py-2">
-                <div class="card-body">
-                    <div class="row no-gutters align-items-center">
-                        <div class="col mr-2">
-                            <div class="text-xs font-weight-bold text-${status} text-uppercase mb-1">
-                                ${reading.device_sn}</div>
-                            <div class="h6 mb-0 font-weight-bold text-gray-800">
-                                <i class="fas fa-circle text-${status} fa-xs"></i> ${statusText}
-                            </div>
-                            <div class="text-xs text-muted mt-1">
-                                Generation: ${reading.generation_power || 0} W<br>
-                                Battery: ${reading.battery_soc || 0}%
-                            </div>
-                        </div>
-                        <div class="col-auto">
-                            <i class="fas fa-plug fa-2x text-gray-300"></i>
-                        </div>
-                    </div>
-                </div>
-            </div>
+            <div class="serial">${reading.device_sn}</div>
+            <div class="reading"><i class="fas fa-circle text-${status} fa-xs mr-1"></i>${statusText}</div>
+            <div class="reading">${formatKilowattsFromWatts(reading.generation_power || 0)}</div>
+            <div class="reading">Battery ${Number(reading.battery_soc || 0).toFixed(1)}%</div>
+            <div class="reading">Updated ${window.EVPlatformAPI.formatTime(reading.timestamp)}</div>
         `;
         container.appendChild(col);
     });
@@ -1059,41 +1103,31 @@ async function updateChart() {
             data: {
                 labels: data.labels,
                 datasets: [{
-                    label: 'Генерация (kW)',
+                    label: 'Energy Trend',
                     data: data.datasets.pv_generation,
-                    backgroundColor: "rgba(78, 115, 223, 0.05)",
-                    borderColor: "rgba(78, 115, 223, 1)",
-                    pointRadius: 1,
-                    pointBackgroundColor: "rgba(78, 115, 223, 1)",
-                    pointBorderColor: "rgba(78, 115, 223, 1)",
+                    backgroundColor: 'transparent',
+                    borderColor: 'rgba(37, 99, 235, 1)',
+                    pointRadius: 0,
                     pointHoverRadius: 3,
-                    pointHoverBackgroundColor: "rgba(78, 115, 223, 1)",
-                    pointHoverBorderColor: "rgba(78, 115, 223, 1)",
-                    pointHitRadius: 10,
-                    pointBorderWidth: 2,
-                    fill: true,
-                    tension: 0.3
+                    borderWidth: 2,
+                    fill: false,
+                    tension: 0.25
                 }]
             },
             options: {
                 maintainAspectRatio: false,
                 responsive: true,
-                interaction: {
-                    mode: 'index',
-                    intersect: false,
-                },
                 plugins: {
                     legend: { display: false }
                 },
                 scales: {
                     x: {
                         grid: { display: false, drawBorder: false },
-                        ticks: { maxTicksLimit: 12, autoSkip: true }
+                        ticks: { maxTicksLimit: 8, autoSkip: true }
                     },
                     y: {
                         beginAtZero: true,
-                        title: { display: true, text: 'Мощност (kW)' },
-                        grid: { color: "rgb(234, 236, 244)", drawBorder: false, borderDash: [2] }
+                        grid: { color: 'rgb(234, 236, 244)', drawBorder: false, borderDash: [2] }
                     }
                 }
             }
@@ -1106,98 +1140,22 @@ async function updateChart() {
 
 async function getChargingRecommendation() {
     const content = document.getElementById('charging-content');
-    const actionsFooter = document.getElementById('recommendation-actions');
-    
-    // Show loading
-    content.innerHTML = '<div class="text-center py-4"><div class="spinner-border text-primary" role="status"></div><p class="mt-2 text-muted">Анализиране на системата...</p></div>';
-    actionsFooter.classList.add('d-none');
+    document.getElementById('btn-apply-inverter').classList.add('d-none');
+    content.innerHTML = '<div class="compact-metric"><span class="label">Status</span><span class="value">Анализиране на системата...</span></div>';
     
     try {
         const data = await window.EVPlatformAPI.getChargingRecommendation();
         
-        let sc1 = data.scenario_1_ev;
-        let sc2 = data.scenario_2_ev;
-        let p_mode = data.recommended_plan?.algorithm_mode || sc1.mode;
+        let p_mode = data.recommended_plan?.algorithm_mode || data.scenario_1_ev?.mode;
         lastRecommendationMode = p_mode;
         lastRecommendationPayload = data;
         updateProjectionState(data, false);
         
-        content.innerHTML = `
-            <div class="alert alert-info">
-                <p class="mb-0"><i class="fas fa-info-circle"></i> <strong>Информация:</strong> ${data.context}</p>
-            </div>
-            
-            <div class="row">
-                <div class="col-md-6 mb-3">
-                    <div class="card border-left-success h-100">
-                        <div class="card-body py-2">
-                            <h6 class="font-weight-bold text-success mb-1">Сценарий 1 (Един автомобил - 11kW)</h6>
-                            <p class="small mb-1 text-gray-800">${sc1.advice}</p>
-                            <p class="mb-0 small"><strong>Отпусната мощност:</strong> ${sc1.power_allowed} kW</p>
-                        </div>
-                    </div>
-                </div>
-                <div class="col-md-6 mb-3">
-                    <div class="card border-left-primary h-100">
-                        <div class="card-body py-2">
-                            <h6 class="font-weight-bold text-primary mb-1">Сценарий 2 (Два автомобила - 22kW)</h6>
-                            <p class="small mb-1 text-gray-800">${sc2.advice}</p>
-                            <p class="mb-0 small"><strong>Отпусната мощност:</strong> ${sc2.power_allowed} kW</p>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <div class="card border-left-info mt-2">
-                <div class="card-body py-2">
-                    <h6 class="font-weight-bold text-info mb-1">Live algorithm read</h6>
-                    <p class="small mb-1 text-gray-800">${data.recommended_plan?.summary || 'No summary available.'}</p>
-                    <p class="mb-0 small"><strong>Algorithm mode:</strong> ${data.recommended_plan?.algorithm_label || p_mode}</p>
-                    <p class="mb-0 small"><strong>Modbus execution:</strong> ${data.recommended_plan?.allocation_summary || data.recommended_plan?.execution_label || '-'}</p>
-                </div>
-            </div>
-            
-            <div class="alert alert-secondary mt-2 mb-0">
-                <i class="fas fa-microchip"></i> <strong>Препоръчана енергийна стратегия:</strong> 
-                <span class="badge badge-dark p-2">${data.recommended_plan?.algorithm_label || p_mode}</span>
-            </div>
-        `;
-        
-        actionsFooter.classList.remove('d-none');
-        
     } catch (error) {
         content.innerHTML = `
-            <div class="alert alert-danger">
-                <i class="fas fa-exclamation-circle"></i> Грешка при получаването на препоръка от алгоритъма. API-то не отговори.
-            </div>
+            <div class="compact-metric"><span class="label">Status</span><span class="value">Грешка при алгоритъмния read.</span></div>
         `;
         console.error('Charging recommendation error:', error);
-    }
-}
-
-function startCharging() {
-    alert('Charging started! (This would integrate with your EV charging system)');
-}
-
-function scheduleCharging() {
-    alert('Charging scheduled for optimal conditions!');
-}
-
-async function collectData() {
-    try {
-        // Parallel data collection: Inverters + Weather (Force Refresh)
-        showNotification('Refreshing Inverter and Weather data...', 'info');
-        
-        await Promise.all([
-            window.EVPlatformAPI.collectEnergyData(),
-            window.EVPlatformAPI.fetchWeather()
-        ]);
-
-        loadDashboardData(); // Refresh the UI
-        showNotification('Data collection completed successfully!', 'success');
-    } catch (error) {
-        console.error('Failed to collect data:', error);
-        showNotification('Failed to collect data: ' + error.message, 'error');
     }
 }
 
@@ -1220,6 +1178,7 @@ function getCookie(name) {
 document.addEventListener('DOMContentLoaded', function() {
     clearProjectionState();
     loadDashboardData();
+    loadWeatherInput();
 });
 
 // Auto-refresh every 3 minutes (180000 ms)
@@ -1227,14 +1186,8 @@ const REFRESH_INTERVAL = 3 * 60 * 1000;
 
 setInterval(async () => {
     try {
-        console.log('Automated refresh: Updating weather and energy stats...');
-        // We do shallow update for UI (loadDashboardData) which fetches latest from DB
-        // But for "live" feel we might want to trigger collection too, 
-        // however triggering collection every 3 minutes might hit API limits or be slow.
-        // Best approach: Just refresh UI. The background service (celery/cron) should handle collection.
-        // Since we don't have background workers yet, we will trigger collection here.
-        
-        await collectData(); 
+        await loadDashboardData();
+        await loadWeatherInput();
     } catch (e) {
         console.error("Auto-refresh failed", e);
     }
