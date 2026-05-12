@@ -279,55 +279,39 @@
                         <thead class="thead-light" style="position: sticky; top: 0; z-index: 1;">
                             <tr>
                                 <th>Transaction ID</th>
-                                <th>Station</th>
+                                <th>Station Name</th>
                                 <th>Connector</th>
-                                <th>Started At</th>
-                                <th>Duration</th>
-                                <th>Energy</th>
-                                <th>Requested Pwr</th>
+                                <th>Vehicle ID</th>
+                                <th>Start Time</th>
+                                <th>End Time</th>
+                                <th>Duration (min)</th>
+                                <th>Energy (kWh)</th>
+                                <th>Avg Power (kW)</th>
+                                <th>Peak Power (kW)</th>
                                 <th>Session Result</th>
+                                <th>Stop Reason</th>
                             </tr>
                         </thead>
                         
                         <tbody id="recentTransactionsBody">
-                            {% for txn in recent_transactions %}
+                            {% for txn in recent_transaction_rows %}
                             <tr>
-                                <td>
-                                    <small class="text-monospace" title="{{ txn.transaction_id|default:txn.id }}">{{ txn.transaction_id|default:txn.id|truncatechars:8 }}</small>
-                                </td>
-                                <td>
-                                    <small class="text-truncate d-inline-block" style="max-width: 150px;" title="{{ txn.connector.station.address }}">{{ txn.connector.station.formatted_serial|default:txn.connector.station.address }}</small>
-                                </td>
-                                <td>
-                                    <small>C{{ txn.connector.connector_id }}</small>
-                                </td>
-                                <td>
-                                    <small>{{ txn.started_at|date:"d M H:i" }}</small>
-                                </td>
-                                <td>
-                                    <small>{{ txn.formatted_duration }}</small>
-                                </td>
-                                <td>
-                                    <small class="font-weight-bold">
-                                        {{ txn.formatted_energy }} <span class="text-muted">kWh</span>
-                                    </small>
-                                </td>
-                                <td>
-                                    <small>
-                                        {% if txn.requested_power_kw %}
-                                            {{ txn.requested_power_kw }} kW
-                                        {% else %}
-                                            —
-                                        {% endif %}
-                                    </small>
-                                </td>
-                                <td>
-                                    <span class="badge badge-{{ txn.result_class }} px-2 py-1">{{ txn.session_result }}</span>
-                                </td>
+                                <td><small class="text-monospace">{{ txn.transaction_id }}</small></td>
+                                <td><small title="{{ txn.station_name }}">{{ txn.station_name }}</small></td>
+                                <td><small>{{ txn.connector_id }}</small></td>
+                                <td><small>{{ txn.vehicle_id }}</small></td>
+                                <td><small>{{ txn.start_time }}</small></td>
+                                <td><small>{{ txn.end_time }}</small></td>
+                                <td><small>{{ txn.duration_minutes }}</small></td>
+                                <td><small class="font-weight-bold">{{ txn.energy_kwh }}</small></td>
+                                <td><small>{{ txn.avg_power_kw }}</small></td>
+                                <td><small>{{ txn.peak_power_kw }}</small></td>
+                                <td><span class="badge badge-{{ txn.result_class }} px-2 py-1">{{ txn.session_result }}</span></td>
+                                <td><small>{{ txn.stop_reason }}</small></td>
                             </tr>
                             {% empty %}
                             <tr>
-                                <td colspan="8" class="text-center py-4 text-muted">No transactions found.</td>
+                                <td colspan="12" class="text-center py-4 text-muted">No transactions found.</td>
                             </tr>
                             {% endfor %}
                         </tbody>
@@ -489,22 +473,25 @@ document.addEventListener("DOMContentLoaded", function() {
 
     function renderTransactions(transactions) {
         if (!transactions.length) {
-            recentTransactionsBody.innerHTML = '<tr><td colspan="8" class="text-center py-4 text-muted">No transactions found.</td></tr>';
+            recentTransactionsBody.innerHTML = '<tr><td colspan="12" class="text-center py-4 text-muted">No transactions found.</td></tr>';
             return;
         }
 
         recentTransactionsBody.innerHTML = transactions.map(function(txn) {
-            const requestedPower = txn.requested_power_kw ? txn.requested_power_kw + ' kW' : '—';
             return `
                 <tr>
-                    <td><small class="text-monospace" title="${txn.transaction_id}">${txn.transaction_id_short}</small></td>
-                    <td><small class="text-truncate d-inline-block" style="max-width: 150px;" title="${txn.station_address}">${txn.station_label}</small></td>
-                    <td><small>C${txn.connector_id}</small></td>
-                    <td><small>${txn.started_at}</small></td>
-                    <td><small>${txn.duration}</small></td>
-                    <td><small class="font-weight-bold">${txn.energy} <span class="text-muted">kWh</span></small></td>
-                    <td><small>${requestedPower}</small></td>
+                    <td><small class="text-monospace">${txn.transaction_id}</small></td>
+                    <td><small title="${txn.station_name}">${txn.station_name}</small></td>
+                    <td><small>${txn.connector_id}</small></td>
+                    <td><small>${txn.vehicle_id}</small></td>
+                    <td><small>${txn.start_time}</small></td>
+                    <td><small>${txn.end_time}</small></td>
+                    <td><small>${txn.duration_minutes}</small></td>
+                    <td><small class="font-weight-bold">${txn.energy_kwh}</small></td>
+                    <td><small>${txn.avg_power_kw}</small></td>
+                    <td><small>${txn.peak_power_kw}</small></td>
                     <td><span class="badge badge-${txn.result_class} px-2 py-1">${txn.session_result}</span></td>
+                    <td><small>${txn.stop_reason}</small></td>
                 </tr>
             `;
         }).join('');
