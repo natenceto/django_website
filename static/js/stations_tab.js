@@ -220,6 +220,21 @@ document.addEventListener("DOMContentLoaded", function () {
       }
     }
   }
+
+  function updateVehicleSoc(_stationId, socPercentage) {
+    if (socPercentage === null || socPercentage === undefined || socPercentage === '') {
+      updateDashboardCard('metric-vehicle-soc', '--', false);
+      return;
+    }
+
+    const numericSoc = Number(socPercentage);
+    if (Number.isNaN(numericSoc)) {
+      updateDashboardCard('metric-vehicle-soc', '--', false);
+      return;
+    }
+
+    updateDashboardCard('metric-vehicle-soc', `${numericSoc.toFixed(2)}%`, false);
+  }
   
   function connectStatusWebSocket() {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -266,11 +281,9 @@ document.addEventListener("DOMContentLoaded", function () {
           });
           
           // Update dashboard counters
-          const totalStations = document.getElementById('metric-total');
           const onlineStations = document.getElementById('metric-online');
           const availableStations = document.getElementById('metric-available');
           
-          if (totalStations) totalStations.textContent = data.stations.length;
           if (onlineStations) {
             const onlineCount = data.stations.filter(s => s.online).length;
             onlineStations.textContent = onlineCount;
@@ -346,6 +359,7 @@ document.addEventListener("DOMContentLoaded", function () {
             } else if (connectorStatus === "available") {
               statusClass = "badge-success";
               statusText = "Available";
+              updateVehicleSoc(stationId, null);
               // Update active sessions if just stopped charging
               if (wasCharging) {
                 dashboardMetrics.activeSessions = Math.max(0, dashboardMetrics.activeSessions - 1);
@@ -360,6 +374,7 @@ document.addEventListener("DOMContentLoaded", function () {
             } else if (connectorStatus === "offline") {
               statusClass = "badge-dark";
               statusText = "Offline";
+              updateVehicleSoc(stationId, null);
               if (wasCharging) {
                 dashboardMetrics.activeSessions = Math.max(0, dashboardMetrics.activeSessions - 1);
                 updateDashboardCard('metric-sessions', dashboardMetrics.activeSessions);
@@ -369,6 +384,10 @@ document.addEventListener("DOMContentLoaded", function () {
             connectorCell.innerHTML = `<span class="badge ${statusClass}">${statusText}</span>`;
           }
           
+        }
+
+        if (messageType === 'soc_update' && data.station_id) {
+          updateVehicleSoc(data.station_id, data.soc_percentage);
         }
         
         // Handle transaction stopped
@@ -411,6 +430,7 @@ document.addEventListener("DOMContentLoaded", function () {
               if (connectorCell) {
                 const wasCharging = connectorCell.innerHTML.includes('Charging');
                 connectorCell.innerHTML = `<span class="badge badge-dark">Offline</span>`;
+                updateVehicleSoc(data.station_id, null);
                 if (wasCharging) {
                   dashboardMetrics.activeSessions = Math.max(0, dashboardMetrics.activeSessions - 1);
                   updateDashboardCard('metric-sessions', dashboardMetrics.activeSessions);
@@ -471,7 +491,6 @@ document.addEventListener("DOMContentLoaded", function () {
 
   // Connect to status WebSocket when page loads
   connectStatusWebSocket();
-
   // Initial button state
   updateActionButtons();
 });

@@ -31,10 +31,13 @@ def execute_station_action(action: str, station_ids: list, power: str = None) ->
                     continue
                 
                 power_limit = None
+                power_mode = "station-default"
                 if power and power.lower() == 'auto':
                     power_limit = None
+                    power_mode = "auto"
                 elif power:
                     power_limit = int(power)
+                    power_mode = "manual"
                 else:
                     station = Station.objects.get(id=station_id)
                     power_limit = station.power_output
@@ -46,9 +49,13 @@ def execute_station_action(action: str, station_ids: list, power: str = None) ->
                             connector_id=connector.connector_id,
                             id_tag=valid_rfid.tag,
                             requested_power_kw=power_limit,
+                            session_context={
+                                "command_source": "operator_ui",
+                                "requested_power_mode": power_mode,
+                            },
                         )
                     )
-                    results.append(f"Station {station_id}: RemoteStartTransaction sent successfully")
+                    results.append(f"Station {station_id}: RemoteStartTransaction queued for station dispatch")
                     success_count += 1
                 except CommandDispatchError as exc:
                     results.append(f"Station {station_id}: Failed to start charging - {str(exc)}")
@@ -62,13 +69,14 @@ def execute_station_action(action: str, station_ids: list, power: str = None) ->
                 
                 if active_transaction:
                     try:
+                        ocpp_transaction_id = active_transaction.transaction_id or active_transaction.id
                         command_bus.dispatch(
                             StopChargingCommand(
                                 station_id=station_id,
-                                transaction_id=active_transaction.id,
+                                transaction_id=ocpp_transaction_id,
                             )
                         )
-                        results.append(f"Station {station_id}: Stop command sent")
+                        results.append(f"Station {station_id}: RemoteStopTransaction queued for station dispatch")
                         success_count += 1
                     except CommandDispatchError as exc:
                         results.append(f"Station {station_id}: Failed to stop charging - {str(exc)}")

@@ -2,7 +2,7 @@ from django.shortcuts import render, redirect
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.contrib import messages
 from .forms import StationForm
-from .models import Station
+from .models import Station, MeterValue
 from django.template.loader import render_to_string
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
@@ -12,7 +12,7 @@ from .services import execute_station_action
 
 def _build_station_stats(stations_list):
     from .consumers import ACTIVE_STATIONS
-    from .models import Transaction
+    from .models import Transaction, MeterValue
     from django.db.models import Sum
     from django.utils import timezone
 
@@ -28,12 +28,20 @@ def _build_station_stats(stations_list):
         meter_stop__isnull=False,
     )
     energy_today_wh = today_transactions.aggregate(total=Sum('meter_stop') - Sum('meter_start'))['total'] or 0
+    latest_vehicle_soc = (
+        MeterValue.objects
+        .filter(transaction__status='active', soc_percentage__isnull=False)
+        .order_by('-timestamp', '-id')
+        .values_list('soc_percentage', flat=True)
+        .first()
+    )
 
     return {
         'total_stations': total_stations,
         'online_stations': online_stations,
         'active_sessions': active_sessions,
         'energy_today_kwh': round(energy_today_wh / 1000, 1),
+        'vehicle_soc': round(float(latest_vehicle_soc), 2) if latest_vehicle_soc is not None else None,
     }
 
 def stations(request: HttpRequest) -> HttpResponse:
@@ -45,7 +53,7 @@ def stations(request: HttpRequest) -> HttpResponse:
     and keeps current tab on refresh.
     """
     form = StationForm(request.POST or None)
-    stations_list = list(Station.objects.all().prefetch_related('connectors'))
+    stations_list = list(Station.objects.prefetch_related('connectors'))
 
     stats = _build_station_stats(stations_list)
 

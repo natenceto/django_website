@@ -297,6 +297,17 @@ LOGGING = {
     },
 }
 
+OCPP_CONFIGURATION_TIMEOUT_SECONDS = env.float('OCPP_CONFIGURATION_TIMEOUT_SECONDS', default=10.0)
+OCPP_STATION_CONFIGURATION = {
+    'HeartbeatInterval': str(env.int('OCPP_HEARTBEAT_INTERVAL_SECONDS', default=60)),
+    'MeterValueSampleInterval': str(env.int('OCPP_METER_VALUE_SAMPLE_INTERVAL_SECONDS', default=30)),
+    'ClockAlignedDataInterval': str(env.int('OCPP_CLOCK_ALIGNED_DATA_INTERVAL_SECONDS', default=0)),
+    'MeterValuesSampledData': env(
+        'OCPP_METER_VALUES_SAMPLED_DATA',
+        default='Energy.Active.Import.Register,Power.Active.Import,Current.Import,Voltage',
+    ),
+}
+
 # Create logs directory if it doesn't exist
 os.makedirs(os.path.join(BASE_DIR, 'logs'), exist_ok=True)
 

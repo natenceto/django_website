@@ -422,7 +422,7 @@
                         console.log('Received connector status update:', data);
                         const stationId = data.station_id;
                         const connectorId = data.connector_id;
-                        const status = data.status;
+                        const status = data.connector_status || data.status;
                         
                         // Update the connector status in the UI
                         if (connectorId) {

@@ -95,7 +95,7 @@
         <div class="card border-left-secondary shadow h-100 py-1">
             <div class="card-body py-2">
                 <div class="text-xs font-weight-bold text-secondary text-uppercase mb-1">Total Chargers</div>
-                <div class="h6 mb-0 font-weight-bold text-gray-800">{{ total_chargers }}</div>
+                <div class="h6 mb-0 font-weight-bold text-gray-800" id="totalChargersCount">{{ total_chargers }}</div>
             </div>
         </div>
     </div>
@@ -105,7 +105,7 @@
         <div class="card border-left-success shadow h-100 py-1">
             <div class="card-body py-2">
                 <div class="text-xs font-weight-bold text-success text-uppercase mb-1">Available</div>
-                <div class="h6 mb-0 font-weight-bold text-gray-800">{{ charger_status_counts.available }}</div>
+                <div class="h6 mb-0 font-weight-bold text-gray-800" id="availableChargersCount">{{ charger_status_counts.available }}</div>
             </div>
         </div>
     </div>
@@ -115,7 +115,7 @@
         <div class="card border-left-primary shadow h-100 py-1">
             <div class="card-body py-2">
                 <div class="text-xs font-weight-bold text-primary text-uppercase mb-1">Charging</div>
-                <div class="h6 mb-0 font-weight-bold text-gray-800">{{ charger_status_counts.charging }}</div>
+                <div class="h6 mb-0 font-weight-bold text-gray-800" id="chargingChargersCount">{{ charger_status_counts.charging }}</div>
             </div>
         </div>
     </div>
@@ -125,7 +125,7 @@
         <div class="card border-left-danger shadow h-100 py-1">
             <div class="card-body py-2">
                 <div class="text-xs font-weight-bold text-danger text-uppercase mb-1">Faulted</div>
-                <div class="h6 mb-0 font-weight-bold text-gray-800">{{ charger_status_counts.faulted }}</div>
+                <div class="h6 mb-0 font-weight-bold text-gray-800" id="faultedChargersCount">{{ charger_status_counts.faulted }}</div>
             </div>
         </div>
     </div>
@@ -135,7 +135,7 @@
         <div class="card border-left-dark shadow h-100 py-1">
             <div class="card-body py-2">
                 <div class="text-xs font-weight-bold text-dark text-uppercase mb-1">Offline</div>
-                <div class="h6 mb-0 font-weight-bold text-gray-800">{{ charger_status_counts.offline }}</div>
+                <div class="h6 mb-0 font-weight-bold text-gray-800" id="offlineChargersCount">{{ charger_status_counts.offline }}</div>
             </div>
         </div>
     </div>
@@ -152,16 +152,16 @@
             <div class="card-body bg-light">
                 <div class="row" id="chargerGrid">
                     {% for station in stations_with_connectors %}
-                    <div class="col-xl-3 col-lg-4 col-md-6 mb-4">
+                    <div class="col-xl-3 col-lg-4 col-md-6 mb-4" id="station-card-{{ station.id }}" data-station-id="{{ station.id }}">
                         <div class="card shadow-sm h-100 border-0 rounded-lg pb-2">
                             <div class="card-header bg-white border-0 d-flex justify-content-between align-items-center pt-3 pb-0">
                                 <h6 class="m-0 font-weight-bold text-dark text-truncate" title="{{ station.formatted_serial }}">
                                     <i class="fas fa-charging-station text-primary mr-1"></i> {{ station.formatted_serial|default:"Station"|truncatechars:15 }}
                                 </h6>
                                 {% if station.is_online %}
-                                    <span class="badge badge-success badge-pill px-2 py-1"><i class="fas fa-wifi mr-1"></i>Online</span>
+                                    <span id="station-online-badge-{{ station.id }}" class="badge badge-success badge-pill px-2 py-1"><i class="fas fa-wifi mr-1"></i>Online</span>
                                 {% else %}
-                                    <span class="badge badge-secondary badge-pill px-2 py-1"><i class="fas fa-plug mr-1"></i>Offline</span>
+                                    <span id="station-online-badge-{{ station.id }}" class="badge badge-secondary badge-pill px-2 py-1"><i class="fas fa-plug mr-1"></i>Offline</span>
                                 {% endif %}
                             </div>
                             <div class="card-body pt-2 pb-2">
@@ -172,22 +172,22 @@
                                 <div class="row mx-n1">
                                     {% for connector in station.prefetched_connectors %}
                                     <div class="col-6 px-1 mb-2">
-                                        <div class="p-2 rounded h-100 text-center border {% if connector.status_class == 'charging' %}border-success bg-white{% elif connector.status_class == 'available' %}border-primary bg-white{% elif connector.status_class == 'faulted' %}border-danger bg-white{% else %}border-secondary bg-light{% endif %} shadow-sm transition-hover">
+                                        <div id="connector-card-{{ station.id }}-{{ connector.connector_id }}" data-status-class="{{ connector.status_class }}" class="p-2 rounded h-100 text-center border {% if connector.status_class == 'charging' %}border-success bg-white{% elif connector.status_class == 'available' %}border-primary bg-white{% elif connector.status_class == 'faulted' %}border-danger bg-white{% else %}border-secondary bg-light{% endif %} shadow-sm transition-hover">
                                             <div class="font-weight-bold text-dark mb-1">
                                                 <i class="fas fa-plug text-gray-400 mr-1"></i> C{{ connector.connector_id }}
                                             </div>
                                             
                                             {% if connector.status_class == 'charging' %}
-                                                <span class="badge badge-success mb-1 w-100"><i class="fas fa-bolt mr-1"></i>Charging</span>
+                                                <span id="connector-badge-{{ station.id }}-{{ connector.connector_id }}" class="badge badge-success mb-1 w-100"><i class="fas fa-bolt mr-1"></i>Charging</span>
                                             {% elif connector.status_class == 'available' %}
-                                                <span class="badge badge-primary mb-1 w-100"><i class="fas fa-check-circle mr-1"></i>Available</span>
+                                                <span id="connector-badge-{{ station.id }}-{{ connector.connector_id }}" class="badge badge-primary mb-1 w-100"><i class="fas fa-check-circle mr-1"></i>Available</span>
                                             {% elif connector.status_class == 'faulted' %}
-                                                <span class="badge badge-danger mb-1 w-100"><i class="fas fa-exclamation-triangle mr-1"></i>Faulted</span>
+                                                <span id="connector-badge-{{ station.id }}-{{ connector.connector_id }}" class="badge badge-danger mb-1 w-100"><i class="fas fa-exclamation-triangle mr-1"></i>Faulted</span>
                                             {% else %}
-                                                <span class="badge badge-secondary mb-1 w-100">{{ connector.status|title }}</span>
+                                                <span id="connector-badge-{{ station.id }}-{{ connector.connector_id }}" class="badge badge-secondary mb-1 w-100">{{ connector.status|title }}</span>
                                             {% endif %}
                                             
-                                            <div class="small mt-1 text-muted">
+                                            <div id="connector-power-{{ station.id }}-{{ connector.connector_id }}" class="small mt-1 text-muted">
                                                 {% if connector.current_power_kw and connector.status_class == 'charging' %}
                                                     <i class="fas fa-tachometer-alt text-success"></i> <strong>{{ connector.current_power_kw }} kW</strong>
                                                 {% else %}
@@ -206,7 +206,7 @@
                                 </div>
                             </div>
                             <div class="card-footer bg-white border-top-0 pt-0 pb-2 text-right">
-                                <small class="text-xs text-muted">
+                                <small id="station-last-seen-{{ station.id }}" class="text-xs text-muted">
                                     <i class="far fa-clock mr-1"></i> Last seen: {% if station.last_seen %}{{ station.last_seen|date:"d M H:i" }} ({{ station.last_seen|timesince }} ago){% else %}Never{% endif %}
                                 </small>
                             </div>
@@ -249,27 +249,31 @@
             <!-- Transaction Aggregations -->
             <div class="card-body border-bottom">
                 <div class="row text-center">
-                    <div class="col-md-2 border-right">
+                    <div class="col-md border-right">
                         <small class="text-muted d-block">Successful Sessions</small>
                         <h5 class="text-success font-weight-bold mb-0" id="quickStatsSuccessful">{{ quick_stats.successful }}</h5>
                     </div>
-                    <div class="col-md-2 border-right">
-                        <small class="text-muted d-block">Partial Sessions</small>
+                    <div class="col-md border-right">
+                        <small class="text-muted d-block">Interrupted Sessions</small>
                         <h5 class="text-warning font-weight-bold mb-0" id="quickStatsPartial">{{ quick_stats.partial }}</h5>
                     </div>
-                    <div class="col-md-2 border-right">
+                    <div class="col-md border-right">
+                        <small class="text-muted d-block">Simulated Sessions</small>
+                        <h5 class="text-secondary font-weight-bold mb-0" id="quickStatsSimulated">{{ quick_stats.simulated }}</h5>
+                    </div>
+                    <div class="col-md border-right">
                         <small class="text-muted d-block">Failed Sessions</small>
                         <h5 class="text-danger font-weight-bold mb-0" id="quickStatsFailed">{{ quick_stats.failed }}</h5>
                     </div>
-                    <div class="col-md-2 border-right">
+                    <div class="col-md border-right">
                         <small class="text-muted d-block">Avg Energy</small>
                         <h5 class="text-primary font-weight-bold mb-0" id="quickStatsAvgEnergy">{{ quick_stats.avg_energy }} <small>kWh</small></h5>
                     </div>
-                    <div class="col-md-2 border-right">
+                    <div class="col-md border-right">
                         <small class="text-muted d-block">Avg Duration</small>
                         <h5 class="text-info font-weight-bold mb-0" id="quickStatsAvgDuration">{{ quick_stats.avg_duration }} <small>min</small></h5>
                     </div>
-                    <div class="col-md-2">
+                    <div class="col-md">
                         <small class="text-muted d-block">Total Energy (Recent)</small>
                         <h5 class="text-success font-weight-bold mb-0" id="quickStatsTotalEnergy">{{ quick_stats.total_energy }} <small>kWh</small></h5>
                     </div>
@@ -288,12 +292,12 @@
                                 <th>Vehicle ID</th>
                                 <th>Start Time</th>
                                 <th>End Time</th>
-                                <th>Duration (min)</th>
+                                <th>Duration</th>
                                 <th>Energy (kWh)</th>
                                 <th>Avg Power (kW)</th>
                                 <th>Peak Power (kW)</th>
-                                <th>Session Result</th>
-                                <th>Stop Reason</th>
+                                <th>Session Status</th>
+                                <th>Authenticity</th>
                             </tr>
                         </thead>
                         
@@ -306,12 +310,12 @@
                                 <td><small>{{ txn.vehicle_id }}</small></td>
                                 <td><small>{{ txn.start_time }}</small></td>
                                 <td><small>{{ txn.end_time }}</small></td>
-                                <td><small>{{ txn.duration_minutes }}</small></td>
+                                <td><small>{{ txn.duration_display }}</small></td>
                                 <td><small class="font-weight-bold">{{ txn.energy_kwh }}</small></td>
                                 <td><small>{{ txn.avg_power_kw }}</small></td>
                                 <td><small>{{ txn.peak_power_kw }}</small></td>
-                                <td><span class="badge badge-{{ txn.result_class }} px-2 py-1">{{ txn.session_result }}</span></td>
-                                <td><small>{{ txn.stop_reason }}</small></td>
+                                <td><span class="badge badge-{{ txn.status_class }} px-2 py-1" title="{{ txn.diagnostics_summary }}">{{ txn.session_status }}</span></td>
+                                <td><span class="badge badge-{{ txn.authenticity_class }} px-2 py-1" title="{{ txn.diagnostics_summary }}">{{ txn.session_authenticity }}</span></td>
                             </tr>
                             {% empty %}
                             <tr>
@@ -468,10 +472,156 @@ document.addEventListener("DOMContentLoaded", function() {
     const recentTransactionsBody = document.getElementById('recentTransactionsBody');
     const quickStatsSuccessful = document.getElementById('quickStatsSuccessful');
     const quickStatsPartial = document.getElementById('quickStatsPartial');
+    const quickStatsSimulated = document.getElementById('quickStatsSimulated');
     const quickStatsFailed = document.getElementById('quickStatsFailed');
     const quickStatsAvgEnergy = document.getElementById('quickStatsAvgEnergy');
     const quickStatsAvgDuration = document.getElementById('quickStatsAvgDuration');
     const quickStatsTotalEnergy = document.getElementById('quickStatsTotalEnergy');
+    const activeSessions = document.getElementById('activeSessions');
+    const totalSessions = document.getElementById('totalSessions');
+    const energyDelivered = document.getElementById('energyDelivered');
+    const todayRevenue = document.getElementById('todayRevenue');
+    const onlineStationsCount = document.getElementById('onlineStations');
+    const totalStationsCount = document.getElementById('totalStations');
+    const totalChargersCount = document.getElementById('totalChargersCount');
+    const availableChargersCount = document.getElementById('availableChargersCount');
+    const chargingChargersCount = document.getElementById('chargingChargersCount');
+    const faultedChargersCount = document.getElementById('faultedChargersCount');
+    const offlineChargersCount = document.getElementById('offlineChargersCount');
+
+    function debounce(fn, wait) {
+        let timeoutId = null;
+        return function debounced() {
+            const args = arguments;
+            clearTimeout(timeoutId);
+            timeoutId = setTimeout(function() {
+                fn.apply(null, args);
+            }, wait);
+        };
+    }
+
+    function renderOnlineBadge(isOnline) {
+        return isOnline
+            ? '<i class="fas fa-wifi mr-1"></i>Online'
+            : '<i class="fas fa-plug mr-1"></i>Offline';
+    }
+
+    function badgeClassForOnline(isOnline) {
+        return isOnline ? 'badge badge-success badge-pill px-2 py-1' : 'badge badge-secondary badge-pill px-2 py-1';
+    }
+
+    function normalizeConnectorStatus(rawStatus) {
+        const value = (rawStatus || 'offline').toLowerCase();
+        if (value === 'charging') return 'charging';
+        if (value === 'available') return 'available';
+        if (value === 'faulted') return 'faulted';
+        return 'offline';
+    }
+
+    function connectorBadgeMarkup(statusClass, rawStatus) {
+        if (statusClass === 'charging') {
+            return '<i class="fas fa-bolt mr-1"></i>Charging';
+        }
+        if (statusClass === 'available') {
+            return '<i class="fas fa-check-circle mr-1"></i>Available';
+        }
+        if (statusClass === 'faulted') {
+            return '<i class="fas fa-exclamation-triangle mr-1"></i>Faulted';
+        }
+        return (rawStatus || 'Offline').replace(/\b\w/g, function(match) { return match.toUpperCase(); });
+    }
+
+    function connectorBadgeClass(statusClass) {
+        if (statusClass === 'charging') return 'badge badge-success mb-1 w-100';
+        if (statusClass === 'available') return 'badge badge-primary mb-1 w-100';
+        if (statusClass === 'faulted') return 'badge badge-danger mb-1 w-100';
+        return 'badge badge-secondary mb-1 w-100';
+    }
+
+    function applyConnectorCardClass(card, statusClass) {
+        card.classList.remove('border-success', 'border-primary', 'border-danger', 'border-secondary', 'bg-white', 'bg-light');
+        if (statusClass === 'charging') {
+            card.classList.add('border-success', 'bg-white');
+        } else if (statusClass === 'available') {
+            card.classList.add('border-primary', 'bg-white');
+        } else if (statusClass === 'faulted') {
+            card.classList.add('border-danger', 'bg-white');
+        } else {
+            card.classList.add('border-secondary', 'bg-light');
+        }
+        card.dataset.statusClass = statusClass;
+    }
+
+    function updateGridFromStatusEvent(payload) {
+        const stationId = payload.station_id;
+        if (!stationId) {
+            return;
+        }
+
+        const onlineBadge = document.getElementById(`station-online-badge-${stationId}`);
+        const lastSeenLabel = document.getElementById(`station-last-seen-${stationId}`);
+        const isOnline = payload.type === 'connector_status_update'
+            ? payload.station_status !== 'inactive' && payload.connector_status !== 'offline'
+            : payload.status === 'active';
+
+        if (onlineBadge) {
+            onlineBadge.className = badgeClassForOnline(isOnline);
+            onlineBadge.innerHTML = renderOnlineBadge(isOnline);
+        }
+        if (lastSeenLabel) {
+            lastSeenLabel.innerHTML = '<i class="far fa-clock mr-1"></i> Last seen: just now';
+        }
+
+        if (payload.type === 'connector_status_update' && payload.connector_id) {
+            const statusClass = normalizeConnectorStatus(payload.connector_status);
+            const connectorCard = document.getElementById(`connector-card-${stationId}-${payload.connector_id}`);
+            const connectorBadge = document.getElementById(`connector-badge-${stationId}-${payload.connector_id}`);
+            const connectorPower = document.getElementById(`connector-power-${stationId}-${payload.connector_id}`);
+
+            if (connectorCard) {
+                applyConnectorCardClass(connectorCard, statusClass);
+            }
+            if (connectorBadge) {
+                connectorBadge.className = connectorBadgeClass(statusClass);
+                connectorBadge.innerHTML = connectorBadgeMarkup(statusClass, payload.connector_status);
+            }
+            if (connectorPower && statusClass !== 'charging') {
+                connectorPower.innerHTML = '<span>-</span>';
+            }
+        }
+    }
+
+    function fetchDashboardSummary() {
+        fetch("{% url 'public:dashboard_live_summary_api' %}", {
+            headers: {
+                'X-Requested-With': 'XMLHttpRequest'
+            }
+        })
+            .then(function(res) { return res.json(); })
+            .then(function(data) {
+                if (activeSessions) activeSessions.textContent = data.active_sessions_count;
+                if (totalSessions) totalSessions.textContent = data.total_sessions_today;
+                if (energyDelivered) energyDelivered.textContent = data.energy_delivered_today;
+                if (todayRevenue) todayRevenue.textContent = data.today_revenue;
+                if (onlineStationsCount) onlineStationsCount.textContent = data.online_stations;
+                if (totalStationsCount) totalStationsCount.textContent = data.total_stations;
+                if (availableChargersCount) availableChargersCount.textContent = data.charger_status_counts.available;
+                if (chargingChargersCount) chargingChargersCount.textContent = data.charger_status_counts.charging;
+                if (faultedChargersCount) faultedChargersCount.textContent = data.charger_status_counts.faulted;
+                if (offlineChargersCount) offlineChargersCount.textContent = data.charger_status_counts.offline;
+                if (totalChargersCount) {
+                    totalChargersCount.textContent = data.charger_status_counts.available + data.charger_status_counts.charging + data.charger_status_counts.faulted + data.charger_status_counts.offline;
+                }
+            });
+    }
+
+    const refreshDashboardSummaryDebounced = debounce(fetchDashboardSummary, 250);
+    const refreshTransactionsDebounced = debounce(fetchTransactions, 300);
+    const refreshChartDebounced = debounce(function() {
+        if (typeof window.refreshDashboardSessionChart === 'function') {
+            window.refreshDashboardSessionChart();
+        }
+    }, 350);
 
     txnDateFilter.value = "{{ txn_date_filter|default:'' }}";
     txnDateFilter.style.display = txnTimeFilter.value === 'date' ? 'block' : 'none';
@@ -491,12 +641,12 @@ document.addEventListener("DOMContentLoaded", function() {
                     <td><small>${txn.vehicle_id}</small></td>
                     <td><small>${txn.start_time}</small></td>
                     <td><small>${txn.end_time}</small></td>
-                    <td><small>${txn.duration_minutes}</small></td>
+                    <td><small>${txn.duration_display}</small></td>
                     <td><small class="font-weight-bold">${txn.energy_kwh}</small></td>
                     <td><small>${txn.avg_power_kw}</small></td>
                     <td><small>${txn.peak_power_kw}</small></td>
-                    <td><span class="badge badge-${txn.result_class} px-2 py-1">${txn.session_result}</span></td>
-                    <td><small>${txn.stop_reason}</small></td>
+                    <td><span class="badge badge-${txn.status_class} px-2 py-1" title="${txn.diagnostics_summary}">${txn.session_status}</span></td>
+                    <td><span class="badge badge-${txn.authenticity_class} px-2 py-1" title="${txn.diagnostics_summary}">${txn.session_authenticity}</span></td>
                 </tr>
             `;
         }).join('');
@@ -505,11 +655,22 @@ document.addEventListener("DOMContentLoaded", function() {
     function renderQuickStats(stats) {
         quickStatsSuccessful.textContent = stats.successful;
         quickStatsPartial.textContent = stats.partial;
+        quickStatsSimulated.textContent = stats.simulated;
         quickStatsFailed.textContent = stats.failed;
         quickStatsAvgEnergy.innerHTML = `${stats.avg_energy} <small>kWh</small>`;
         quickStatsAvgDuration.innerHTML = `${stats.avg_duration} <small>min</small>`;
         quickStatsTotalEnergy.innerHTML = `${stats.total_energy} <small>kWh</small>`;
     }
+
+    window.addEventListener('ws-status-update', function(event) {
+        const payload = event.detail || {};
+        if (payload.type === 'station_status' || payload.type === 'connector_status_update') {
+            updateGridFromStatusEvent(payload);
+            refreshDashboardSummaryDebounced();
+            refreshTransactionsDebounced();
+            refreshChartDebounced();
+        }
+    });
 
     // ===== CSV and Transaction Handling =====
     txnTimeFilter.addEventListener('change', function(e) {
@@ -568,6 +729,7 @@ document.addEventListener("DOMContentLoaded", function() {
                 renderQuickStats(data.quick_stats || {
                     successful: 0,
                     partial: 0,
+                    simulated: 0,
                     failed: 0,
                     avg_energy: 0,
                     avg_duration: 0,
@@ -659,6 +821,8 @@ document.addEventListener("DOMContentLoaded", function() {
                 });
             });
         }
+
+        window.refreshDashboardSessionChart = loadChart;
 
         timeRangeSelect.addEventListener('change', function() {
             specificDateInput.style.display = this.value === 'specificDay' ? 'block' : 'none';

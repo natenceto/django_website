@@ -25,7 +25,7 @@ class StationForm(forms.ModelForm):
             "model", "address", "latitude", "longitude",
             "connector_type", "power_output",
             # Secondary
-            "status", "email"
+            "status", "runtime_environment", "email"
         ]
         
         widgets = {
@@ -73,6 +73,9 @@ class StationForm(forms.ModelForm):
             "status": forms.Select(attrs={
                 "class": "form-control form-control-user"
             }),
+            "runtime_environment": forms.Select(attrs={
+                "class": "form-control form-control-user"
+            }),
             "email": forms.EmailInput(attrs={
                 "class": "form-control form-control-user",
                 "placeholder": "owner@example.com"
@@ -87,6 +90,7 @@ class StationForm(forms.ModelForm):
             "connector_type": "Connector Type",
             "power_output": "Power Output (kW)",
             "status": "Status",
+            "runtime_environment": "Runtime Environment",
             "email": "Owner Email",
         }
         
