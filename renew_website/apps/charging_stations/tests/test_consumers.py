@@ -2,8 +2,10 @@ from django.test import SimpleTestCase
 from types import SimpleNamespace
 from datetime import datetime, timezone as dt_timezone
 from asgiref.sync import async_to_sync
+from channels.testing import WebsocketCommunicator
 
 from renew_website.apps.charging_stations.consumers import ChargePoint
+from renew_website.asgi import application
 
 
 class _DummyWebSocket:
@@ -176,3 +178,14 @@ class ChargePointPendingRemoteStartTests(SimpleTestCase):
         self.assertEqual(request_payload.__class__.__name__, "TriggerMessagePayload")
         self.assertEqual(getattr(request_payload, "requested_message", None), "Heartbeat")
         self.assertEqual(getattr(request_payload, "connector_id", None), 1)
+
+
+class StationStatusConsumerAuthTests(SimpleTestCase):
+    def test_station_status_socket_requires_authenticated_user(self):
+        async def run_test():
+            communicator = WebsocketCommunicator(application, "/ws/stations/status/")
+            connected, close_code = await communicator.connect()
+            self.assertFalse(connected)
+            self.assertIsNotNone(close_code)
+
+        async_to_sync(run_test)()

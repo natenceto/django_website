@@ -14,6 +14,7 @@ from pathlib import Path
 
 import environ
 import os
+import sys
 import warnings
 
 # Suppress "StreamingHttpResponse must consume synchronous iterators" warning 
@@ -26,7 +27,8 @@ PROJECT_DIR = os.path.join(BASE_DIR, "renew_website")
 
 # Initialise environment variables
 env = environ.Env(
-    DEBUG=(bool, False)
+    DEBUG=(bool, False),
+    ENABLE_API_DOCS=(bool, False),
 )
 
 # Reading .env file
@@ -41,15 +43,37 @@ SECRET_KEY = env('SECRET_KEY')
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = env.bool('DEBUG', default=False)
+ENABLE_API_DOCS = env.bool('ENABLE_API_DOCS', default=DEBUG)
 
-# Allowed hosts - in development allow all, in production configure via env
-if DEBUG:
-    ALLOWED_HOSTS = ['*']
-else:
-    ALLOWED_HOSTS = env.list('ALLOWED_HOSTS', default=['localhost', '127.0.0.1'])
+DEFAULT_ALLOWED_HOSTS = ['localhost', '127.0.0.1', '192.168.88.247']
+IS_TEST_ENV = os.path.basename(sys.argv[0]).startswith('pytest') or 'test' in sys.argv
+ALLOWED_HOSTS = env.list('ALLOWED_HOSTS', default=DEFAULT_ALLOWED_HOSTS)
+if IS_TEST_ENV and 'testserver' not in ALLOWED_HOSTS:
+    ALLOWED_HOSTS.append('testserver')
+
+unexpected_hosts = [
+    host for host in ALLOWED_HOSTS
+    if host not in DEFAULT_ALLOWED_HOSTS and not (IS_TEST_ENV and host == 'testserver')
+]
+if unexpected_hosts:
+    raise RuntimeError(
+        'ALLOWED_HOSTS may only contain localhost, 127.0.0.1, and 192.168.88.247 '
+        f'(unexpected: {unexpected_hosts})'
+    )
 
 # CSRF trusted origins for production
-CSRF_TRUSTED_ORIGINS = env.list('CSRF_TRUSTED_ORIGINS', default=['http://localhost:8000'])
+DEFAULT_TRUSTED_ORIGINS = [
+    'http://localhost',
+    'http://127.0.0.1',
+    'http://192.168.88.247',
+    'http://localhost:8000',
+    'http://127.0.0.1:8000',
+    'http://192.168.88.247:8000',
+    'https://localhost',
+    'https://127.0.0.1',
+    'https://192.168.88.247',
+]
+CSRF_TRUSTED_ORIGINS = env.list('CSRF_TRUSTED_ORIGINS', default=DEFAULT_TRUSTED_ORIGINS)
 
 # Application definition
 
@@ -74,20 +98,25 @@ INSTALLED_APPS = [
     'channels',
     'rest_framework',
     'django_filters',
-    'drf_spectacular',
     'corsheaders',
     # Celery
     'django_celery_beat',
     'django_celery_results',
 ]
 
-# Channel Layers Configuration
-# In development, prefer the in-memory channel layer so browser/OCPP websockets
-# stay alive even if Redis restarts. Production can opt into Redis explicitly.
-REDIS_URL = env('REDIS_URL', default=None)
-USE_REDIS_CHANNEL_LAYER = env.bool('USE_REDIS_CHANNEL_LAYER', default=(not DEBUG and bool(REDIS_URL)))
+if ENABLE_API_DOCS:
+    INSTALLED_APPS.append('drf_spectacular')
 
-if USE_REDIS_CHANNEL_LAYER and REDIS_URL:
+# Channel Layers Configuration
+REDIS_URL = env('REDIS_URL', default=None)
+USE_REDIS_CHANNEL_LAYER = env.bool('USE_REDIS_CHANNEL_LAYER', default=bool(REDIS_URL))
+
+if not DEBUG and not REDIS_URL:
+    raise RuntimeError('REDIS_URL must be configured when DEBUG is disabled')
+
+if USE_REDIS_CHANNEL_LAYER:
+    if not REDIS_URL:
+        raise RuntimeError('USE_REDIS_CHANNEL_LAYER=1 requires REDIS_URL')
     CHANNEL_LAYERS = {
         "default": {
             "BACKEND": "channels_redis.core.RedisChannelLayer",
@@ -105,11 +134,28 @@ else:
         }
     }
 
+if REDIS_URL:
+    CACHES = {
+        'default': {
+            'BACKEND': 'django.core.cache.backends.redis.RedisCache',
+            'LOCATION': REDIS_URL,
+            'TIMEOUT': env.int('CACHE_DEFAULT_TIMEOUT', default=300),
+        }
+    }
+else:
+    CACHES = {
+        'default': {
+            'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+            'LOCATION': 'renew-local-cache',
+        }
+    }
+
 if not DEBUG and ALLOWED_HOSTS == ['*']:
     raise RuntimeError('ALLOWED_HOSTS cannot be wildcard when DEBUG is disabled')
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'corsheaders.middleware.CorsMiddleware',  # CORS - must be before CommonMiddleware
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -117,7 +163,6 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
-    'whitenoise.middleware.WhiteNoiseMiddleware',
     'renew_website.apps.accounts.middleware.SessionTrackingMiddleware',  # Custom session tracking
 ]
 
@@ -153,6 +198,8 @@ DATABASES = {
         'PASSWORD': env('POSTGRES_PASSWORD', default='changeme'),
         'HOST': env('POSTGRES_HOST', default='db'),
         'PORT': env('POSTGRES_PORT', default='5432'),
+        'CONN_MAX_AGE': env.int('POSTGRES_CONN_MAX_AGE', default=60),
+        'CONN_HEALTH_CHECKS': True,
     }
 }
 
@@ -208,10 +255,6 @@ LOGOUT_REDIRECT_URL = 'public:index'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
-# Add these settings at the end of the file
-STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
-
-# For Django 4.2+ add this setting
 STORAGES = {
     "staticfiles": {
         "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
@@ -230,7 +273,7 @@ SESSION_COOKIE_HTTPONLY = True
 # Production security settings (enabled when DEBUG=False)
 if not DEBUG:
     # HTTPS settings
-    SECURE_SSL_REDIRECT = True
+    SECURE_SSL_REDIRECT = env.bool('SECURE_SSL_REDIRECT', default=True)
     SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
     
     # Cookie security
@@ -342,8 +385,10 @@ REST_FRAMEWORK = {
     ],
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
     'PAGE_SIZE': 20,
-    'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
 }
+
+if ENABLE_API_DOCS:
+    REST_FRAMEWORK['DEFAULT_SCHEMA_CLASS'] = 'drf_spectacular.openapi.AutoSchema'
 
 # JWT Settings
 from datetime import timedelta as jwt_timedelta
@@ -366,8 +411,16 @@ SPECTACULAR_SETTINGS = {
 # =============================================================================
 
 CORS_ALLOWED_ORIGINS = env.list('CORS_ALLOWED_ORIGINS', default=[
+    'http://localhost',
+    'http://127.0.0.1',
+    'http://192.168.88.247',
     'http://localhost:3000',
     'http://localhost:8000',
+    'http://127.0.0.1:8000',
+    'http://192.168.88.247:8000',
+    'https://localhost',
+    'https://127.0.0.1',
+    'https://192.168.88.247',
 ])
 CORS_ALLOW_CREDENTIALS = True
 

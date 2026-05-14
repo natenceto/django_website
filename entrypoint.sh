@@ -29,16 +29,9 @@ until postgres_ready; do
 done
 echo "PostgreSQL is up - continuing"
 
-# Determine whether startup initialization should run for this process.
-is_web_command=0
-case "$1" in
-    uvicorn|gunicorn|daphne)
-        is_web_command=1
-        ;;
-esac
-
-RUN_DB_MIGRATIONS="${RUN_DB_MIGRATIONS:-$is_web_command}"
-RUN_COLLECTSTATIC="${RUN_COLLECTSTATIC:-$is_web_command}"
+RUN_DB_MIGRATIONS="${RUN_DB_MIGRATIONS:-0}"
+RUN_COLLECTSTATIC="${RUN_COLLECTSTATIC:-0}"
+DJANGO_SUPERUSER_CREATE="${DJANGO_SUPERUSER_CREATE:-0}"
 
 if [ "$RUN_DB_MIGRATIONS" = "1" ]; then
     echo "Applying database migrations..."
@@ -54,9 +47,11 @@ else
     echo "Skipping static collection (RUN_COLLECTSTATIC=$RUN_COLLECTSTATIC)"
 fi
 
-if [ "$is_web_command" = "1" ] || [ "$RUN_DB_MIGRATIONS" = "1" ]; then
-    # Run the superuser script
+if [ "$DJANGO_SUPERUSER_CREATE" = "1" ]; then
+    echo "Running non-interactive superuser bootstrap..."
     python setup_superuser.py
+else
+    echo "Skipping automatic superuser bootstrap (DJANGO_SUPERUSER_CREATE=$DJANGO_SUPERUSER_CREATE)"
 fi
 
 # Start the application

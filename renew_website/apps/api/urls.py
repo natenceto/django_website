@@ -4,12 +4,8 @@ API URL Configuration.
 Supports API versioning through URL paths:
 - /api/v1/ - Version 1 (current)
 """
+from django.conf import settings
 from django.urls import path, include
-from drf_spectacular.views import (
-    SpectacularAPIView,
-    SpectacularRedocView,
-    SpectacularSwaggerView
-)
 
 app_name = 'api'
 
@@ -26,8 +22,13 @@ urlpatterns = [
     # Weather Forecasting
     path('weather/', include('renew_website.apps.api.weather.urls')),
     
-    # API Documentation (OpenAPI/Swagger)
-    path('schema/', SpectacularAPIView.as_view(), name='schema'),
-    path('docs/', SpectacularSwaggerView.as_view(url_name='api:schema'), name='swagger-ui'),
-    path('redoc/', SpectacularRedocView.as_view(url_name='api:schema'), name='redoc'),
 ]
+
+if settings.ENABLE_API_DOCS:
+    from drf_spectacular.views import SpectacularAPIView, SpectacularRedocView, SpectacularSwaggerView
+
+    urlpatterns += [
+        path('schema/', SpectacularAPIView.as_view(), name='schema'),
+        path('docs/', SpectacularSwaggerView.as_view(url_name='api:schema'), name='swagger-ui'),
+        path('redoc/', SpectacularRedocView.as_view(url_name='api:schema'), name='redoc'),
+    ]
