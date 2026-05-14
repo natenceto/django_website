@@ -169,6 +169,21 @@ uvicorn renew_website.asgi:application --host 0.0.0.0 --port 8000 --reload
 uvicorn renew_website.asgi:application --host 0.0.0.0 --port 8000
 ```
 
+### Schema Changes
+
+When you change Django models or anything that affects the database schema, use this order:
+
+```bash
+docker compose exec -T web python manage.py makemigrations
+docker compose exec -T web python manage.py migrate
+docker compose exec -T web python manage.py check
+```
+
+- `makemigrations` detects model changes and creates migration files.
+- `migrate` applies the schema changes to PostgreSQL.
+- `check` validates Django configuration and model/admin consistency after the database is up to date.
+- In this project, code reload can happen before migrations are applied, so skipping `migrate` after model changes can lead to runtime errors such as missing columns.
+
 ### Code Quality
 ```bash
 # Format code
