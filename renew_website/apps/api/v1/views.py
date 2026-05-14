@@ -1,6 +1,7 @@
 """
 API Views for EV Charging Platform.
 """
+from asgiref.sync import async_to_sync
 from rest_framework import viewsets, status, permissions
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -9,25 +10,32 @@ from django.db.models import Sum, Count, Q
 from django.utils import timezone
 from datetime import timedelta
 
+from renew_website.apps.api.schema import OpenApiParameter, OpenApiResponse, OpenApiTypes, extend_schema
+
 from renew_website.apps.charging_stations.models import (
     Station, Connector, Transaction, MeterValue, UserRFID
 )
-from renew_website.apps.charging_stations.consumers import (
-    ACTIVE_STATIONS
+from renew_website.apps.charging_stations.registry import station_runtime
+from renew_website.apps.charging_stations.services import (
+    CommandDispatchError,
+    StartChargingCommand,
+    StopChargingCommand,
+    command_bus,
 )
 
 def is_station_active(station_id):
     """Check if station is active."""
-    return station_id in ACTIVE_STATIONS
+    return station_runtime.is_online(station_id)
 
 def get_active_station_count():
     """Get count of active stations."""
-    return len(ACTIVE_STATIONS)
+    return station_runtime.count_online()
 from .serializers import (
     StationListSerializer, StationDetailSerializer, ConnectorSerializer,
     TransactionSerializer, MeterValueSerializer, UserRFIDSerializer,
     ChargingSessionStartSerializer, ChargingSessionStopSerializer,
-    StationStatisticsSerializer
+    ChargingSessionStartResponseSerializer, ChargingSessionStopResponseSerializer,
+    V1ErrorResponseSerializer, StationStatisticsSerializer
 )
 
 
@@ -60,7 +68,7 @@ class StationViewSet(viewsets.ModelViewSet):
         # Filter by online/offline
         online = self.request.query_params.get('online')
         if online is not None:
-            online_ids = list(ACTIVE_STATIONS.keys())
+            online_ids = station_runtime.get_all_online()
             if online.lower() == 'true':
                 queryset = queryset.filter(id__in=online_ids)
             else:
@@ -184,6 +192,24 @@ class UserRFIDViewSet(viewsets.ModelViewSet):
 class ChargingSessionView(APIView):
     """API endpoints for starting and stopping charging sessions."""
     permission_classes = [permissions.IsAuthenticated]
+
+    @extend_schema(
+        parameters=[
+            OpenApiParameter(
+                name='action_type',
+                type=OpenApiTypes.STR,
+                location=OpenApiParameter.PATH,
+                description='Supported values: start, stop',
+            )
+        ],
+        request=OpenApiTypes.OBJECT,
+        responses={
+            200: OpenApiResponse(response=OpenApiTypes.OBJECT, description='Charging session request accepted'),
+            400: V1ErrorResponseSerializer,
+            404: V1ErrorResponseSerializer,
+            502: V1ErrorResponseSerializer,
+        },
+    )
     
     def post(self, request, action_type):
         """Start or stop a charging session."""
@@ -205,6 +231,16 @@ class ChargingSessionView(APIView):
         station_id = serializer.validated_data['station_id']
         connector_id = serializer.validated_data.get('connector_id', 1)
         power_kw = serializer.validated_data.get('power_kw')
+        session_context = {
+            'vehicle_soc': serializer.validated_data.get('vehicle_soc'),
+            'target_soc': serializer.validated_data.get('target_soc', 80.0),
+            'estimated_departure_hours': serializer.validated_data.get('estimated_departure_hours'),
+            'priority_weight': serializer.validated_data.get('priority_weight'),
+            'battery_capacity_kwh': serializer.validated_data.get('battery_capacity_kwh'),
+            'max_acceptance_kw': serializer.validated_data.get('max_acceptance_kw'),
+            'requested_power_kw': power_kw,
+        }
+        session_context = {key: value for key, value in session_context.items() if value is not None}
         
         # Check if station is connected
         if not is_station_active(station_id):
@@ -225,15 +261,34 @@ class ChargingSessionView(APIView):
             rfid_tag = rfid.tag
         
         # TODO: Implement actual RemoteStartTransaction call
-        # This would use ACTIVE_STATIONS[station_id].cp.call_remote_start_transaction()
+        try:
+            dispatch_result = command_bus.dispatch(
+                StartChargingCommand(
+                    station_id=station_id,
+                    connector_id=connector_id,
+                    id_tag=rfid_tag,
+                    requested_power_kw=power_kw,
+                    session_context=session_context,
+                )
+            )
+        except CommandDispatchError as exc:
+            return Response(
+                {'error': f'Failed to send remote start to station {station_id}: {exc}'},
+                status=status.HTTP_502_BAD_GATEWAY
+            )
         
-        return Response({
+        response_payload = {
             'message': f'Charging session start requested for station {station_id}',
             'station_id': station_id,
             'connector_id': connector_id,
             'rfid_tag': rfid_tag,
-            'power_kw': power_kw
-        })
+            'power_kw': power_kw,
+            'command_id': str(dispatch_result.command_id),
+            'session_context': session_context,
+        }
+        response_serializer = ChargingSessionStartResponseSerializer(data=response_payload)
+        response_serializer.is_valid(raise_exception=True)
+        return Response(response_serializer.data)
     
     def _stop_session(self, request):
         """Stop an active charging session."""
@@ -258,18 +313,35 @@ class ChargingSessionView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
         
-        # TODO: Implement actual RemoteStopTransaction call
+        try:
+            dispatch_result = command_bus.dispatch(
+                StopChargingCommand(
+                    station_id=station_id,
+                    transaction_id=transaction.id,
+                )
+            )
+        except CommandDispatchError as exc:
+            return Response(
+                {'error': f'Failed to send remote stop for transaction {transaction_id}: {exc}'},
+                status=status.HTTP_502_BAD_GATEWAY
+            )
         
-        return Response({
+        response_payload = {
             'message': f'Charging session stop requested for transaction {transaction_id}',
             'transaction_id': transaction_id,
-            'station_id': station_id
-        })
+            'station_id': station_id,
+            'command_id': str(dispatch_result.command_id),
+        }
+        response_serializer = ChargingSessionStopResponseSerializer(data=response_payload)
+        response_serializer.is_valid(raise_exception=True)
+        return Response(response_serializer.data)
 
 
 class StatisticsView(APIView):
     """API endpoint for charging statistics."""
     permission_classes = [permissions.IsAuthenticated]
+
+    @extend_schema(responses={200: StationStatisticsSerializer})
     
     def get(self, request):
         """Get overall charging statistics."""

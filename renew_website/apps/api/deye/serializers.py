@@ -4,6 +4,8 @@ Deye API Serializers.
 """
 from rest_framework import serializers
 
+from renew_website.apps.api.schema import extend_schema_field
+
 class BaseInverterSerializer(serializers.Serializer):
     """
     Общ за данни между Backend и Frontend.
@@ -35,34 +37,42 @@ class DeyeCloudSerializer(BaseInverterSerializer):
     total_energy = serializers.SerializerMethodField()
     capacity = serializers.SerializerMethodField()
 
+    @extend_schema_field(serializers.FloatField())
     def get_generation_power(self, obj):
         if 'generationPower' in obj: return float(obj['generationPower'])
         return self._find_in_datalist(obj, ['TotalSolarPower', 'ActivePower', 'Pac'])
 
+    @extend_schema_field(serializers.FloatField())
     def get_battery_soc(self, obj):
         if 'batterySOC' in obj: return float(obj['batterySOC'])
         return self._find_in_datalist(obj, ['BatterySOC', 'SOC'])
 
+    @extend_schema_field(serializers.FloatField())
     def get_grid_power(self, obj):
         if 'gridPower' in obj: return float(obj['gridPower'])
         return self._find_in_datalist(obj, ['GridActivePower', 'TotalGridPower'])
         
+    @extend_schema_field(serializers.FloatField())
     def get_load_power(self, obj):
         # Облакът често не дава Load Power директно
         return self._find_in_datalist(obj, ['TotalLoadPower', 'LoadPower', 'CustomerLoad'])
 
+    @extend_schema_field(serializers.FloatField())
     def get_daily_energy(self, obj):
         if 'dailyEnergy' in obj: return float(obj['dailyEnergy'])
         return self._find_in_datalist(obj, ['DailyActiveProduction', 'DailyEnergy', 'TodayYield'])
 
+    @extend_schema_field(serializers.FloatField())
     def get_total_energy(self, obj):
         if 'totalEnergy' in obj: return float(obj['totalEnergy'])
         return self._find_in_datalist(obj, ['TotalActiveProduction', 'TotalEnergy', 'TotalYield'])
 
+    @extend_schema_field(serializers.FloatField())
     def get_monthly_energy(self, obj):
         if 'monthlyEnergy' in obj: return float(obj['monthlyEnergy'])
         return self._find_in_datalist(obj, ['MonthlyActiveProduction', 'MonthlyEnergy', 'MonthYield'])
 
+    @extend_schema_field(serializers.FloatField())
     def get_capacity(self, obj):
         if 'capacity' in obj: return float(obj['capacity'])
         return self._find_in_datalist(obj, ['InstalledCapacity', 'Capacity', 'PlantCapacity'])
@@ -88,6 +98,7 @@ class DeyeLocalSerializer(BaseInverterSerializer):
     total_energy = serializers.SerializerMethodField()
     capacity = serializers.SerializerMethodField()
 
+    @extend_schema_field(serializers.FloatField())
     def get_generation_power(self, obj):
         return float(
             obj.get('total_solar_generation') or 
@@ -96,9 +107,11 @@ class DeyeLocalSerializer(BaseInverterSerializer):
             obj.get('total_from_pv') or 0
         )
 
+    @extend_schema_field(serializers.FloatField())
     def get_battery_soc(self, obj):
         return float(obj.get('battery_soc') or 0)
 
+    @extend_schema_field(serializers.FloatField())
     def get_grid_power(self, obj):
         return float(
             obj.get('total_grid_power') or 
@@ -106,6 +119,7 @@ class DeyeLocalSerializer(BaseInverterSerializer):
             obj.get('grid_power') or 0
         )
 
+    @extend_schema_field(serializers.FloatField())
     def get_load_power(self, obj):
         return float(
             obj.get('total_load_power') or 
@@ -113,14 +127,18 @@ class DeyeLocalSerializer(BaseInverterSerializer):
             obj.get('total_to_load') or 0
         )
 
+    @extend_schema_field(serializers.FloatField())
     def get_daily_energy(self, obj):
         return float(obj.get('daily_energy') or 0)
 
+    @extend_schema_field(serializers.FloatField())
     def get_total_energy(self, obj):
         return float(obj.get('total_energy') or 0)
 
+    @extend_schema_field(serializers.FloatField())
     def get_monthly_energy(self, obj):
         return float(obj.get('monthly_energy') or obj.get('month_energy') or 0)
 
+    @extend_schema_field(serializers.FloatField())
     def get_capacity(self, obj):
         return float(obj.get('capacity') or obj.get('installed_capacity') or obj.get('capacity_kwp') or 0)

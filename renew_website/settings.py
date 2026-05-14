@@ -404,6 +404,12 @@ SPECTACULAR_SETTINGS = {
     'DESCRIPTION': 'REST API for managing EV charging stations, sessions, and users',
     'VERSION': '1.0.0',
     'SERVE_INCLUDE_SCHEMA': False,
+    'ENUM_NAME_OVERRIDES': {
+        'StationOperationalStatusEnum': 'renew_website.apps.charging_stations.models.Station.STATUS_CHOICES',
+        'ConnectorStatusEnum': 'renew_website.apps.charging_stations.models.Connector.STATUS_CHOICES',
+        'TransactionStatusEnum': 'renew_website.apps.charging_stations.models.Transaction.STATUS_CHOICES',
+        'EnergyRecommendationStatusEnum': 'renew_website.apps.api.energy.models.EnergyRecommendation.Status',
+    },
 }
 
 # =============================================================================

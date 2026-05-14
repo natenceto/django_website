@@ -14,15 +14,25 @@ from rest_framework.views import APIView
 from .services import InverterDataService, EVChargingOptimizer
 from .models import InverterReading, WorkMode, EnergyRecommendation
 from .serializers import (
-    InverterReadingSerializer, 
-    DashboardDataSerializer,
-    ChargingRecommendationRequestSerializer,
-    ChargingRecommendationResponseSerializer,
-    WorkModeSerializer
+    ChartDataResponseSerializer,
+    ChargingRecommendationSummarySerializer,
+    CurrentGenerationSummarySerializer,
+    EMSApplyResponseSerializer,
+    EnergyDashboardSerializer,
+    EnergyRecommendationsResponseSerializer,
+    ErrorResponseSerializer,
+    GenericStatusResponseSerializer,
+    InverterHistoryResponseSerializer,
+    InverterReadingSerializer,
+    MessageTimestampSerializer,
+    RecommendationActionResponseSerializer,
+    RecommendationHistoryResponseSerializer,
+    WorkModeSerializer,
 )
 from renew_website.apps.api.deye.cloud_client import DeyeCloudClient, DeyeCloudError, WORK_MODE_MAP
 from renew_website.apps.api.deye.manager import DeyeManager, DeyeManagerError
 from renew_website.apps.api.deye.serializers import DeyeCloudSerializer
+from renew_website.apps.api.schema import OpenApiParameter, OpenApiResponse, OpenApiTypes, extend_schema
 from renew_website.apps.charging_stations.models import MeterValue, Transaction
 from .decision_service import EnergyOrchestrator
 from .execution_service import EMSExecutionService
@@ -100,16 +110,16 @@ def _serialize_strategy_decision(state, decision, target_ev_sessions, target_ev_
 class InverterStatusView(APIView):
     """Get current status of all inverters."""
     permission_classes = [IsAuthenticated]
-    serializer_class = InverterReadingSerializer
+
+    @extend_schema(responses={200: CurrentGenerationSummarySerializer, 503: ErrorResponseSerializer})
     
     def get(self, request):
         try:
             service = InverterDataService()
             data = service.get_current_generation_summary()
-            serializer = DashboardDataSerializer(data=data)
-            if serializer.is_valid():
-                return Response(serializer.data)
-            return Response(data)
+            serializer = CurrentGenerationSummarySerializer(data=data)
+            serializer.is_valid(raise_exception=True)
+            return Response(serializer.data)
         except Exception as e:
             logger.error(f"Failed to get inverter status: {e}")
             return Response(
@@ -118,6 +128,13 @@ class InverterStatusView(APIView):
             )
 
 
+@extend_schema(
+    parameters=[
+        OpenApiParameter(name='device_sn', type=OpenApiTypes.STR, location=OpenApiParameter.PATH),
+        OpenApiParameter(name='hours', type=OpenApiTypes.INT, location=OpenApiParameter.QUERY, required=False),
+    ],
+    responses={200: InverterHistoryResponseSerializer, 503: ErrorResponseSerializer},
+)
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def inverter_history(request, device_sn):
@@ -143,7 +160,9 @@ def inverter_history(request, device_sn):
             ]
         }
         
-        return Response(data)
+        serializer = InverterHistoryResponseSerializer(data=data)
+        serializer.is_valid(raise_exception=True)
+        return Response(serializer.data)
     except Exception as e:
         logger.error(f"Failed to get inverter history: {e}")
         return Response(
@@ -152,6 +171,7 @@ def inverter_history(request, device_sn):
         )
 
 
+@extend_schema(responses={200: ChargingRecommendationSummarySerializer, 500: ErrorResponseSerializer})
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def charging_recommendation(request):
@@ -207,25 +227,19 @@ def charging_recommendation(request):
             ),
         }
         
-        return Response(response_data)
+        serializer = ChargingRecommendationSummarySerializer(data=response_data)
+        serializer.is_valid(raise_exception=True)
+        return Response(serializer.data)
         
     except Exception as e:
-        import traceback
-        import logging
-        logger = logging.getLogger(__name__)
-        logger.error(f"Charging recommendation error: {e}\\n{traceback.format_exc()}")
+        logger.error("Charging recommendation error: %s", e, exc_info=True)
         return Response(
             {"error": f"Грешка при генериране на препоръка: {e}"},
             status=500
         )
-    except Exception as e:
-        logger.error(f"Failed to get charging recommendation: {e}")
-        return Response(
-            {"error": str(e)}, 
-            status=status.HTTP_503_SERVICE_UNAVAILABLE
-        )
 
 
+@extend_schema(request=None, responses={200: MessageTimestampSerializer, 503: ErrorResponseSerializer})
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def collect_data(request):
@@ -234,10 +248,13 @@ def collect_data(request):
         service = InverterDataService()
         service.collect_current_data()
         
-        return Response({
+        response_payload = {
             "message": "Data collection completed",
             "timestamp": timezone.now().isoformat()
-        })
+        }
+        serializer = MessageTimestampSerializer(data=response_payload)
+        serializer.is_valid(raise_exception=True)
+        return Response(serializer.data)
     except Exception as e:
         logger.error(f"Failed to collect data: {e}")
         return Response(
@@ -246,6 +263,7 @@ def collect_data(request):
         )
 
 
+@extend_schema(responses={200: EnergyDashboardSerializer, 503: ErrorResponseSerializer})
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def dashboard_data(request):
@@ -434,7 +452,9 @@ def dashboard_data(request):
             ]
         }
         
-        return Response(dashboard)
+        serializer = EnergyDashboardSerializer(data=dashboard)
+        serializer.is_valid(raise_exception=True)
+        return Response(serializer.data)
         
     except Exception as e:
         logger.error(f"Failed to get dashboard data: {e}")
@@ -684,6 +704,10 @@ from django.http import HttpResponse
 import csv
 from datetime import timedelta
 
+@extend_schema(
+    parameters=[OpenApiParameter(name='range', type=OpenApiTypes.STR, location=OpenApiParameter.QUERY, required=False)],
+    responses={200: ChartDataResponseSerializer, 500: ErrorResponseSerializer},
+)
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def chart_data(request):
@@ -729,7 +753,7 @@ def chart_data(request):
             building_load.append(load)
             grid_power.append(grid)
 
-        return Response({
+        response_payload = {
             'labels': labels,
             'datasets': {
                 'pv_generation': pv_generation,
@@ -737,11 +761,18 @@ def chart_data(request):
                 'building_load': building_load,
                 'grid_power': grid_power
             }
-        })
+        }
+        serializer = ChartDataResponseSerializer(data=response_payload)
+        serializer.is_valid(raise_exception=True)
+        return Response(serializer.data)
     except Exception as e:
         logger.error(f"Error in chart_data: {e}")
         return Response({"error": str(e)}, status=500)
 
+@extend_schema(
+    parameters=[OpenApiParameter(name='range', type=OpenApiTypes.STR, location=OpenApiParameter.QUERY, required=False)],
+    responses={200: OpenApiResponse(response=OpenApiTypes.BINARY, description='CSV export')},
+)
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def export_chart_csv(request):
@@ -821,6 +852,7 @@ def start_charging_session(request):
 # Energy Recommendations API
 # ==============================
 
+@extend_schema(request=OpenApiTypes.OBJECT, responses={200: EMSApplyResponseSerializer, 400: GenericStatusResponseSerializer, 500: GenericStatusResponseSerializer})
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def direct_apply_inverter_mode(request):
@@ -843,6 +875,7 @@ def direct_apply_inverter_mode(request):
         logger.error(f"Failed to directly apply EMS allocation: {e}")
         return Response({'success': False, 'message': str(e)}, status=500)
 
+@extend_schema(responses={200: EnergyRecommendationsResponseSerializer, 500: ErrorResponseSerializer})
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def energy_recommendations(request):
@@ -880,7 +913,9 @@ def energy_recommendations(request):
             }
         }
         
-        return Response(response_data)
+        serializer = EnergyRecommendationsResponseSerializer(data=response_data)
+        serializer.is_valid(raise_exception=True)
+        return Response(serializer.data)
         
     except Exception as e:
         logger.error(f"Failed to get energy recommendations: {e}")
@@ -890,6 +925,7 @@ def energy_recommendations(request):
         )
 
 
+@extend_schema(request=None, responses={200: RecommendationActionResponseSerializer, 400: RecommendationActionResponseSerializer, 404: RecommendationActionResponseSerializer, 500: ErrorResponseSerializer})
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def apply_energy_recommendation(request, recommendation_id):
@@ -940,6 +976,7 @@ def apply_energy_recommendation(request, recommendation_id):
         )
 
 
+@extend_schema(request=None, responses={200: RecommendationActionResponseSerializer, 400: RecommendationActionResponseSerializer, 404: RecommendationActionResponseSerializer, 500: ErrorResponseSerializer})
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def ignore_energy_recommendation(request, recommendation_id):
@@ -974,6 +1011,10 @@ def ignore_energy_recommendation(request, recommendation_id):
         )
 
 
+@extend_schema(
+    parameters=[OpenApiParameter(name='limit', type=OpenApiTypes.INT, location=OpenApiParameter.QUERY, required=False)],
+    responses={200: RecommendationHistoryResponseSerializer, 500: ErrorResponseSerializer},
+)
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def energy_recommendations_history(request):
@@ -998,10 +1039,13 @@ def energy_recommendations_history(request):
                 'expires_at': rec.expires_at.isoformat()
             })
         
-        return Response({
+        response_payload = {
             'history': history_data,
             'total_count': EnergyRecommendation.objects.count()
-        })
+        }
+        serializer = RecommendationHistoryResponseSerializer(data=response_payload)
+        serializer.is_valid(raise_exception=True)
+        return Response(serializer.data)
         
     except Exception as e:
         logger.error(f"Failed to get energy recommendations history: {e}")

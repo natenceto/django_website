@@ -9,7 +9,7 @@ app_name = 'deye'
 urlpatterns = [
     # --- Основни данни за устройства (Хибридни) ---
     # Този път поддържа както специфичен SN, така и Master SN от settings
-    path('devices/latest/', views.device_latest, name='device-latest-default'),
+    path('devices/latest/', views.device_latest_default, name='device-latest-default'),
     path('devices/<str:device_sn>/latest/', views.device_latest, name='device-latest'),
     
     # --- Управление на режими (EMS) ---
