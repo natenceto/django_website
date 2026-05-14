@@ -29,7 +29,7 @@ urlpatterns = [
     path("portal/", include("renew_website.apps.admin.urls")),
     path("accounts/", include("renew_website.apps.accounts.urls")),
     path("charging_stations/", include("renew_website.apps.charging_stations.urls")),
-    path("deye/", include("renew_website.apps.api.deye.urls")),
+    path("deye/", include("renew_website.apps.api.deye.legacy_urls")),
     
     # Account Settings page
     path("account/", AccountSettingsView.as_view(), name="account"),

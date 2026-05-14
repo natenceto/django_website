@@ -10,6 +10,8 @@ from django.db.models import Sum, Count, Q
 from django.utils import timezone
 from datetime import timedelta
 
+from renew_website.apps.api.schema import OpenApiParameter, OpenApiResponse, OpenApiTypes, extend_schema
+
 from renew_website.apps.charging_stations.models import (
     Station, Connector, Transaction, MeterValue, UserRFID
 )
@@ -32,7 +34,8 @@ from .serializers import (
     StationListSerializer, StationDetailSerializer, ConnectorSerializer,
     TransactionSerializer, MeterValueSerializer, UserRFIDSerializer,
     ChargingSessionStartSerializer, ChargingSessionStopSerializer,
-    StationStatisticsSerializer
+    ChargingSessionStartResponseSerializer, ChargingSessionStopResponseSerializer,
+    V1ErrorResponseSerializer, StationStatisticsSerializer
 )
 
 
@@ -189,6 +192,24 @@ class UserRFIDViewSet(viewsets.ModelViewSet):
 class ChargingSessionView(APIView):
     """API endpoints for starting and stopping charging sessions."""
     permission_classes = [permissions.IsAuthenticated]
+
+    @extend_schema(
+        parameters=[
+            OpenApiParameter(
+                name='action_type',
+                type=OpenApiTypes.STR,
+                location=OpenApiParameter.PATH,
+                description='Supported values: start, stop',
+            )
+        ],
+        request=OpenApiTypes.OBJECT,
+        responses={
+            200: OpenApiResponse(response=OpenApiTypes.OBJECT, description='Charging session request accepted'),
+            400: V1ErrorResponseSerializer,
+            404: V1ErrorResponseSerializer,
+            502: V1ErrorResponseSerializer,
+        },
+    )
     
     def post(self, request, action_type):
         """Start or stop a charging session."""
@@ -256,15 +277,18 @@ class ChargingSessionView(APIView):
                 status=status.HTTP_502_BAD_GATEWAY
             )
         
-        return Response({
+        response_payload = {
             'message': f'Charging session start requested for station {station_id}',
             'station_id': station_id,
             'connector_id': connector_id,
             'rfid_tag': rfid_tag,
             'power_kw': power_kw,
-            'command_id': dispatch_result.command_id,
+            'command_id': str(dispatch_result.command_id),
             'session_context': session_context,
-        })
+        }
+        response_serializer = ChargingSessionStartResponseSerializer(data=response_payload)
+        response_serializer.is_valid(raise_exception=True)
+        return Response(response_serializer.data)
     
     def _stop_session(self, request):
         """Stop an active charging session."""
@@ -302,17 +326,22 @@ class ChargingSessionView(APIView):
                 status=status.HTTP_502_BAD_GATEWAY
             )
         
-        return Response({
+        response_payload = {
             'message': f'Charging session stop requested for transaction {transaction_id}',
             'transaction_id': transaction_id,
             'station_id': station_id,
-            'command_id': dispatch_result.command_id,
-        })
+            'command_id': str(dispatch_result.command_id),
+        }
+        response_serializer = ChargingSessionStopResponseSerializer(data=response_payload)
+        response_serializer.is_valid(raise_exception=True)
+        return Response(response_serializer.data)
 
 
 class StatisticsView(APIView):
     """API endpoint for charging statistics."""
     permission_classes = [permissions.IsAuthenticated]
+
+    @extend_schema(responses={200: StationStatisticsSerializer})
     
     def get(self, request):
         """Get overall charging statistics."""

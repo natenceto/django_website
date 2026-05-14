@@ -8,9 +8,11 @@ import logging
 from .services import WeatherService
 from .models import WeatherLog
 from .serializers import WeatherLogSerializer
+from renew_website.apps.api.schema import OpenApiResponse, OpenApiTypes, extend_schema
 
 logger = logging.getLogger(__name__)
 
+@extend_schema(responses={200: WeatherLogSerializer, 503: OpenApiResponse(response=OpenApiTypes.OBJECT)})
 @api_view(['GET'])
 # @permission_classes([IsAuthenticated]) # Optional: public weather endpoint?
 def current_weather(request):
@@ -36,6 +38,7 @@ def current_weather(request):
     
     return Response({"error": "Failed to fetch weather data"}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
 
+@extend_schema(request=None, responses={200: WeatherLogSerializer, 503: OpenApiResponse(response=OpenApiTypes.OBJECT)})
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def fetch_weather(request):
