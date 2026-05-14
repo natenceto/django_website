@@ -8,6 +8,7 @@ from channels.layers import get_channel_layer
 
 from .models import Station, Connector, Transaction, MeterValue
 from .components import EVStationComponent
+from .live_state import update_station_live_state_from_event
 
 logger = logging.getLogger(__name__)
 
@@ -15,6 +16,7 @@ logger = logging.getLogger(__name__)
 # Помощна функция за изпращане към WebSocket групата
 def send_to_ui(data):
     try:
+        update_station_live_state_from_event(data)
         channel_layer = get_channel_layer()
         if channel_layer:
             async_to_sync(channel_layer.group_send)(
@@ -31,6 +33,15 @@ def _format_requested_power_display(tx):
     if tx.requested_power_kw is not None:
         return f"{float(tx.requested_power_kw):.2f} kW"
     return 'Station default'
+
+
+def _latest_session_context(tx):
+    latest_meter = tx.meter_values.order_by('-timestamp', '-id').first()
+    if latest_meter and isinstance(latest_meter.data, dict):
+        session_context = latest_meter.data.get('session_context')
+        if isinstance(session_context, dict) and session_context:
+            return dict(session_context)
+    return {}
 
 # ==========================================
 # 1. СИГНАЛИ (Event Signals) към други модули
@@ -62,12 +73,14 @@ def process_meter_values(station_id, connector_id, transaction_id, power_w, ener
 
         # 1. Запис на телеметрията (опционално: само ако транзакцията е активна)
         if tx:
+            meter_payload = dict(mv_data or {})
+            meter_payload['session_context'] = _latest_session_context(tx)
             MeterValue.objects.create(
                 transaction=tx,
                 power_w=power_w,
                 energy_wh=energy_wh,
                 soc_percentage=soc_percentage,
-                data=mv_data or {},
+                data=meter_payload,
                 timestamp=timezone.now()
             )
 

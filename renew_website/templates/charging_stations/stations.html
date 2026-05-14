@@ -20,6 +20,47 @@
   .badge { transition: all 0.3s ease; }
   .badge-primary { animation: charging-pulse 1.5s infinite; }
 
+  .snapshot-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.75rem;
+  }
+
+  .snapshot-item {
+    border: 1px solid rgba(0, 0, 0, 0.08);
+    border-radius: 0.5rem;
+    padding: 0.6rem 0.75rem;
+    background: rgba(248, 249, 252, 0.85);
+  }
+
+  .snapshot-label {
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #6c757d;
+    margin-bottom: 0.2rem;
+  }
+
+  .snapshot-value {
+    font-size: 1rem;
+    font-weight: 700;
+    color: #2f3640;
+    line-height: 1.2;
+  }
+
+  .snapshot-meta {
+    font-size: 0.8rem;
+    color: #6c757d;
+    margin-top: 0.2rem;
+  }
+
+  @media (max-width: 575.98px) {
+    .snapshot-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+
   #dashboard-cards .card {
     transition: transform 0.2s ease, box-shadow 0.2s ease;
   }
@@ -47,21 +88,36 @@
         <div class="card-body">
           <div class="row no-gutters align-items-center">
             <div class="col mr-2">
-              <div class="text-xs font-weight-bold text-primary text-uppercase mb-1">Live Session Snapshot</div>
-              <div class="h5 mb-0 font-weight-bold text-gray-800" id="metric-vehicle-soc">
-                {% if stats.vehicle_soc is not None %}
-                {{ stats.vehicle_soc|floatformat:2 }} %
-                {% else %}
-                --
-                {% endif %}
+              <div class="d-flex align-items-center justify-content-between mb-2">
+                <div class="text-xs font-weight-bold text-primary text-uppercase">Latest Session Snapshot</div>
+                <span class="badge badge-light" id="metric-session-status">{{ stats.session_status_label }}</span>
               </div>
-              <div class="small text-muted mt-2">Requested Power</div>
-              <div class="small font-weight-bold text-gray-800" id="metric-requested-power">{{ stats.requested_power_display }}</div>
-              <div class="small text-muted" id="metric-requested-power-mode">{{ stats.requested_power_mode_label }}</div>
-              <div class="small text-muted mt-2">Charging Power (Actual)</div>
-              <div class="small font-weight-bold text-gray-800" id="metric-actual-power">{{ stats.actual_power_display }}</div>
-              <div class="small text-muted mt-2">EMS Limit</div>
-              <div class="small font-weight-bold text-gray-800" id="metric-ems-limit">{{ stats.ems_limit_display }}</div>
+              <div class="snapshot-grid">
+                <div class="snapshot-item">
+                  <div class="snapshot-label">Vehicle SoC</div>
+                  <div class="snapshot-value" id="metric-vehicle-soc">
+                    {% if stats.vehicle_soc is not None %}
+                    {{ stats.vehicle_soc|floatformat:2 }} %
+                    {% else %}
+                    --
+                    {% endif %}
+                  </div>
+                </div>
+                <div class="snapshot-item">
+                  <div class="snapshot-label">Requested Power</div>
+                  <div class="snapshot-value" id="metric-requested-power">{{ stats.requested_power_display }}</div>
+                  <div class="snapshot-meta" id="metric-requested-power-mode">{{ stats.requested_power_mode_label }}</div>
+                </div>
+                <div class="snapshot-item">
+                  <div class="snapshot-label">Actual Power</div>
+                  <div class="snapshot-value" id="metric-actual-power">{{ stats.actual_power_display }}</div>
+                </div>
+                <div class="snapshot-item">
+                  <div class="snapshot-label">Energy</div>
+                  <div class="snapshot-value" id="metric-energy-session">{{ stats.energy_display }}</div>
+                  <div class="snapshot-meta">EMS <span id="metric-ems-limit">{{ stats.ems_limit_display }}</span></div>
+                </div>
+              </div>
             </div>
             <div class="col-auto">
               <i class="fas fa-car-battery fa-2x text-gray-300"></i>

@@ -12,6 +12,7 @@ from ..models import Transaction
 SIMULATOR_MODEL_SIGNATURES = ("simulator", "simulation", "avt-express")
 MIN_REAL_CHARGE_KWH = Decimal("0.05")
 LONG_SESSION_NO_ENERGY_SECONDS = 300
+DEFAULT_TEST_RFID_TAG = "000000010160897"
 
 
 def _align_datetime_for_project_timezone(value: datetime) -> datetime:
@@ -123,6 +124,9 @@ def _is_simulated_station(tx: Transaction) -> bool:
         or session_context.get("runtime_type")
     )
     if source in {"simulator", "simulation", "simulated"}:
+        return True
+
+    if _normalized_text(getattr(tx, "id_tag", "")) == DEFAULT_TEST_RFID_TAG:
         return True
 
     if _normalized_text(getattr(tx, "id_tag", "")).startswith("simulated_"):

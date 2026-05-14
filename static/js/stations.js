@@ -180,6 +180,30 @@ document.addEventListener("DOMContentLoaded", function () {
     }
   }
 
+  function updateSessionStatusBadge(statusLabel) {
+    const badge = document.getElementById('metric-session-status');
+    if (!badge) {
+      return;
+    }
+
+    let badgeClass = 'badge badge-light';
+    const normalized = String(statusLabel || '').toLowerCase();
+    if (normalized.includes('active') || normalized.includes('charging')) {
+      badgeClass = 'badge badge-success';
+    } else if (normalized.includes('preparing') || normalized.includes('finishing')) {
+      badgeClass = 'badge badge-info';
+    } else if (normalized.includes('completed') || normalized.includes('available')) {
+      badgeClass = 'badge badge-secondary';
+    } else if (normalized.includes('offline') || normalized.includes('inactive')) {
+      badgeClass = 'badge badge-dark';
+    } else if (normalized.includes('maintenance')) {
+      badgeClass = 'badge badge-warning';
+    }
+
+    badge.className = badgeClass;
+    badge.textContent = statusLabel;
+  }
+
   function updateDashboardCard(elementId, value, animate = true) {
     const element = document.getElementById(elementId);
     if (!element) {
@@ -199,14 +223,16 @@ document.addEventListener("DOMContentLoaded", function () {
     element.textContent = value;
   }
 
-  function updateVehicleSoc(stationId, socPercentage) {
+  function updateVehicleSoc(stationId, socPercentage, updateSummary = true) {
     const tableCell = document.getElementById(`soc-${stationId}`);
 
     if (socPercentage === null || socPercentage === undefined || socPercentage === '') {
       if (tableCell) {
         tableCell.innerHTML = '<span>--</span>';
       }
-      updateDashboardCard('metric-vehicle-soc', '--', false);
+      if (updateSummary) {
+        updateDashboardCard('metric-vehicle-soc', '--', false);
+      }
       return;
     }
 
@@ -215,7 +241,9 @@ document.addEventListener("DOMContentLoaded", function () {
       if (tableCell) {
         tableCell.innerHTML = '<span>--</span>';
       }
-      updateDashboardCard('metric-vehicle-soc', '--', false);
+      if (updateSummary) {
+        updateDashboardCard('metric-vehicle-soc', '--', false);
+      }
       return;
     }
 
@@ -223,7 +251,9 @@ document.addEventListener("DOMContentLoaded", function () {
     if (tableCell) {
       tableCell.innerHTML = `<span>${formattedSoc}</span>`;
     }
-    updateDashboardCard('metric-vehicle-soc', formattedSoc, false);
+    if (updateSummary) {
+      updateDashboardCard('metric-vehicle-soc', formattedSoc, false);
+    }
   }
 
   function humanizeRequestedMode(requestedMode) {
@@ -233,7 +263,7 @@ document.addEventListener("DOMContentLoaded", function () {
     return String(requestedMode || '--').replace(/-/g, ' ');
   }
 
-  function updatePowerState(stationId, powerState = {}) {
+  function updatePowerState(stationId, powerState = {}, updateSummary = true) {
     const requestedCell = document.getElementById(`requested-power-${stationId}`);
     const requestedModeCell = document.getElementById(`requested-power-mode-${stationId}`);
     const actualCell = document.getElementById(`actual-power-${stationId}`);
@@ -243,6 +273,7 @@ document.addEventListener("DOMContentLoaded", function () {
     const requestedMode = powerState.requested_power_mode || '--';
     const actualPowerKw = powerState.actual_power_kw;
     const emsLimitKw = powerState.ems_limit_kw;
+    const energyKwh = powerState.energy_kwh;
 
     if (requestedCell && requestedCell.firstElementChild) {
       requestedCell.firstElementChild.textContent = requestedDisplay;
@@ -263,34 +294,43 @@ document.addEventListener("DOMContentLoaded", function () {
       emsLimitCell.textContent = emsValue;
     }
 
-    updateDashboardCard('metric-requested-power', requestedDisplay, false);
-    const requestedModeSummary = document.getElementById('metric-requested-power-mode');
-    if (requestedModeSummary) {
-      requestedModeSummary.textContent = humanizeRequestedMode(requestedMode);
+    if (updateSummary) {
+      updateDashboardCard('metric-requested-power', requestedDisplay, false);
+      const requestedModeSummary = document.getElementById('metric-requested-power-mode');
+      if (requestedModeSummary) {
+        requestedModeSummary.textContent = humanizeRequestedMode(requestedMode);
+      }
+      updateDashboardCard(
+        'metric-actual-power',
+        actualPowerKw === null || actualPowerKw === undefined || Number.isNaN(Number(actualPowerKw))
+          ? '--'
+          : `${Number(actualPowerKw).toFixed(2)} kW`,
+        false,
+      );
+      updateDashboardCard(
+        'metric-ems-limit',
+        emsLimitKw === null || emsLimitKw === undefined || Number.isNaN(Number(emsLimitKw))
+          ? '--'
+          : `${Number(emsLimitKw).toFixed(2)} kW`,
+        false,
+      );
+      updateDashboardCard(
+        'metric-energy-session',
+        energyKwh === null || energyKwh === undefined || Number.isNaN(Number(energyKwh))
+          ? '--'
+          : `${Number(energyKwh).toFixed(2)} kWh`,
+        false,
+      );
     }
-    updateDashboardCard(
-      'metric-actual-power',
-      actualPowerKw === null || actualPowerKw === undefined || Number.isNaN(Number(actualPowerKw))
-        ? '--'
-        : `${Number(actualPowerKw).toFixed(2)} kW`,
-      false,
-    );
-    updateDashboardCard(
-      'metric-ems-limit',
-      emsLimitKw === null || emsLimitKw === undefined || Number.isNaN(Number(emsLimitKw))
-        ? '--'
-        : `${Number(emsLimitKw).toFixed(2)} kW`,
-      false,
-    );
   }
 
-  function resetPowerState(stationId) {
+  function resetPowerState(stationId, updateSummary = false) {
     updatePowerState(stationId, {
       requested_power_display: '--',
       requested_power_mode: '--',
       actual_power_kw: null,
       ems_limit_kw: null,
-    });
+    }, updateSummary);
   }
 
   function connectStatusWebSocket() {
@@ -383,6 +423,7 @@ document.addEventListener("DOMContentLoaded", function () {
             if (connectorStatus === 'charging') {
               statusClass = 'badge-primary';
               statusText = 'Charging';
+              updateSessionStatusBadge('Active');
               if (!wasCharging) {
                 dashboardMetrics.activeSessions++;
                 updateDashboardCard('metric-sessions', dashboardMetrics.activeSessions);
@@ -390,8 +431,9 @@ document.addEventListener("DOMContentLoaded", function () {
             } else if (connectorStatus === 'available') {
               statusClass = 'badge-success';
               statusText = 'Available';
-              updateVehicleSoc(stationId, null);
-              resetPowerState(stationId);
+              updateSessionStatusBadge('Completed');
+              updateVehicleSoc(stationId, null, false);
+              resetPowerState(stationId, false);
               if (wasCharging) {
                 dashboardMetrics.activeSessions = Math.max(0, dashboardMetrics.activeSessions - 1);
                 updateDashboardCard('metric-sessions', dashboardMetrics.activeSessions);
@@ -399,14 +441,20 @@ document.addEventListener("DOMContentLoaded", function () {
             } else if (connectorStatus === 'preparing') {
               statusClass = 'badge-info';
               statusText = 'Preparing';
+              updateSessionStatusBadge('Preparing');
+            } else if (connectorStatus === 'finishing') {
+              statusClass = 'badge-warning';
+              statusText = 'Finishing';
+              updateSessionStatusBadge('Finishing');
             } else if (connectorStatus === 'faulted') {
               statusClass = 'badge-danger';
               statusText = 'Faulted';
             } else if (connectorStatus === 'offline') {
               statusClass = 'badge-dark';
               statusText = 'Offline';
-              updateVehicleSoc(stationId, null);
-              resetPowerState(stationId);
+              updateSessionStatusBadge('Offline');
+              updateVehicleSoc(stationId, null, false);
+              resetPowerState(stationId, false);
               if (wasCharging) {
                 dashboardMetrics.activeSessions = Math.max(0, dashboardMetrics.activeSessions - 1);
                 updateDashboardCard('metric-sessions', dashboardMetrics.activeSessions);
@@ -443,6 +491,7 @@ document.addEventListener("DOMContentLoaded", function () {
             if (data.status === 'active') {
               statusClass = 'badge-success';
               statusText = 'Active';
+              updateSessionStatusBadge('Active');
               if (!wasActive) {
                 dashboardMetrics.onlineStations++;
                 updateDashboardCard('metric-online', dashboardMetrics.onlineStations);
@@ -450,6 +499,7 @@ document.addEventListener("DOMContentLoaded", function () {
             } else if (data.status === 'inactive') {
               statusClass = 'badge-secondary';
               statusText = 'Inactive';
+              updateSessionStatusBadge('Offline');
               if (wasActive) {
                 dashboardMetrics.onlineStations = Math.max(0, dashboardMetrics.onlineStations - 1);
                 updateDashboardCard('metric-online', dashboardMetrics.onlineStations);
@@ -458,8 +508,8 @@ document.addEventListener("DOMContentLoaded", function () {
               if (connectorCell) {
                 const wasCharging = connectorCell.innerHTML.includes('Charging');
                 connectorCell.innerHTML = '<span class="badge badge-dark">Offline</span>';
-                updateVehicleSoc(data.station_id, null);
-                resetPowerState(data.station_id);
+                updateVehicleSoc(data.station_id, null, false);
+                resetPowerState(data.station_id, false);
                 if (wasCharging) {
                   dashboardMetrics.activeSessions = Math.max(0, dashboardMetrics.activeSessions - 1);
                   updateDashboardCard('metric-sessions', dashboardMetrics.activeSessions);
@@ -468,6 +518,7 @@ document.addEventListener("DOMContentLoaded", function () {
             } else if (data.status === 'maintenance') {
               statusClass = 'badge-warning';
               statusText = 'Maintenance';
+              updateSessionStatusBadge('Maintenance');
             }
 
             statusCell.innerHTML = `<span class="badge ${statusClass}">${statusText}</span>`;
@@ -493,6 +544,9 @@ document.addEventListener("DOMContentLoaded", function () {
               } else if (data.connector_status === 'preparing') {
                 statusClass = 'badge-info';
                 statusText = 'Preparing';
+              } else if (data.connector_status === 'finishing') {
+                statusClass = 'badge-warning';
+                statusText = 'Finishing';
               } else if (data.connector_status === 'faulted') {
                 statusClass = 'badge-danger';
                 statusText = 'Faulted';

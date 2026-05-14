@@ -1,5 +1,17 @@
 from .ocpp_command_bus import CommandDispatchError, StartChargingCommand, StopChargingCommand, command_bus
 from ..models import UserRFID, Transaction, Connector, Station
+from ..tasks import send_to_ui
+
+
+DEFAULT_TEST_RFID_TAG = "000000010160897"
+
+
+def _format_requested_power_display(requested_power_kw, requested_power_mode):
+    if requested_power_mode == "auto" and requested_power_kw is None:
+        return "Auto"
+    if requested_power_kw is not None:
+        return f"{float(requested_power_kw):.2f} kW"
+    return "Station default"
 
 def execute_station_action(action: str, station_ids: list, power: str = None) -> tuple[int, int, str]:
     """
@@ -9,10 +21,10 @@ def execute_station_action(action: str, station_ids: list, power: str = None) ->
     if not station_ids:
         return 0, 0, "No station selected."
         
-    valid_rfid = UserRFID.objects.filter(tag="000000010160897").first()
+    valid_rfid = UserRFID.objects.filter(tag=DEFAULT_TEST_RFID_TAG).first()
     if not valid_rfid:
         valid_rfid = UserRFID.objects.create(
-            tag="000000010160897",
+            tag=DEFAULT_TEST_RFID_TAG,
             owner_name="Default Test Tag"
         )
 
@@ -42,6 +54,14 @@ def execute_station_action(action: str, station_ids: list, power: str = None) ->
                     station = Station.objects.get(id=station_id)
                     power_limit = station.power_output
 
+                session_context = {
+                    "command_source": "operator_ui",
+                    "requested_power_mode": power_mode,
+                }
+                if valid_rfid.tag == DEFAULT_TEST_RFID_TAG:
+                    session_context.setdefault("session_source", "simulated")
+                    session_context.setdefault("runtime_type", "simulated")
+
                 try:
                     command_bus.dispatch(
                         StartChargingCommand(
@@ -49,12 +69,25 @@ def execute_station_action(action: str, station_ids: list, power: str = None) ->
                             connector_id=connector.connector_id,
                             id_tag=valid_rfid.tag,
                             requested_power_kw=power_limit,
-                            session_context={
-                                "command_source": "operator_ui",
-                                "requested_power_mode": power_mode,
-                            },
+                            session_context=session_context,
                         )
                     )
+                    send_to_ui({
+                        "type": "station_power_update",
+                        "station_id": station_id,
+                        "requested_power_kw": power_limit,
+                        "requested_power_mode": power_mode,
+                        "requested_power_display": _format_requested_power_display(power_limit, power_mode),
+                        "actual_power_kw": None,
+                        "ems_limit_kw": None,
+                        "energy_kwh": 0.0,
+                    })
+                    send_to_ui({
+                        "type": "connector_status_update",
+                        "station_id": station_id,
+                        "status": "active",
+                        "connector_status": "preparing",
+                    })
                     results.append(f"Station {station_id}: RemoteStartTransaction queued for station dispatch")
                     success_count += 1
                 except CommandDispatchError as exc:
@@ -76,6 +109,12 @@ def execute_station_action(action: str, station_ids: list, power: str = None) ->
                                 transaction_id=ocpp_transaction_id,
                             )
                         )
+                        send_to_ui({
+                            "type": "connector_status_update",
+                            "station_id": station_id,
+                            "status": "active",
+                            "connector_status": "finishing",
+                        })
                         results.append(f"Station {station_id}: RemoteStopTransaction queued for station dispatch")
                         success_count += 1
                     except CommandDispatchError as exc:
