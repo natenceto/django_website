@@ -1,3 +1,19 @@
+x-django-common-env: &django-common-env
+  SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in .env}
+  ALLOWED_HOSTS: localhost,127.0.0.1,192.168.88.247
+  CSRF_TRUSTED_ORIGINS: http://localhost,http://127.0.0.1,http://192.168.88.247,https://localhost,https://127.0.0.1,https://192.168.88.247
+  CORS_ALLOWED_ORIGINS: http://localhost,http://127.0.0.1,http://192.168.88.247,https://localhost,https://127.0.0.1,https://192.168.88.247
+  POSTGRES_DB: ${POSTGRES_DB:-renew_db}
+  POSTGRES_USER: ${POSTGRES_USER:-renew_user}
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+  POSTGRES_HOST: db
+  POSTGRES_PORT: 5432
+  REDIS_URL: redis://redis:6379/0
+  CELERY_BROKER_URL: redis://redis:6379/0
+  CELERY_RESULT_BACKEND: redis://redis:6379/0
+  USE_REDIS_CHANNEL_LAYER: 1
+  SECURE_SSL_REDIRECT: ${SECURE_SSL_REDIRECT:-0}
+
 services:
   # PostgreSQL Database
   db:
@@ -6,7 +22,7 @@ services:
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     restart: unless-stopped
@@ -40,20 +56,11 @@ services:
       - static_volume:/app/staticfiles
       - media_volume:/app/media
     environment:
-      - DEBUG=False
-      - SECRET_KEY=${SECRET_KEY}
-      - ALLOWED_HOSTS=${ALLOWED_HOSTS}
-      - CSRF_TRUSTED_ORIGINS=${CSRF_TRUSTED_ORIGINS}
-      - CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS}
-      - POSTGRES_DB=${POSTGRES_DB}
-      - POSTGRES_USER=${POSTGRES_USER}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
-      - POSTGRES_HOST=db
-      - POSTGRES_PORT=5432
-      - CELERY_BROKER_URL=redis://redis:6379/0
-      - CELERY_RESULT_BACKEND=redis://redis:6379/0
-      - RUN_DB_MIGRATIONS=1
-      - RUN_COLLECTSTATIC=1
+      <<: *django-common-env
+      DEBUG: False
+      RUN_DB_MIGRATIONS: 1
+      RUN_COLLECTSTATIC: 1
+      ENABLE_API_DOCS: ${ENABLE_API_DOCS:-0}
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8000/health/ || exit 1"]
       interval: 30s
@@ -73,16 +80,10 @@ services:
     container_name: renew_celery_worker_prod
     command: celery -A renew_website worker --loglevel=info
     environment:
-      - DEBUG=False
-      - POSTGRES_DB=${POSTGRES_DB}
-      - POSTGRES_USER=${POSTGRES_USER}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
-      - POSTGRES_HOST=db
-      - POSTGRES_PORT=5432
-      - CELERY_BROKER_URL=redis://redis:6379/0
-      - CELERY_RESULT_BACKEND=redis://redis:6379/0
-      - RUN_DB_MIGRATIONS=0
-      - RUN_COLLECTSTATIC=0
+      <<: *django-common-env
+      DEBUG: False
+      RUN_DB_MIGRATIONS: 0
+      RUN_COLLECTSTATIC: 0
     restart: unless-stopped
     depends_on:
       - db
@@ -94,16 +95,10 @@ services:
     container_name: renew_celery_beat_prod
     command: celery -A renew_website beat --loglevel=info
     environment:
-      - DEBUG=False
-      - POSTGRES_DB=${POSTGRES_DB}
-      - POSTGRES_USER=${POSTGRES_USER}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
-      - POSTGRES_HOST=db
-      - POSTGRES_PORT=5432
-      - CELERY_BROKER_URL=redis://redis:6379/0
-      - CELERY_RESULT_BACKEND=redis://redis:6379/0
-      - RUN_DB_MIGRATIONS=0
-      - RUN_COLLECTSTATIC=0
+      <<: *django-common-env
+      DEBUG: False
+      RUN_DB_MIGRATIONS: 0
+      RUN_COLLECTSTATIC: 0
     restart: unless-stopped
     depends_on:
       - db
@@ -114,7 +109,8 @@ services:
     image: nginx:1.25-alpine
     container_name: renew_nginx_prod
     ports:
-      - "80:80"
+      - "127.0.0.1:80:80"
+      - "192.168.88.247:80:80"
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/conf.d:/etc/nginx/conf.d:ro

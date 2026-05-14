@@ -125,16 +125,28 @@ run_docker_setup() {
     sleep 5
 
     echo "--> Running database migrations in the web container..."
-    (cd "$PROJECT_ROOT" && $COMPOSE_CMD exec web python manage.py migrate)
+    (cd "$PROJECT_ROOT" && $COMPOSE_CMD exec -T web python manage.py migrate)
 
-    echo ""
-    echo "=== Create Admin User ==="
-    read -r -p "Do you want to create a superuser now? (y/n) " create_admin
+    echo "--> Running Django system checks..."
+    (cd "$PROJECT_ROOT" && $COMPOSE_CMD exec -T web python manage.py check)
 
-    if [[ "$create_admin" =~ ^[Yy]$ ]]; then
-        (cd "$PROJECT_ROOT" && $COMPOSE_CMD exec web python manage.py createsuperuser)
+    local superuser_count
+    superuser_count="$(cd "$PROJECT_ROOT" && $COMPOSE_CMD exec -T web python manage.py shell -c "from django.contrib.auth import get_user_model; print(get_user_model().objects.filter(is_superuser=True).count())")"
+    superuser_count="$(echo "$superuser_count" | tr -dc '0-9')"
+
+    if [[ "${superuser_count:-0}" == "0" ]]; then
+        echo ""
+        echo "=== Create Admin User ==="
+        read -r -p "No superuser exists yet. Do you want to create one now? (y/n) " create_admin
+
+        if [[ "$create_admin" =~ ^[Yy]$ ]]; then
+            (cd "$PROJECT_ROOT" && $COMPOSE_CMD exec web python manage.py createsuperuser)
+        else
+            echo "Skipping superuser creation. You can run it later with:"
+            echo "$COMPOSE_CMD exec web python manage.py createsuperuser"
+        fi
     else
-        echo "Skipping superuser creation."
+        echo "--> Superuser already exists. Skipping superuser prompt."
     fi
 
     echo ""

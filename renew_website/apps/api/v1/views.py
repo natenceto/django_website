@@ -42,7 +42,7 @@ class StationViewSet(viewsets.ModelViewSet):
     destroy: Delete a station (admin only)
     """
     queryset = Station.objects.all().prefetch_related('connectors')
-    permission_classes = [permissions.IsAuthenticatedOrReadOnly]
+    permission_classes = [permissions.IsAuthenticated]
     
     def get_serializer_class(self):
         if self.action == 'list':
@@ -101,7 +101,7 @@ class ConnectorViewSet(viewsets.ReadOnlyModelViewSet):
     """ViewSet for viewing connectors."""
     queryset = Connector.objects.all().select_related('station')
     serializer_class = ConnectorSerializer
-    permission_classes = [permissions.IsAuthenticatedOrReadOnly]
+    permission_classes = [permissions.IsAuthenticated]
     
     def get_queryset(self):
         queryset = Connector.objects.all().select_related('station')

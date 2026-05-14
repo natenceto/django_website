@@ -1,177 +1,192 @@
 # RENEW
 
-RENEW is a Django-based web application for managing electric vehicle charging stations and renewable energy integrations. The platform supports station management, OCPP communication, weather and energy data, and role-based administration.
+RENEW is a Django-based EV charging platform with OCPP 1.6 communication, PostgreSQL persistence, Redis-backed realtime delivery, Celery background tasks, charging analytics, and Deye energy integrations.
 
-The project title: Research and development of a smart Energy system for eco-charging of electric vehicles, using reNEWable energy sources.
+The project title is: Research and development of a smart energy system for eco-charging of electric vehicles, using renewable energy sources.
 
-## Features
+## Access Policy
 
-- Station owner registration and management
-- Charging station onboarding and monitoring
-- OCPP 1.6 real-time communication
-- Weather and solar irradiance integration
-- Role-based access for administrators, station owners, and end users
+The project is intentionally restricted to these access hosts only:
 
-## Tech Stack & Requirements
+- `localhost`
+- `127.0.0.1`
+- `192.168.88.247`
 
-- Python 3.12+
+Do not add other public hosts unless you intentionally broaden the deployment model.
+
+## Stack
+
+- Python 3.12
 - Django 5.2
-- PostgreSQL 15+
-- Redis 7+
-- Docker with Docker Compose V2 for the containerized setup
-- Frontend: HTML, CSS, JavaScript
+- PostgreSQL 15
+- Redis 7
+- Django Channels
+- Celery + django-celery-beat + django-celery-results
+- Gunicorn/Uvicorn workers for container runtime
+- Docker Compose V2
 
-## Installation
+## First Start
 
-### Quick Start
-
-1. Clone the repository:
+Always start with `setup.sh` after cloning the project.
 
 ```bash
 git clone <repository-url>
 cd django_website
-```
-
-2. Run the startup script before any `docker compose up --build` or manual Django commands:
-
-```bash
 ./setup.sh
 ```
 
-The script performs the required pre-Docker preparation automatically:
+`setup.sh` is the canonical bootstrap entrypoint. It does the initial preparation in the correct order:
 
-- creates `.env` from `.env.example` when missing
-- creates `.venv`
-- activates `.venv` for the setup process
-- installs Python dependencies from `requirements/dev.txt`
-- checks Docker and Docker Compose availability
-- starts the containers and runs migrations when Docker is usable
-- falls back to local preparation instructions when Docker is unavailable
+1. Creates `.env` from `.env.example` if it is missing.
+2. Creates `.venv` if it is missing.
+3. Installs `requirements/dev.txt` into `.venv`.
+4. Verifies Docker and Docker Compose availability.
+5. Starts the local stack with `docker compose up --build -d` when Docker is available.
+6. Runs `python manage.py migrate`.
+7. Runs `python manage.py check`.
+8. Prompts to create a superuser only when no superuser exists yet.
 
-3. If you want the virtual environment active in your current terminal after the script finishes, run:
+If you want the virtual environment active in your current shell after the script finishes:
 
 ```bash
 source .venv/bin/activate
 ```
 
-### What happens if Docker is not installed?
+## Environment Configuration
 
-`./setup.sh` still performs the Python-side preparation and then stops before infrastructure startup. It prints the local next steps:
+The project reads configuration from `.env`. Start from `.env.example` and review at least these keys:
 
-- install and start PostgreSQL
-- install and start Redis if Channels/Celery are needed
-- update `.env` for the local database host and credentials
-- run `python manage.py migrate`
-- run `python manage.py createsuperuser`
-- start the app with `uvicorn renew_website.asgi:application --host 0.0.0.0 --port 8000 --reload`
-
-You can also force this behavior explicitly with:
-
-```bash
-./setup.sh local
+```env
+SECRET_KEY=change-this-secret-key-in-production-keep-it-secure
+DEBUG=True
+ENABLE_API_DOCS=True
+ALLOWED_HOSTS=localhost,127.0.0.1,192.168.88.247
+CSRF_TRUSTED_ORIGINS=http://localhost,http://127.0.0.1,http://192.168.88.247,http://localhost:8000,http://127.0.0.1:8000,http://192.168.88.247:8000
+CORS_ALLOWED_ORIGINS=http://localhost,http://127.0.0.1,http://192.168.88.247,http://localhost:8000,http://127.0.0.1:8000,http://192.168.88.247:8000
+POSTGRES_DB=renew_db
+POSTGRES_USER=renew_user
+POSTGRES_PASSWORD=your-secure-password
+POSTGRES_HOST=localhost
+POSTGRES_PORT=5432
+REDIS_URL=redis://localhost:6379/0
+USE_REDIS_CHANNEL_LAYER=True
+POSTGRES_CONN_MAX_AGE=60
+SECURE_SSL_REDIRECT=False
 ```
 
-### Docker Setup
+Important notes:
 
-For normal development, prefer `./setup.sh` instead of invoking Docker directly first. If the environment is already prepared and you only need to restart services later, you can use:
+- `POSTGRES_PASSWORD` must be set explicitly. There is no weak fallback in Compose anymore.
+- Redis is the expected backend for Channels, Celery, and cache in containerized runs.
+- API docs are enabled only when `ENABLE_API_DOCS=True`.
+- `SECURE_SSL_REDIRECT` should stay `False` until you actually terminate TLS in front of Django.
+
+## Local Docker Workflow
+
+Use this for day-to-day development after `setup.sh` has prepared the environment:
 
 ```bash
 docker compose up -d --build
+docker compose logs -f web
+docker compose down
 ```
 
-For production:
+The development stack behavior is:
+
+- Django app on `http://localhost:8000`
+- Django app also reachable on `http://192.168.88.247:8000`
+- PostgreSQL published only to `127.0.0.1:5432`
+- Redis published only to `127.0.0.1:6379`
+- Flower published only to `127.0.0.1:5555`
+
+## Production-Style Docker Workflow
+
+Use the production compose file when you want Gunicorn + Nginx + restart policies:
 
 ```bash
 docker compose -f docker-compose.prod.yml up -d --build
+docker compose -f docker-compose.prod.yml logs -f web
+docker compose -f docker-compose.prod.yml down
 ```
 
-## Key Packages
+Current production-style behavior:
 
-### Core Dependencies
-- `Django==5.2` - Web framework
-- `psycopg==3.2.10` - PostgreSQL adapter
-- `python-dotenv==1.1.1` - Environment variables
+- Gunicorn runs the ASGI app with Uvicorn workers.
+- Nginx listens only on `localhost:80` and `192.168.88.247:80`.
+- Nginx rejects host headers outside the allowed host set.
+- WebSocket traffic is rate-limited in the reverse proxy.
+- API docs are disabled by default.
 
-### WebSocket & Real-time
-- `channels==4.3.1` - Django Channels for WebSockets
-- `channels-redis==4.2.1` - Redis channel layer
-- `uvicorn==0.37.0` - ASGI server
-- `websockets==13.1` - WebSocket support
+TLS note:
 
-### OCPP Protocol
-- `ocpp==0.17.0` - Open Charge Point Protocol implementation
+- The project is prepared for secure-cookie and proxy-aware HTTPS behavior when `DEBUG=False`.
+- If you add real TLS termination, set `SECURE_SSL_REDIRECT=True` and configure certificates at the reverse proxy layer.
+- Do not force HTTPS redirects before the proxy actually serves HTTPS, or you will create redirect loops or a broken deployment.
 
-### REST API
-- `djangorestframework==3.15.2` - Django REST framework
-- `drf-spectacular==0.28.0` - API documentation
-- `django-cors-headers==4.6.0` - CORS support
+## Superuser Creation
 
-## Usage
+Interactive superuser creation during `setup.sh` is the better default practice for this repository.
 
-- Administrator can manage all aspects of the platform.  
-- Station Owners can add new stations and track their station info.  
-- Users can view charging sessions and history.
+Why:
 
-### OCPP WebSocket Connections
+- It avoids hardcoded credentials.
+- It avoids creating admin accounts during every container boot.
+- It only prompts when no superuser exists.
 
-The platform supports OCPP 1.6 protocol for real-time communication with charging stations:
+If you need a non-interactive bootstrap for automation, use environment variables and run:
 
-**WebSocket Endpoint:** `ws://your-server:8000/ws/charging_stations/{station_id}/`
-
-**Setup Hostname (Optional):**
 ```bash
-./setup_hostname.sh
-# This adds 'renew' to /etc/hosts for local testing
+DJANGO_SUPERUSER_CREATE=1 \
+DJANGO_SUPERUSER_USERNAME=admin \
+DJANGO_SUPERUSER_EMAIL=admin@example.com \
+DJANGO_SUPERUSER_PASSWORD=change-me \
+python setup_superuser.py
 ```
 
-**Example Connections:**
-- `ws://localhost:8000/ws/charging_stations/1/`
-- `ws://192.168.1.100:8000/ws/charging_stations/1/`
-- `ws://renew:8000/ws/charging_stations/1/` (after hostname setup)
+The entrypoint does not auto-create a superuser unless that flag is explicitly enabled.
 
-**Supported OCPP Actions:**
-- BootNotification
-- Heartbeat
-- Authorize
-- StartTransaction
-- StopTransaction
-- StatusNotification
-- MeterValues
+## Manual Local Workflow Without Docker
 
-## Testing
+If Docker is unavailable, `./setup.sh local` prepares `.venv` and prints the local next steps.
 
-### Running Tests
+Typical manual sequence:
+
 ```bash
-# Run all tests
-pytest
-
-# Run with coverage
-pytest --cov=renew_website
-
-# Run specific test file
-pytest renew_website/apps/charging_stations/tests/
-```
-
-### OCPP Simulator
-For testing OCPP connections, you can use WebSocket clients or OCPP simulators to connect to the WebSocket endpoint.
-
-## Development
-
-### Starting the Server
-```bash
-# If this is the first run, prepare the environment first
-./setup.sh
-
-# Then start manually with auto-reload
+./setup.sh local
+source .venv/bin/activate
+python manage.py migrate
+python manage.py createsuperuser
+python manage.py check
 uvicorn renew_website.asgi:application --host 0.0.0.0 --port 8000 --reload
-
-# Manual start
-uvicorn renew_website.asgi:application --host 0.0.0.0 --port 8000
 ```
 
-### Schema Changes
+For manual local runs you still need PostgreSQL and Redis running separately.
 
-When you change Django models or anything that affects the database schema, use this order:
+## Runtime Components
+
+- Django serves HTTP and API traffic.
+- Channels serves OCPP and browser WebSocket traffic.
+- Redis backs Channels, Celery, and Django cache when configured.
+- Celery worker executes background tasks.
+- Celery Beat schedules periodic tasks.
+- Nginx is used in the production-style stack.
+
+## OCPP Endpoints
+
+Charging station connections:
+
+- `ws://localhost:8000/ws/charging_stations/{station_id}/`
+- `ws://192.168.88.247:8000/ws/charging_stations/{station_id}/`
+
+Browser status socket:
+
+- `/ws/stations/status/`
+
+The browser status socket now requires an authenticated Django user session.
+
+## Schema Change Workflow
+
+Whenever models change, use this order:
 
 ```bash
 docker compose exec -T web python manage.py makemigrations
@@ -179,85 +194,57 @@ docker compose exec -T web python manage.py migrate
 docker compose exec -T web python manage.py check
 ```
 
-- `makemigrations` detects model changes and creates migration files.
-- `migrate` applies the schema changes to PostgreSQL.
-- `check` validates Django configuration and model/admin consistency after the database is up to date.
-- In this project, code reload can happen before migrations are applied, so skipping `migrate` after model changes can lead to runtime errors such as missing columns.
+Do not skip `migrate` after creating migrations. This project has realtime and worker processes that assume the schema is already current.
 
-### Code Quality
+## Validation Commands
+
+Use these commands regularly while developing:
+
 ```bash
-# Format code
-black .
-isort .
-
-# Lint
-flake8 .
-
-# Type checking
-mypy .
+python manage.py check
+python manage.py makemigrations --check --dry-run
+pytest
+pip check
 ```
 
-## DeyeCloud API Integration
+Focused examples:
 
-The platform integrates with DeyeCloud for energy monitoring:
-
-1. **Install requests library:**
 ```bash
-pip install requests
-```
-
-2. **Configure in .env:**
-```bash
-DEYE_APP_ID=your-deye-app-id
-DEYE_APP_SECRET=your-deye-app-secret
-DEYE_EMAIL=your-deye-account-email
-DEYE_PASSWORD=your-deye-account-password
-```
-
-3. **Run the server** - API integration will work automatically
-
-## Production Deployment
-
-### Environment Variables
-```bash
-DEBUG=False
-SECRET_KEY=your-secure-secret-key
-ALLOWED_HOSTS=yourdomain.com,www.yourdomain.com
-CSRF_TRUSTED_ORIGINS=https://yourdomain.com
-```
-
-### Docker Production
-```bash
-docker compose -f docker-compose.prod.yml up -d
-```
-
-### Static Files
-```bash
-python manage.py collectstatic --noinput
+pytest renew_website/apps/charging_stations/tests/test_consumers.py -q
+pytest renew_website/apps/api/tests.py -q
 ```
 
 ## Troubleshooting
 
-### Common Issues
+WebSocket issues:
 
-1. **WebSocket Connection Failed**
-   - Check if Redis is running
-   - Verify firewall settings
-   - Ensure WebSocket endpoint is correct
+- Ensure Redis is running.
+- Ensure the browser user is authenticated for `/ws/stations/status/`.
+- Ensure the host is `localhost` or `192.168.88.247`.
 
-2. **OCPP Protocol Errors**
-   - Verify OCPP version compatibility (1.6)
-   - Check message format
-   - Review station configuration
+Database issues:
 
-3. **Database Connection Issues**
-   - Verify PostgreSQL is running
-   - Check database credentials in .env
-   - Ensure database exists
+- Verify PostgreSQL credentials in `.env`.
+- Verify the database container is healthy.
+- Run `python manage.py migrate`.
 
-### Logs
-- Application logs: `logs/django.log`
-- Docker logs: `docker compose logs -f web`
+Celery issues:
+
+- Verify `REDIS_URL`, `CELERY_BROKER_URL`, and `CELERY_RESULT_BACKEND`.
+- Check `docker compose logs -f celery`.
+- Check `docker compose logs -f celery-beat`.
+
+Static file issues:
+
+- In containers, static collection is controlled by `RUN_COLLECTSTATIC`.
+- In the production-style stack, Nginx serves `/static/` from the shared static volume.
+
+## Logs
+
+- Django app: `docker compose logs -f web`
+- Celery worker: `docker compose logs -f celery`
+- Celery beat: `docker compose logs -f celery-beat`
+- Nginx: `docker compose -f docker-compose.prod.yml logs -f nginx`
 
 ## Contributing
 

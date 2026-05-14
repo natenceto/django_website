@@ -51,10 +51,9 @@ COPY --chown=appuser:appuser requirements/prod.txt requirements.txt
 RUN pip install --upgrade pip && pip install -r requirements.txt
 
 # -----------------------
-# Verify Django installation and collect static files
+# Verify Django installation
 # -----------------------
-RUN python -c "import django; print('Django version:', django.get_version())" && \
-    python manage.py collectstatic --noinput --clear
+RUN python -c "import django; print('Django version:', django.get_version())"
 
 # -----------------------
 # Expose port
@@ -65,4 +64,4 @@ EXPOSE 8000
 # Entrypoint & CMD
 # -----------------------
 ENTRYPOINT ["/app/entrypoint.sh"]
-CMD ["uvicorn", "renew_website.asgi:application", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["gunicorn", "renew_website.asgi:application", "-k", "uvicorn.workers.UvicornWorker", "--bind", "0.0.0.0:8000"]

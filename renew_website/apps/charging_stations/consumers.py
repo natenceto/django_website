@@ -2416,6 +2416,11 @@ class StationStatusConsumer(AsyncWebsocketConsumer):
         self._connected = False
 
     async def connect(self):
+        user = self.scope.get("user")
+        if not user or not getattr(user, "is_authenticated", False):
+            await self.close(code=4401)
+            return
+
         try:
             self._is_closing = False
             await self.channel_layer.group_add(UI_STATUS_GROUP, self.channel_name)
