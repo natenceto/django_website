@@ -703,3 +703,43 @@ class Invoice(models.Model):
         self.subtotal = sum(s.total_cost for s in self.sessions.all())
         self.tax_amount = self.subtotal * (self.tax_rate / 100)
         self.total = self.subtotal + self.tax_amount
+
+
+class CommandLog(models.Model):
+    COMMAND_TYPE_CHOICES = [
+        ('start', 'Start'),
+        ('stop', 'Stop'),
+        ('reset', 'Reset'),
+        ('update', 'Update'),
+    ]
+
+    STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('sent', 'Sent'),
+        ('success', 'Success'),
+        ('failed', 'Failed'),
+    ]
+
+    command_id = models.CharField(max_length=64, unique=True)
+    command_type = models.CharField(max_length=20, choices=COMMAND_TYPE_CHOICES)
+    
+    station = models.ForeignKey(
+        Station,
+        on_delete=models.CASCADE,
+        related_name="command_logs"
+    )
+
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+
+    payload = models.JSONField(default=dict, blank=True)
+    detail = models.TextField(blank=True, null=True)
+    error_message = models.TextField(blank=True, null=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    executed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.command_type} - {self.command_id} ({self.status})"

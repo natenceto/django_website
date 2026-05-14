@@ -55,8 +55,7 @@ services:
       - .:/app
       - static_volume:/app/staticfiles
     ports:
-      - "127.0.0.1:8000:8000"
-      - "192.168.88.247:8000:8000"
+      - "8000:8000"
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8000/health/ || exit 1"]
       interval: 30s
