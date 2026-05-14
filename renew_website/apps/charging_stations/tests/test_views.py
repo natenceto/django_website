@@ -1,9 +1,13 @@
 """
 Tests for charging_stations views.
 """
+from datetime import timedelta
+
 import pytest
 from django.urls import reverse
-from renew_website.apps.charging_stations.models import Station, Connector
+from django.utils import timezone
+
+from renew_website.apps.charging_stations.models import Station, Connector, MeterValue, StationStatusHistory
 
 
 class TestStationsView:
@@ -44,6 +48,87 @@ class TestStatisticsView:
         """Test admin can access statistics view."""
         response = admin_client.get('/charging_stations/statistics/')
         assert response.status_code == 200
+
+    def test_statistics_renders_analytics_sections(self, admin_client, completed_transaction):
+        """Test analytics-oriented sections render on the statistics page."""
+        station = completed_transaction.connector.station
+        start = timezone.now() - timezone.timedelta(hours=2)
+        StationStatusHistory.objects.create(station=station, status='active', reason='test-start', observed_at=start)
+        StationStatusHistory.objects.create(station=station, status='inactive', reason='test-offline', observed_at=start + timezone.timedelta(hours=1))
+        StationStatusHistory.objects.create(station=station, status='active', reason='test-online', observed_at=start + timezone.timedelta(hours=1, minutes=30))
+
+        MeterValue.objects.create(
+            transaction=completed_transaction,
+            timestamp=timezone.now(),
+            energy_wh=5000,
+            power_w=7400,
+            soc_percentage=48.0,
+            data={
+                'raw_payload': [
+                    {
+                        'sampled_value': [
+                            {'measurand': 'Current.Import', 'value': '16', 'unit': 'A'},
+                            {'measurand': 'Voltage', 'value': '230', 'unit': 'V'},
+                        ]
+                    }
+                ],
+                'session_context': {'requested_power_mode': 'manual'},
+            },
+        )
+
+        response = admin_client.get('/charging_stations/statistics/')
+
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert 'Power &amp; Energy Timeline' in content
+        assert 'Session Duration Distribution' in content
+        assert 'Charger Utilization' in content
+        assert 'Meter Values Explorer' in content
+        assert 'Offline Time' in content
+        assert 'Latest Buckets' in content
+
+    def test_statistics_supports_specific_date_range_selector(self, admin_client):
+        selected_date = timezone.localdate().strftime('%Y-%m-%d')
+
+        response = admin_client.get('/charging_stations/statistics/', {'timerange': 'date', 'date': selected_date})
+
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert 'Specific Date' in content
+        assert f'value="{selected_date}"' in content
+
+    def test_statistics_timeline_csv_export(self, admin_client, completed_transaction):
+        MeterValue.objects.create(
+            transaction=completed_transaction,
+            timestamp=timezone.now(),
+            energy_wh=5000,
+            power_w=7400,
+            data={'raw_payload': [], 'session_context': {}},
+        )
+
+        response = admin_client.get('/charging_stations/statistics/export/timeline/', {'timerange': '24h'})
+
+        assert response.status_code == 200
+        assert response['Content-Type'] == 'text/csv'
+        content = response.content.decode()
+        assert 'Bucket Start,Total Charging Power (kW),Delivered Energy Delta (kWh)' in content
+
+    def test_statistics_meter_explorer_uses_ten_rows_per_page(self, admin_client, completed_transaction):
+        for offset in range(12):
+            MeterValue.objects.create(
+                transaction=completed_transaction,
+                timestamp=timezone.now() - timedelta(minutes=offset),
+                energy_wh=1000 + offset,
+                power_w=7000,
+                data={'raw_payload': [], 'session_context': {}},
+            )
+
+        response = admin_client.get('/charging_stations/statistics/', {'timerange': '24h'})
+
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert 'Showing 10 rows per page.' in content
+        assert 'Page 1 of 2' in content
 
 
 class TestStationActions:

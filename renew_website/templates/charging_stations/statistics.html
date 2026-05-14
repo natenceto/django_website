@@ -1,159 +1,246 @@
 {% extends 'base.html' %}
 {% load static %}
-{% load custom_tags %}
 
 {% block title %} RENEW | Statistics {% endblock%}
 
 {% block content %}
-<!-- Page Heading -->
-<h1 class="h3 mb-2 text-gray-800">Charging Station Statistics</h1>
-<p class="mb-4">Real-time meter measurements and charging session data from all stations.</p>
+<div class="d-sm-flex align-items-start justify-content-between mb-4">
+    <div>
+        <h1 class="h3 mb-2 text-gray-800">Charging Statistics</h1>
+        <p class="mb-0 text-muted">Historical telemetry only: aggregated load, session quality, charger utilization and compact meter exploration.</p>
+    </div>
+    <form method="get" class="form-inline mt-3 mt-sm-0 align-items-end" id="statistics-range-form">
+        <div class="mr-2">
+            <label class="small text-muted d-block mb-1" for="statistics-timerange">Time Range</label>
+            <select class="form-control form-control-sm" id="statistics-timerange" name="timerange">
+                {% for value, label in range_filters.choices %}
+                <option value="{{ value }}" {% if range_filters.timerange == value %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="mr-2 {% if not range_filters.show_date_input %}d-none{% endif %}" id="statistics-date-wrapper">
+            <label class="small text-muted d-block mb-1" for="statistics-date">Specific Date</label>
+            <input class="form-control form-control-sm" type="date" id="statistics-date" name="date" value="{{ range_filters.selected_date }}">
+        </div>
+        <input type="hidden" name="station" value="{{ explorer_filters.station }}">
+        <input type="hidden" name="status" value="{{ explorer_filters.status }}">
+        <button type="submit" class="btn btn-sm btn-primary mr-2">Apply</button>
+        <a href="?timerange=24h" class="btn btn-sm btn-outline-secondary">Reset</a>
+    </form>
+</div>
 
-<!-- Error Message -->
+<div class="small text-muted mb-4">
+    Active range: <strong>{{ range_filters.label }}</strong>
+</div>
+
 {% if error_message %}
 <div class="alert alert-danger" role="alert">
     <i class="fas fa-exclamation-triangle"></i> {{ error_message }}
 </div>
 {% endif %}
 
-<!-- Summary Cards -->
 <div class="row">
-    <!-- Total Meter Readings -->
     <div class="col-xl-3 col-md-6 mb-4">
         <div class="card border-left-primary shadow h-100 py-2">
             <div class="card-body">
-                <div class="row no-gutters align-items-center">
-                    <div class="col mr-2">
-                        <div class="text-xs font-weight-bold text-primary text-uppercase mb-1">
-                            Total Readings</div>
-                        <div class="h5 mb-0 font-weight-bold text-gray-800">{{ total_readings|default:0 }}</div>
-                    </div>
-                    <div class="col-auto">
-                        <i class="fas fa-tachometer-alt fa-2x text-gray-300"></i>
-                    </div>
-                </div>
+                <div class="text-xs font-weight-bold text-primary text-uppercase mb-1">Total Energy</div>
+                <div class="h5 mb-0 font-weight-bold text-gray-800">{{ kpis.total_energy_kwh }} kWh</div>
+                <div class="small text-muted mt-2">Across {{ range_filters.label|lower }}</div>
             </div>
         </div>
     </div>
-
-    <!-- Active Transactions -->
     <div class="col-xl-3 col-md-6 mb-4">
         <div class="card border-left-success shadow h-100 py-2">
             <div class="card-body">
-                <div class="row no-gutters align-items-center">
-                    <div class="col mr-2">
-                        <div class="text-xs font-weight-bold text-success text-uppercase mb-1">
-                            Active Sessions</div>
-                        <div class="h5 mb-0 font-weight-bold text-gray-800">{{ active_sessions|default:0 }}</div>
-                    </div>
-                    <div class="col-auto">
-                        <i class="fas fa-charging-station fa-2x text-gray-300"></i>
-                    </div>
-                </div>
+                <div class="text-xs font-weight-bold text-success text-uppercase mb-1">Average Load</div>
+                <div class="h5 mb-0 font-weight-bold text-gray-800">{{ kpis.avg_load_kw }} kW</div>
+                <div class="small text-muted mt-2">Computed for {{ range_filters.label|lower }}</div>
             </div>
         </div>
     </div>
-
-    <!-- Latest Reading -->
     <div class="col-xl-3 col-md-6 mb-4">
         <div class="card border-left-info shadow h-100 py-2">
             <div class="card-body">
-                <div class="row no-gutters align-items-center">
-                    <div class="col mr-2">
-                        <div class="text-xs font-weight-bold text-info text-uppercase mb-1">
-                            Latest Reading</div>
-                        <div class="h5 mb-0 font-weight-bold text-gray-800">
-                            {% if latest_reading %}
-                                {{ latest_reading.value }} Wh
-                            {% else %}
-                                N/A
-                            {% endif %}
-                        </div>
-                    </div>
-                    <div class="col-auto">
-                        <i class="fas fa-bolt fa-2x text-gray-300"></i>
-                    </div>
-                </div>
+                <div class="text-xs font-weight-bold text-info text-uppercase mb-1">Sessions</div>
+                <div class="h5 mb-0 font-weight-bold text-gray-800">{{ kpis.sessions }}</div>
             </div>
         </div>
     </div>
-
-    <!-- Stations Online -->
     <div class="col-xl-3 col-md-6 mb-4">
         <div class="card border-left-warning shadow h-100 py-2">
             <div class="card-body">
-                <div class="row no-gutters align-items-center">
-                    <div class="col mr-2">
-                        <div class="text-xs font-weight-bold text-warning text-uppercase mb-1">
-                            Stations</div>
-                        <div class="h5 mb-0 font-weight-bold text-gray-800">
-                            {{ transactions|unique_stations }}
-                        </div>
-                    </div>
-                    <div class="col-auto">
-                        <i class="fas fa-map-marker-alt fa-2x text-gray-300"></i>
-                    </div>
-                </div>
+                <div class="text-xs font-weight-bold text-warning text-uppercase mb-1">Peak Load</div>
+                <div class="h5 mb-0 font-weight-bold text-gray-800">{{ kpis.peak_load_kw }} kW</div>
+                <div class="small text-muted mt-2">Highest aggregate bucket in {{ range_filters.label|lower }}</div>
             </div>
         </div>
     </div>
 </div>
 
-<!-- Content Row -->
 <div class="row">
+    <div class="col-12 mb-4">
+        <div class="card shadow h-100">
+            <div class="card-header py-3 d-flex justify-content-between align-items-center">
+                <div>
+                    <h6 class="m-0 font-weight-bold text-primary">Power &amp; Energy Timeline</h6>
+                    <small class="text-muted">Aggregate charging power and delivered energy over time.</small>
+                </div>
+                <a class="btn btn-sm btn-outline-primary" href="{% url 'charging_stations:statistics_export' 'timeline' %}?{{ base_querystring }}">CSV</a>
+            </div>
+            <div class="card-body">
+                {% if timeline.labels %}
+                <div style="height: 340px;">
+                    <canvas id="powerEnergyTimelineChart" height="340"></canvas>
+                </div>
+                <div class="row mt-4">
+                    <div class="col-12">
+                        <div class="small text-uppercase text-muted mb-2">Latest Buckets</div>
+                        {% for row in timeline_preview_rows %}
+                        <div class="d-flex align-items-center mb-2">
+                            <div class="small text-muted mr-3" style="width: 64px;">{{ row.label }}</div>
+                            <div class="flex-grow-1 mr-3">
+                                <div class="progress" style="height: 7px;">
+                                    <div class="progress-bar bg-primary" role="progressbar" style="width: {{ row.power_pct }}%"></div>
+                                </div>
+                            </div>
+                            <div class="small font-weight-bold text-gray-700 mr-3" style="width: 88px;">{{ row.total_power_kw }} kW</div>
+                            <div class="small text-muted" style="width: 88px;">{{ row.energy_delta_kwh }} kWh</div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+                {% else %}
+                <div class="text-center py-5 text-muted">
+                    <i class="fas fa-wave-square fa-3x text-gray-300 mb-3"></i>
+                    <p class="mb-1">No telemetry in the last 24 hours.</p>
+                    <small>Once chargers send meter values, the timeline becomes the main analytical view.</small>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
 
-    <!-- Recent Meter Values -->
-    <div class="col-xl-8 col-lg-7">
-        <div class="card shadow mb-4">
+<div class="row">
+    <div class="col-xl-6 mb-4">
+        <div class="card shadow h-100">
+            <div class="card-header py-3 d-flex justify-content-between align-items-center">
+                <h6 class="m-0 font-weight-bold text-primary">Session Duration Distribution</h6>
+                <a class="btn btn-sm btn-outline-primary" href="{% url 'charging_stations:statistics_export' 'sessions' %}?{{ base_querystring }}">CSV</a>
+            </div>
+            <div class="card-body">
+                {% if session_analytics.duration_labels %}
+                <div style="height: 280px;">
+                    <canvas id="sessionDurationChart" height="280"></canvas>
+                </div>
+                <div class="mt-4">
+                    {% for row in session_analytics.duration_chart_rows %}
+                    <div class="d-flex align-items-center mb-2">
+                        <div class="small text-muted mr-3" style="width: 76px;">{{ row.label }}</div>
+                        <div class="flex-grow-1 mr-3">
+                            <div class="progress" style="height: 7px;">
+                                <div class="progress-bar bg-info" role="progressbar" style="width: {{ row.pct }}%"></div>
+                            </div>
+                        </div>
+                        <div class="small font-weight-bold text-gray-700" style="width: 28px;">{{ row.count }}</div>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <div class="text-center py-5 text-muted">
+                    <i class="fas fa-hourglass-half fa-3x text-gray-300 mb-3"></i>
+                    <p class="mb-1">No completed sessions yet.</p>
+                    <small>Duration buckets appear once a transaction has both start and stop timestamps.</small>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    <div class="col-xl-6 mb-4">
+        <div class="card shadow h-100">
             <div class="card-header py-3">
-                <h6 class="m-0 font-weight-bold text-primary">Recent Meter Values</h6>
+                <h6 class="m-0 font-weight-bold text-primary">Energy per Session</h6>
+            </div>
+            <div class="card-body">
+                {% if session_analytics.energy_labels %}
+                <div style="height: 280px;">
+                    <canvas id="energyPerSessionChart" height="280"></canvas>
+                </div>
+                <div class="mt-4">
+                    {% for row in session_analytics.energy_chart_rows %}
+                    <div class="d-flex align-items-center mb-2">
+                        <div class="small text-muted mr-3 text-truncate" style="width: 120px;">{{ row.label }}</div>
+                        <div class="flex-grow-1 mr-3">
+                            <div class="progress" style="height: 7px;">
+                                <div class="progress-bar bg-success" role="progressbar" style="width: {{ row.pct }}%"></div>
+                            </div>
+                        </div>
+                        <div class="small font-weight-bold text-gray-700" style="width: 56px;">{{ row.value_kwh }} kWh</div>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <div class="text-center py-5 text-muted">
+                    <i class="fas fa-battery-half fa-3x text-gray-300 mb-3"></i>
+                    <p class="mb-1">No delivered energy history yet.</p>
+                    <small>Completed sessions with meter stop values will populate this chart.</small>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-12 mb-4">
+        <div class="card shadow h-100">
+            <div class="card-header py-3 d-flex justify-content-between align-items-center">
+                <div>
+                    <h6 class="m-0 font-weight-bold text-primary">Charger Utilization</h6>
+                    <small class="text-muted">Relative activity across chargers based on recorded session durations and power samples.</small>
+                </div>
+                <a class="btn btn-sm btn-outline-primary" href="{% url 'charging_stations:statistics_export' 'utilization' %}?{{ base_querystring }}">CSV</a>
             </div>
             <div class="card-body">
                 <div class="table-responsive">
-                    <table class="table table-bordered" id="dataTable" width="100%" cellspacing="0">
-                        <thead>
+                    <table class="table table-borderless table-hover align-middle mb-0">
+                        <thead class="border-bottom">
                             <tr>
-                                <th>Time</th>
-                                <th>Station</th>
-                                <th>Energy (Wh)</th>
-                                <th>Context</th>
-                                <th>Type</th>
-                                <th>Phase</th>
+                                <th>Charger</th>
+                                <th>Sessions</th>
+                                <th>Avg Power</th>
+                                <th>Peak Power</th>
+                                <th>Active Time</th>
+                                <th>Offline Time</th>
+                                <th>Last Seen</th>
+                                <th style="min-width: 180px;">Relative Utilization</th>
                             </tr>
                         </thead>
                         <tbody>
-                            {% for meter_value in meter_values %}
+                            {% for row in utilization_rows %}
                             <tr>
-                                <td><small>{{ meter_value.timestamp|date:"M d H:i:s" }}</small></td>
-                                <td><strong>{{ meter_value.transaction.connector.station.address|truncatechars:25 }}</strong></td>
-                                <td><span class="badge badge-primary">{{ meter_value.value }}</span></td>
                                 <td>
-                                    {% if meter_value.data.context %}
-                                        <small class="text-muted">{{ meter_value.data.context|slice:":15" }}</small>
-                                    {% else %}
-                                        -
-                                    {% endif %}
+                                    <div class="font-weight-bold text-gray-800">{{ row.station_label }}</div>
+                                    <div class="small text-muted">{{ row.station_address }}</div>
                                 </td>
+                                <td>{{ row.sessions }}</td>
+                                <td>{{ row.avg_power_kw }} kW</td>
+                                <td>{{ row.peak_power_kw }} kW</td>
+                                <td>{{ row.active_time_display }}</td>
+                                <td>{{ row.offline_time_display }}</td>
+                                <td>{{ row.last_seen_display }}</td>
                                 <td>
-                                    {% if meter_value.data.measurand %}
-                                        <small class="text-success">{{ meter_value.data.measurand|slice:":20" }}</small>
-                                    {% else %}
-                                        -
-                                    {% endif %}
-                                </td>
-                                <td>
-                                    {% if meter_value.data.phase %}
-                                        <span class="badge badge-secondary">{{ meter_value.data.phase }}</span>
-                                    {% else %}
-                                        -
-                                    {% endif %}
+                                    <div class="progress" style="height: 8px;">
+                                        <div class="progress-bar bg-primary" role="progressbar" style="width: {{ row.utilization_pct }}%" aria-valuenow="{{ row.utilization_pct }}" aria-valuemin="0" aria-valuemax="100"></div>
+                                    </div>
+                                    <div class="small text-muted mt-2">{{ row.utilization_pct }}% of top observed activity</div>
                                 </td>
                             </tr>
                             {% empty %}
                             <tr>
-                                <td colspan="6" class="text-center text-muted">
-                                    <i class="fas fa-info-circle"></i> No meter values recorded yet.<br>
-                                    <small>Start a charging session to see measurements.</small>
+                                <td colspan="8" class="text-center text-muted py-4">
+                                    <i class="fas fa-charging-station fa-3x text-gray-300 mb-3"></i>
+                                    <p class="mb-1">No utilization history yet.</p>
                                 </td>
                             </tr>
                             {% endfor %}
@@ -163,130 +250,295 @@
             </div>
         </div>
     </div>
-
-    <!-- Transaction Summary -->
-    <div class="col-xl-4 col-lg-5">
-        <div class="card shadow mb-4">
-            <div class="card-header py-3">
-                <h6 class="m-0 font-weight-bold text-success">Recent Transactions</h6>
-            </div>
-            <div class="card-body">
-                {% for transaction in transactions %}
-                <div class="mb-3 p-3 border rounded {% if transaction.status == 'active' %}border-success{% else %}border-secondary{% endif %}">
-                    <div class="d-flex justify-content-between align-items-start">
-                        <div class="font-weight-bold text-truncate" style="max-width: 200px;" title="{{ transaction.connector.station.address }}">
-                            {{ transaction.connector.station.address }}
-                        </div>
-                        <span class="badge badge-{% if transaction.status == 'active' %}success{% elif transaction.status == 'completed' %}primary{% else %}warning{% endif %}">
-                            {{ transaction.status|title }}
-                        </span>
-                    </div>
-                    <div class="small text-muted mt-1">
-                        <i class="fas fa-clock"></i> {{ transaction.started_at|date:"M d, H:i" }}<br>
-                        {% if transaction.meter_count %}
-                        <i class="fas fa-tachometer-alt"></i> {{ transaction.meter_count }} readings<br>
-                        <i class="fas fa-bolt"></i> Latest: <strong>{{ transaction.latest_reading }} Wh</strong>
-                        {% else %}
-                        <i class="fas fa-spinner"></i> Waiting for meter data...
-                        {% endif %}
-                    </div>
-                </div>
-                {% empty %}
-                <div class="text-center text-muted py-4">
-                    <i class="fas fa-charging-station fa-3x text-gray-300 mb-3"></i>
-                    <p>No transactions yet</p>
-                    <small>Start charging to see session data</small>
-                </div>
-                {% endfor %}
-            </div>
-        </div>
-    </div>
 </div>
 
-<!-- Detailed Meter Data -->
 <div class="row">
-    <div class="col-xl-12">
-        <div class="card shadow mb-4">
-            <div class="card-header py-3 d-flex justify-content-between align-items-center">
-                <h6 class="m-0 font-weight-bold text-info">Complete Meter Data (JSON)</h6>
-                <small class="text-muted">Raw OCPP sampled_value data</small>
+    <div class="col-12 mb-4">
+        <div class="card shadow h-100">
+            <div class="card-header py-3 d-flex flex-column flex-lg-row justify-content-between align-items-lg-center">
+                <div>
+                    <h6 class="m-0 font-weight-bold text-primary">Meter Values Explorer</h6>
+                    <small class="text-muted">Compact engineering visibility with expandable raw payload and session context.</small>
+                </div>
+                <div class="d-flex flex-column flex-lg-row mt-3 mt-lg-0">
+                <form method="get" class="form-inline mr-lg-2 mb-2 mb-lg-0">
+                    <input type="hidden" name="timerange" value="{{ range_filters.timerange }}">
+                    <input type="hidden" name="date" value="{{ range_filters.selected_date }}">
+                    <input type="text" class="form-control form-control-sm mr-2 mb-2 mb-lg-0" name="station" value="{{ explorer_filters.station }}" placeholder="Filter by station address">
+                    <select class="form-control form-control-sm mr-2 mb-2 mb-lg-0" name="status">
+                        <option value="">All statuses</option>
+                        <option value="active" {% if explorer_filters.status == 'active' %}selected{% endif %}>Active</option>
+                        <option value="completed" {% if explorer_filters.status == 'completed' %}selected{% endif %}>Completed</option>
+                        <option value="stopped" {% if explorer_filters.status == 'stopped' %}selected{% endif %}>Stopped</option>
+                        <option value="error" {% if explorer_filters.status == 'error' %}selected{% endif %}>Error</option>
+                    </select>
+                    <button type="submit" class="btn btn-sm btn-primary mr-2 mb-2 mb-lg-0">Apply</button>
+                    <a href="?timerange={{ range_filters.timerange }}{% if range_filters.selected_date %}&date={{ range_filters.selected_date|urlencode }}{% endif %}" class="btn btn-sm btn-outline-secondary mb-2 mb-lg-0">Reset</a>
+                </form>
+                <a class="btn btn-sm btn-outline-primary" href="{% url 'charging_stations:statistics_export' 'meter-values' %}?{{ base_querystring }}">CSV</a>
+                </div>
             </div>
             <div class="card-body">
-                {% for meter_value in meter_values %}
-                <div class="mb-3 p-3 border-left-info bg-light">
-                    <div class="d-flex justify-content-between align-items-start mb-2">
-                        <div>
-                            <strong class="text-primary">{{ meter_value.transaction.connector.station.address }}</strong>
-                            <span class="text-muted ml-2">{{ meter_value.timestamp|date:"M d H:i:s" }}</span>
-                        </div>
-                        <span class="badge badge-info font-weight-bold">{{ meter_value.value }} Wh</span>
-                    </div>
-                    {% if meter_value.data %}
-                    <div class="bg-white p-2 rounded border">
-                        <code class="text-dark small">{{ meter_value.data|safe }}</code>
-                    </div>
-                    {% endif %}
+                <div class="table-responsive">
+                    <table class="table table-sm table-hover align-middle">
+                        <thead>
+                            <tr>
+                                <th>Time</th>
+                                <th>Charger</th>
+                                <th>Power</th>
+                                <th>Current</th>
+                                <th>Voltage</th>
+                                <th>Energy</th>
+                                <th>SoC</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for row in meter_explorer_rows %}
+                            <tr>
+                                <td>{{ row.timestamp_display }}</td>
+                                <td>
+                                    <div class="font-weight-bold text-gray-800">{{ row.station_label }}</div>
+                                    <div class="small text-muted">{{ row.station_address }}</div>
+                                </td>
+                                <td>{{ row.power_display }}</td>
+                                <td>{{ row.current_display }}</td>
+                                <td>{{ row.voltage_display }}</td>
+                                <td>{{ row.energy_display }}</td>
+                                <td>{{ row.soc_display }}</td>
+                                <td class="text-right">
+                                    <button class="btn btn-sm btn-outline-primary" type="button" data-toggle="collapse" data-target="#meter-details-{{ row.id }}" aria-expanded="false" aria-controls="meter-details-{{ row.id }}">
+                                        Details
+                                    </button>
+                                </td>
+                            </tr>
+                            <tr class="collapse bg-light" id="meter-details-{{ row.id }}">
+                                <td colspan="8">
+                                    <div class="row">
+                                        <div class="col-lg-6 mb-3 mb-lg-0">
+                                            <div class="small text-uppercase text-muted mb-2">Raw Payload</div>
+                                            <pre class="small bg-white border rounded p-3 mb-0" style="max-height: 280px; overflow: auto;">{{ row.raw_payload_pretty }}</pre>
+                                        </div>
+                                        <div class="col-lg-6">
+                                            <div class="small text-uppercase text-muted mb-2">Session Context</div>
+                                            <pre class="small bg-white border rounded p-3 mb-0" style="max-height: 280px; overflow: auto;">{{ row.session_context_pretty }}</pre>
+                                        </div>
+                                    </div>
+                                </td>
+                            </tr>
+                            {% empty %}
+                            <tr>
+                                <td colspan="8" class="text-center text-muted py-5">
+                                    <i class="fas fa-database fa-3x text-gray-300 mb-3"></i>
+                                    <p class="mb-1">No meter values match the selected filters.</p>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
                 </div>
-                {% empty %}
-                <div class="text-center py-5">
-                    <i class="fas fa-database fa-4x text-gray-300 mb-3"></i>
-                    <h5 class="text-muted">No Meter Data Available</h5>
-                    <p class="text-muted">Start a charging session to collect measurements from station hardware.</p>
-                </div>
-                {% endfor %}
+
+                {% if meter_page and meter_page.has_other_pages %}
+                <div class="small text-muted mb-2">Showing 10 rows per page.</div>
+                <nav aria-label="Meter explorer pagination">
+                    <ul class="pagination pagination-sm justify-content-end mb-0">
+                        {% if meter_page.has_previous %}
+                        <li class="page-item">
+                            <a class="page-link" href="?page={{ meter_page.previous_page_number }}{% if base_querystring %}&{{ base_querystring }}{% endif %}">Previous</a>
+                        </li>
+                        {% endif %}
+                        <li class="page-item disabled">
+                            <span class="page-link">Page {{ meter_page.number }} of {{ meter_page.paginator.num_pages }}</span>
+                        </li>
+                        {% if meter_page.has_next %}
+                        <li class="page-item">
+                            <a class="page-link" href="?page={{ meter_page.next_page_number }}{% if base_querystring %}&{{ base_querystring }}{% endif %}">Next</a>
+                        </li>
+                        {% endif %}
+                    </ul>
+                </nav>
+                {% endif %}
             </div>
         </div>
     </div>
 </div>
+
+{{ timeline.labels|json_script:"statistics-timeline-labels" }}
+{{ timeline.total_power_kw|json_script:"statistics-timeline-power" }}
+{{ timeline.energy_delta_kwh|json_script:"statistics-timeline-energy" }}
+{{ session_analytics.duration_labels|json_script:"statistics-duration-labels" }}
+{{ session_analytics.duration_counts|json_script:"statistics-duration-values" }}
+{{ session_analytics.energy_labels|json_script:"statistics-session-energy-labels" }}
+{{ session_analytics.energy_values_kwh|json_script:"statistics-session-energy-values" }}
 
 {% endblock %}
 
 {% block scripts %}
-<!-- Bootstrap core JavaScript-->
-<script src="{% static 'theme/vendor/jquery/jquery.min.js' %}"></script>
-<script src="{% static 'theme/vendor/bootstrap/js/bootstrap.bundle.min.js' %}"></script>
-
-<!-- Core plugin JavaScript-->
-<script src="{% static 'theme/vendor/jquery-easing/jquery.easing.min.js' %}"></script>
-
-<!-- Custom scripts for all pages-->
-<script src="{% static 'theme/js/sb-admin-2.min.js' %}"></script>
-
-<!-- Page level plugins -->
-<script src="{% static 'theme/vendor/datatables/jquery.dataTables.min.js' %}"></script>
-<script src="{% static 'theme/vendor/datatables/dataTables.bootstrap4.min.js' %}"></script>
-
-<!-- Page level custom scripts -->
-<script src="{% static 'theme/js/demo/datatables-demo.js' %}"></script>
+{{ block.super }}
 
 {% endblock %}
 
 {% block extra_js %}
 <script>
-// Statistics page receives real-time updates via WebSocket from base.html
-// Update statistics-specific elements when data arrives
 document.addEventListener('DOMContentLoaded', function() {
-    // Listen for custom events dispatched by the WebSocket handler
-    window.addEventListener('ws-status-update', function(e) {
-        const data = e.detail;
-        if (data && data.data) {
-            const status = data.data;
-            // Update active sessions count
-            const activeSessionsEl = document.querySelector('.border-left-success .h5');
-            if (activeSessionsEl && status.active_sessions !== undefined) {
-                activeSessionsEl.textContent = status.active_sessions;
-            }
+    const timerangeSelect = document.getElementById('statistics-timerange');
+    const dateWrapper = document.getElementById('statistics-date-wrapper');
+
+    function syncDateVisibility() {
+        if (!timerangeSelect || !dateWrapper) {
+            return;
         }
-    });
-    
-    // Add a connection status indicator
-    const statusIndicator = document.createElement('div');
-    statusIndicator.id = 'ws-status';
-    statusIndicator.className = 'small text-muted mb-2';
-    statusIndicator.innerHTML = '<i class="fas fa-circle text-success"></i> Real-time updates active';
-    const heading = document.querySelector('h1.h3');
-    if (heading) {
-        heading.parentNode.insertBefore(statusIndicator, heading.nextSibling);
+        if (timerangeSelect.value === 'date') {
+            dateWrapper.classList.remove('d-none');
+        } else {
+            dateWrapper.classList.add('d-none');
+        }
+    }
+
+    if (timerangeSelect) {
+        timerangeSelect.addEventListener('change', syncDateVisibility);
+        syncDateVisibility();
+    }
+
+    function parseJsonScript(id) {
+        const element = document.getElementById(id);
+        if (!element) {
+            return [];
+        }
+        return JSON.parse(element.textContent);
+    }
+
+    const timelineLabels = parseJsonScript('statistics-timeline-labels');
+    const timelinePower = parseJsonScript('statistics-timeline-power');
+    const timelineEnergy = parseJsonScript('statistics-timeline-energy');
+    const durationLabels = parseJsonScript('statistics-duration-labels');
+    const durationValues = parseJsonScript('statistics-duration-values');
+    const sessionEnergyLabels = parseJsonScript('statistics-session-energy-labels');
+    const sessionEnergyValues = parseJsonScript('statistics-session-energy-values');
+
+    function getCanvasContext(id) {
+        const canvas = document.getElementById(id);
+        if (!canvas || typeof Chart === 'undefined') {
+            return null;
+        }
+        return canvas.getContext('2d');
+    }
+
+    if (timelineLabels.length) {
+        const timelineContext = getCanvasContext('powerEnergyTimelineChart');
+        if (timelineContext) {
+        new Chart(timelineContext, {
+            type: 'line',
+            data: {
+                labels: timelineLabels,
+                datasets: [
+                    {
+                        label: 'Total Charging Power (kW)',
+                        data: timelinePower,
+                        borderColor: '#1f77b4',
+                        backgroundColor: 'rgba(31, 119, 180, 0.12)',
+                        borderWidth: 2,
+                        fill: true,
+                        pointRadius: 1,
+                        lineTension: 0.25,
+                        yAxisID: 'y-power'
+                    },
+                    {
+                        label: 'Delivered Energy Delta (kWh)',
+                        data: timelineEnergy,
+                        borderColor: '#2ca58d',
+                        backgroundColor: 'rgba(44, 165, 141, 0.08)',
+                        borderWidth: 2,
+                        fill: false,
+                        pointRadius: 1,
+                        lineTension: 0.2,
+                        yAxisID: 'y-energy'
+                    }
+                ]
+            },
+            options: {
+                maintainAspectRatio: false,
+                responsive: true,
+                tooltips: { mode: 'index', intersect: false },
+                hover: { mode: 'nearest', intersect: false },
+                legend: { display: true, position: 'top' },
+                scales: {
+                    xAxes: [{ gridLines: { display: false } }],
+                    yAxes: [
+                        {
+                            id: 'y-power',
+                            position: 'left',
+                            ticks: { beginAtZero: true },
+                            scaleLabel: { display: true, labelString: 'Power (kW)' }
+                        },
+                        {
+                            id: 'y-energy',
+                            position: 'right',
+                            ticks: { beginAtZero: true },
+                            gridLines: { drawOnChartArea: false },
+                            scaleLabel: { display: true, labelString: 'Energy delta (kWh)' }
+                        }
+                    ]
+                }
+            }
+        });
+        }
+    }
+
+    if (durationLabels.length) {
+        const durationContext = getCanvasContext('sessionDurationChart');
+        if (durationContext) {
+        new Chart(durationContext, {
+            type: 'bar',
+            data: {
+                labels: durationLabels,
+                datasets: [{
+                    label: 'Sessions',
+                    data: durationValues,
+                    backgroundColor: ['#dceefb', '#b6def5', '#8dcaef', '#63b4e8', '#2f8fdc'],
+                    borderColor: '#1f77b4',
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                maintainAspectRatio: false,
+                responsive: true,
+                legend: { display: false },
+                scales: {
+                    yAxes: [{ ticks: { beginAtZero: true, precision: 0 } }],
+                    xAxes: [{ gridLines: { display: false } }]
+                }
+            }
+        });
+        }
+    }
+
+    if (sessionEnergyLabels.length) {
+        const sessionEnergyContext = getCanvasContext('energyPerSessionChart');
+        if (sessionEnergyContext) {
+        new Chart(sessionEnergyContext, {
+            type: 'bar',
+            data: {
+                labels: sessionEnergyLabels,
+                datasets: [{
+                    label: 'Delivered Energy (kWh)',
+                    data: sessionEnergyValues,
+                    backgroundColor: 'rgba(42, 157, 143, 0.65)',
+                    borderColor: '#2a9d8f',
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                maintainAspectRatio: false,
+                responsive: true,
+                legend: { display: false },
+                scales: {
+                    yAxes: [{ ticks: { beginAtZero: true } }],
+                    xAxes: [{ gridLines: { display: false } }]
+                }
+            }
+        });
+        }
     }
 });
 </script>

@@ -82,10 +82,12 @@ INSTALLED_APPS = [
 ]
 
 # Channel Layers Configuration
-# Use Redis whenever it is configured so ASGI/web/Celery workers share the same bus.
+# In development, prefer the in-memory channel layer so browser/OCPP websockets
+# stay alive even if Redis restarts. Production can opt into Redis explicitly.
 REDIS_URL = env('REDIS_URL', default=None)
+USE_REDIS_CHANNEL_LAYER = env.bool('USE_REDIS_CHANNEL_LAYER', default=(not DEBUG and bool(REDIS_URL)))
 
-if REDIS_URL:
+if USE_REDIS_CHANNEL_LAYER and REDIS_URL:
     CHANNEL_LAYERS = {
         "default": {
             "BACKEND": "channels_redis.core.RedisChannelLayer",
@@ -314,7 +316,7 @@ OCPP_STATION_CONFIGURATION = {
     'ClockAlignedDataInterval': str(env.int('OCPP_CLOCK_ALIGNED_DATA_INTERVAL_SECONDS', default=0)),
     'MeterValuesSampledData': env(
         'OCPP_METER_VALUES_SAMPLED_DATA',
-        default='Energy.Active.Import.Register,Power.Active.Import,Current.Import,Voltage',
+        default='Energy.Active.Import.Register,Power.Active.Import,Current.Import,Voltage,SoC',
     ),
 }
 

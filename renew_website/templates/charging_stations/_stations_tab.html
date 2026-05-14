@@ -40,6 +40,9 @@
               <th>ID</th>
               <th>Model</th>
               <th>Max Power</th>
+              <th>Vehicle SoC</th>
+              <th>Requested Power</th>
+              <th>Charging Power (Actual)</th>
               <th>Station Status</th>
               <th>Connector Status</th>
               <th>Address</th>
@@ -52,6 +55,31 @@
               <td><strong>{{ station.id }}</strong></td>
               <td>{{ station.model|default:"TACW22-G0135" }}</td>
               <td><strong>{{ station.power_output }} kW</strong></td>
+              <td id="soc-{{ station.id }}">
+                {% if station.vehicle_soc is not None %}
+                <span>{{ station.vehicle_soc|floatformat:2 }} %</span>
+                {% else %}
+                <span>--</span>
+                {% endif %}
+              </td>
+              <td id="requested-power-{{ station.id }}">
+                <div>{{ station.requested_power_label|default:"--" }}</div>
+                <small class="text-muted" id="requested-power-mode-{{ station.id }}">{{ station.requested_power_mode|default:"--" }}</small>
+              </td>
+              <td id="actual-power-{{ station.id }}">
+                {% if station.actual_power_kw is not None %}
+                <span>{{ station.actual_power_kw|floatformat:2 }} kW</span>
+                {% else %}
+                <span>--</span>
+                {% endif %}
+                <small class="text-muted d-block" id="ems-limit-{{ station.id }}">
+                  {% if station.ems_limit_kw is not None %}
+                  EMS {{ station.ems_limit_kw|floatformat:2 }} kW
+                  {% else %}
+                  EMS --
+                  {% endif %}
+                </small>
+              </td>
               <td id="status-{{station.id}}">
                 {% if station.status == "active" %}
                 <span class="badge badge-success">Active</span>

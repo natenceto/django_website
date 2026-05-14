@@ -1,6 +1,6 @@
 from django.urls import path
 from django.contrib.auth import views as auth_views
-from .views import ProfileView, LogoutView, SessionManagementView, AlertsView, AlertActionView
+from .views import ProfileView, LogoutView, SessionManagementView, AlertsView, AlertActionView, AlertPreferencesView
 
 app_name = "accounts"
 
@@ -11,4 +11,5 @@ urlpatterns = [
     path('sessions/', SessionManagementView.as_view(), name='sessions'),
     path('alerts/', AlertsView.as_view(), name='alerts'),
     path('alerts/<int:alert_id>/', AlertActionView.as_view(), name='alert_action'),
+    path('alert-preferences/', AlertPreferencesView.as_view(), name='alert_preferences'),
 ]

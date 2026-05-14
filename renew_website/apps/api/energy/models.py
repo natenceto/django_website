@@ -7,6 +7,10 @@ from django.db.models import Q
 from datetime import timedelta
 
 
+def default_energy_recommendation_expires_at():
+    return timezone.now() + timedelta(minutes=5)
+
+
 # ------------------------
 # Inverter
 # ------------------------
@@ -189,7 +193,7 @@ class EnergyRecommendation(models.Model):
     applied_at = models.DateTimeField(null=True, blank=True)
 
     expires_at = models.DateTimeField(
-        default=timezone.now() + timedelta(minutes=5)
+        default=default_energy_recommendation_expires_at
     )
 
     # Extra
