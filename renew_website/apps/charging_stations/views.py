@@ -11,11 +11,7 @@ from django.contrib import messages
 from django.db.models import F, Sum
 from django.utils import timezone
 
-from .forms import StationForm
 from .models import Station, MeterValue, Transaction, StationStatusHistory
-from django.template.loader import render_to_string
-from asgiref.sync import async_to_sync
-from channels.layers import get_channel_layer
 
 from .services import execute_station_action
 
@@ -143,58 +139,14 @@ def _build_station_stats(stations_list, latest_session_snapshot):
     }
 
 def stations(request: HttpRequest) -> HttpResponse:
-    """
-    Two-tab view:
-    - Add Station form
-    - View Stations tab (with actions for multiple stations)
-    Implements Post/Redirect/Get pattern to avoid form resubmission
-    and keeps current tab on refresh.
-    """
-    form = StationForm(request.POST or None)
+    """Operational charging stations view; CRUD is handled via Django admin."""
     stations_list = list(Station.objects.prefetch_related('connectors'))
 
     latest_session_snapshot = _attach_station_live_power_state(stations_list)
     stats = _build_station_stats(stations_list, latest_session_snapshot)
 
-    # Keep original status from database - don't override based on WebSocket connections
-    # The WebSocket will update the status in real-time via JavaScript
-
-    # Определяме текущия активен таб според query параметър
-    active_tab = request.GET.get("tab", "add")
-
     if request.method == "POST":
-        # Скрито поле във формата за текущ таб
-        current_tab = request.POST.get("current_tab", "add")
-
-        # --- Add Station Form POST ---
-        if "address" in request.POST:  # едно от полетата на StationForm
-            if form.is_valid():
-                station = form.save()
-                
-                stations_list = Station.objects.all()
-
-                # Notify WebSocket group (ако се използва)
-                channel_layer = get_channel_layer()
-                async_to_sync(channel_layer.group_send)(
-                    "charging_stations_group",
-                    {
-                        "type": "station.message",
-                        "html": render_to_string(
-                            "charging_stations/_stations_tab.html",
-                            {"stations_list": stations_list}
-                        )
-                    }
-                )
-
-                messages.success(request, f"Station {station.address} added successfully!")
-                # След POST redirect към list tab
-                return redirect(f"{request.path}?tab=list")
-            else:
-                messages.error(request, "Please correct the errors below.")
-                active_tab = current_tab
-
-        # --- Action buttons POST (start/stop) ---
-        elif "action" in request.POST:
+        if "action" in request.POST:
             station_ids = request.POST.getlist("station_ids")
             action = request.POST.get("action")
             power = request.POST.get("power")
@@ -205,7 +157,7 @@ def stations(request: HttpRequest) -> HttpResponse:
                 if is_ajax:
                     return JsonResponse({'success': False, 'message': message})
                 messages.error(request, message)
-                return redirect(f"{request.path}?tab=list")
+                return redirect(request.path)
 
             success_count, error_count, message = execute_station_action(
                 action=action,
@@ -229,17 +181,17 @@ def stations(request: HttpRequest) -> HttpResponse:
                 messages.warning(request, message)
             else:
                 messages.error(request, message)
-            
-            return redirect(f"{request.path}?tab=list")
 
-    # --- GET request ---
+            return redirect(request.path)
+
+        messages.info(request, 'Use the Add/ Edit Station button to manage stations in Django admin.')
+        return redirect('admin:charging_stations_station_changelist')
+
     return render(
         request,
         "charging_stations/stations.html",
         {
-            "form": form,
             "stations_list": stations_list,
-            "active_tab": active_tab,
             "stats": stats,
         }
     )

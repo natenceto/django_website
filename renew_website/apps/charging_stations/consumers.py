@@ -2292,7 +2292,7 @@ class ChargePointConsumer(AsyncWebsocketConsumer):
 
     async def broadcast_soc_update(self, station_id: int, soc_percentage: float):
         try:
-            # This is what stations_tab.js expects: data.type === "soc_update"
+            # This is what stations.js expects: data.type === "soc_update"
             await self._ui_send({
                 "type": "soc_update",
                 "station_id": int(station_id),
