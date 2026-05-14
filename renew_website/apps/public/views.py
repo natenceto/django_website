@@ -2,6 +2,7 @@ from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import render
 from renew_website.apps.charging_stations.services.exports import download_transactions_csv, get_filtered_transactions
 from renew_website.apps.charging_stations.services.reporting import (
+    build_dashboard_live_summary_payload,
     build_public_dashboard_context,
     build_recent_transactions_payload,
     build_session_chart_payload,
@@ -14,6 +15,10 @@ def index(request: HttpRequest) -> HttpResponse:
 
 def recent_transactions_api(request: HttpRequest) -> JsonResponse:
     return JsonResponse(build_recent_transactions_payload(request))
+
+
+def dashboard_live_summary_api(request: HttpRequest) -> JsonResponse:
+    return JsonResponse(build_dashboard_live_summary_payload(request))
 
 
 def recent_transactions_csv(request: HttpRequest) -> HttpResponse:

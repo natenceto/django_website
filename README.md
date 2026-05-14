@@ -1,104 +1,88 @@
-<<<<<<< Updated upstream
 # RENEW
 
-RENEW is a Django-based web application designed for managing electric vehicle charging stations. The platform allows station owners to register, add, and manage their charging stations, while users can view information and history related to charging.
+RENEW is a Django-based web application for managing electric vehicle charging stations and renewable energy integrations. The platform supports station management, OCPP communication, weather and energy data, and role-based administration.
 
-The project title: Research and development of a smart Energy system for eco-charging of 
-electric vehicles, using reNEWable energy sources 
+The project title: Research and development of a smart Energy system for eco-charging of electric vehicles, using reNEWable energy sources.
 
 ## Features
 
-- Station owner registration and management  
-- Adding and managing charging stations  
-- Viewing detailed station information  
-- Weather Integration:
-  - Real-time weather and solar irradiance monitoring (Open-Meteo)
-  - Automatic updates every 3 minutes
-  - Dynamic dashboard widget for conditions in Sofia, BG
-- User roles and permissions:  
-  - Administrator: Full control over the platform  
-  - Station Owner: Manage their own stations  
-  - User: View charging information and history  
+- Station owner registration and management
+- Charging station onboarding and monitoring
+- OCPP 1.6 real-time communication
+- Weather and solar irradiance integration
+- Role-based access for administrators, station owners, and end users
 
 ## Tech Stack & Requirements
 
-- Python 3.12+  
-- Django 5.2  
-- PostgreSQL (production database)  
-- Redis (for WebSocket channel layer)
-- Frontend: HTML, CSS, JavaScript (with SB Admin 2 theme)
-- OCPP 1.6 Protocol Support
-- WebSocket Real-time Communication
+- Python 3.12+
+- Django 5.2
+- PostgreSQL 15+
+- Redis 7+
+- Docker with Docker Compose V2 for the containerized setup
+- Frontend: HTML, CSS, JavaScript
 
 ## Installation
 
-### Prerequisites
-- Python 3.12+
-- PostgreSQL 15+
-- Redis 7+
-- Node.js (for frontend development, optional)
-
 ### Quick Start
 
-1. **Clone the repository**
+1. Clone the repository:
+
 ```bash
 git clone <repository-url>
-cd django_website_copy
+cd django_website
 ```
 
-2. **Create virtual environment**
+2. Run the startup script before any `docker compose up --build` or manual Django commands:
+
 ```bash
-python -m venv .venv
-source .venv/bin/activate  # Linux/Mac
-# or
-.venv\Scripts\activate     # Windows
+./setup.sh
 ```
 
-3. **Install dependencies**
+The script performs the required pre-Docker preparation automatically:
+
+- creates `.env` from `.env.example` when missing
+- creates `.venv`
+- activates `.venv` for the setup process
+- installs Python dependencies from `requirements/dev.txt`
+- checks Docker and Docker Compose availability
+- starts the containers and runs migrations when Docker is usable
+- falls back to local preparation instructions when Docker is unavailable
+
+3. If you want the virtual environment active in your current terminal after the script finishes, run:
+
 ```bash
-pip install -r requirements/dev.txt
+source .venv/bin/activate
 ```
 
-4. **Environment setup**
+### What happens if Docker is not installed?
+
+`./setup.sh` still performs the Python-side preparation and then stops before infrastructure startup. It prints the local next steps:
+
+- install and start PostgreSQL
+- install and start Redis if Channels/Celery are needed
+- update `.env` for the local database host and credentials
+- run `python manage.py migrate`
+- run `python manage.py createsuperuser`
+- start the app with `uvicorn renew_website.asgi:application --host 0.0.0.0 --port 8000 --reload`
+
+You can also force this behavior explicitly with:
+
 ```bash
-cp .env.example .env
-# Edit .env with your configuration
-```
-
-5. **Database setup**
-```bash
-# For PostgreSQL (recommended)
-# Create database and user as specified in .env
-python manage.py migrate
-
-# For development with SQLite (default)
-python manage.py migrate
-```
-
-6. **Create superuser**
-```bash
-python manage.py createsuperuser
-```
-
-7. **Start the server**
-```bash
-# Development
-./start_server.sh
-
-# Or manually
-uvicorn renew_website.asgi:application --host 0.0.0.0 --port 8000 --reload
+./setup.sh local
 ```
 
 ### Docker Setup
 
-1. **Development with Docker**
+For normal development, prefer `./setup.sh` instead of invoking Docker directly first. If the environment is already prepared and you only need to restart services later, you can use:
+
 ```bash
-docker compose up -d
+docker compose up -d --build
 ```
 
-2. **Production with Docker**
+For production:
+
 ```bash
-docker compose -f docker-compose.prod.yml up -d
+docker compose -f docker-compose.prod.yml up -d --build
 ```
 
 ## Key Packages
@@ -175,10 +159,10 @@ For testing OCPP connections, you can use WebSocket clients or OCPP simulators t
 
 ### Starting the Server
 ```bash
-# Development with auto-reload
-./start_server.sh
+# If this is the first run, prepare the environment first
+./setup.sh
 
-# Manual start with reload
+# Then start manually with auto-reload
 uvicorn renew_website.asgi:application --host 0.0.0.0 --port 8000 --reload
 
 # Manual start
@@ -270,100 +254,4 @@ python manage.py collectstatic --noinput
 
 ## License
 
-This project is licensed under the MIT License.
-=======
-# RENEW - Smart Energy System for EV Eco-Charging
-
-**Full Title**: Research and development of a smart Energy system for eco-charging of electric vehicles, using reNEWable energy sources.
-
-RENEW is a Django-based web application designed for managing electric vehicle (EV) charging stations and integrating renewable energy sources (Solar PV). The platform allows station owners to register and manage their charging stations, while users can view availability, charging history, and real-time statistics. It features full OCPP 1.6J support and integration with Deye inverters.
-
-## Features
-
-*   **Station Management**: Add, configure, and monitor EV charging stations.
-*   **OCPP 1.6 Support**: Real-time communication with charging stations via WebSocket (OCPP 1.6J).
-*   **Smart Energy Management**: Integration with Deye inverters for solar energy monitoring and optimization.
-*   **User Roles**:
-    *   **Administrator**: Full control over the platform, system settings, and user management.
-    *   **Station Owner**: Manage owned stations and view transaction history.
-    *   **User**: View charging status, availability, and session history.
-*   **Dashboard & Analytics**: Visual representation of energy consumption and charging sessions.
-
-## Tech Stack
-
-*   **Backend**: Python 3.12+, Django 5.2
-*   **Database**: PostgreSQL 15+ (Production), SQLite (Development/Auth)
-*   **Async/Real-time**: Django Channels, Redis, Uvicorn (ASGI)
-*   **Frontend**: HTML5, CSS3, JavaScript (Bootstrap 5 / SB Admin 2)
-*   **Protocol**: OCPP 1.6 JSON
-
-## Installation & Setup
-
-This project handles its own setup via automated scripts.
-
-### Prerequisites
-
-Ensure you have the following installed on your system:
-*   **Python 3.12** or higher
-*   **Git**
-*   **Redis** (Required for WebSocket functionality)
-*   *Optional*: PostgreSQL (Recommended for production)
-
-### 1. Clone the Repository
-
-```bash
-git clone <repository-url>
-cd django_website
-```
-
-### 2. Install and Configure
-
-We provide a comprehensive installation script that handles:
-1.  Virtual environment creation (`.venv`)
-2.  Dependency installation
-3.  Environment configuration (`.env`)
-4.  Database migrations
-5.  Superuser creation (Interactive)
-
-Run the installation script:
-
-```bash
-chmod +x install_project.sh
-./install_project.sh
-```
-
-Follow the on-screen prompts. When asked, create your superuser account (admin) with a username, email, and password.
-
-### 3. Start the Server
-
-Once installed, start the development server:
-
-```bash
-chmod +x start_server.sh
-./start_server.sh
-```
-
-This will launch:
-*   **Web Interface**: [http://localhost:8000](http://localhost:8000)
-*   **Admin Interface**: [http://localhost:8000/admin](http://localhost:8000/admin) (Django Admin)
-*   **Portal Dashboard**: [http://localhost:8000/portal/dashboard](http://localhost:8000/portal/dashboard) (Professional Dashboard - requires staff login)
-*   **WebSocket Endpoint**: `ws://localhost:8000/ws/charging_stations/{station_id}/`
-
-## Project Structure
-
-*   `renew_website/`: Main project configuration.
-*   `renew_website/apps/`: Django applications.
-    *   `accounts/`: User authentication and profiles.
-    *   `admin/`: Custom admin dashboard and professional system settings.
-    *   `api/`: REST API endpoints (Deye integration, Mobile App API).
-    *   `charging_stations/`: OCPP logic, station management models.
-    *   `public/`: Public-facing pages (Landing, About, Contact).
-*   `templates/`: HTML templates.
-*   `static/`: CSS, JS, and image assets.
-*   `requirements/`: Python dependency lists.
-*   `scripts/`: Utility scripts.
-
-## License
-
-This project is part of the "RENEW" research initiative.
->>>>>>> Stashed changes
+This project is part of the RENEW research initiative.

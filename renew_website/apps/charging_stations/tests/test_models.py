@@ -5,8 +5,9 @@ import pytest
 from django.utils import timezone
 from django.db import IntegrityError
 from renew_website.apps.charging_stations.models import (
-    Station, Connector, Transaction, MeterValue, UserRFID
+    Station, Connector, Transaction, MeterValue, UserRFID, Vehicle
 )
+from renew_website.apps.charging_stations.tasks import process_meter_values
 
 
 class TestStationModel:
@@ -53,6 +54,14 @@ class TestStationModel:
             station.save()
             station.refresh_from_db()
             assert station.status == status
+
+    def test_station_is_online_false_when_recent_but_inactive(self, station):
+        """Inactive stations should render offline immediately after disconnect."""
+        station.status = 'inactive'
+        station.last_seen = timezone.now()
+        station.save(update_fields=['status', 'last_seen'])
+
+        assert station.is_online is False
 
 
 class TestConnectorModel:
@@ -138,6 +147,45 @@ class TestTransactionModel:
         transactions = list(Transaction.objects.all())
         assert transactions[0] == t2  # Newest first
         assert transactions[1] == t1
+
+
+class TestVehicleModel:
+    def test_create_vehicle_profile(self, db):
+        vehicle = Vehicle.objects.create(
+            vehicle_identifier='veh-001',
+            vin='VIN00000000000001',
+            registration_number='CB1234AB',
+            manufacturer='Hyundai',
+            model_name='IONIQ 5',
+            model_year=2024,
+            trim='Long Range',
+            color='Silver',
+            battery_capacity_kwh=77.4,
+            last_known_soc_percent=48.5,
+        )
+
+        assert vehicle.id is not None
+        assert vehicle.model_year == 2024
+        assert vehicle.trim == 'Long Range'
+        assert vehicle.last_known_soc_percent == 48.5
+
+    def test_process_meter_values_updates_vehicle_latest_soc(self, transaction):
+        vehicle = Vehicle.objects.create(vehicle_identifier=transaction.id_tag)
+        transaction.vehicle = vehicle
+        transaction.save(update_fields=['vehicle'])
+
+        process_meter_values(
+            station_id=transaction.connector.station_id,
+            connector_id=transaction.connector_id,
+            transaction_id=transaction.id,
+            power_w=7400,
+            energy_wh=1200,
+            soc_percentage=56.0,
+            mv_data={'source': 'test'},
+        )
+
+        vehicle.refresh_from_db()
+        assert vehicle.last_known_soc_percent == 56.0
 
 
 class TestMeterValueModel:

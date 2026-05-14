@@ -27,6 +27,17 @@ class Station(models.Model):
 
     # operations
     ocpp_identity = models.CharField(max_length=255, blank=True, null=True, help_text="OCPP Identity (ChargeBox Identity)")
+    RUNTIME_ENVIRONMENT_CHOICES = [
+        ('unknown', 'Unknown / Unverified'),
+        ('physical', 'Physical Hardware'),
+        ('simulated', 'Simulator / Test Bench'),
+    ]
+    runtime_environment = models.CharField(
+        max_length=20,
+        choices=RUNTIME_ENVIRONMENT_CHOICES,
+        default='unknown',
+        help_text='Operational provenance used for reporting authenticity classification.',
+    )
 
     # Owner Info
     email = models.EmailField()
@@ -71,8 +82,10 @@ class Station(models.Model):
 
     @property
     def is_online(self):
-        """Check if station is currently online based on last_seen"""
+        """Check if station is currently online based on status and last_seen."""
         from django.utils import timezone
+        if self.status != 'active':
+            return False
         if self.last_seen:
             # Consider online if seen in the last 5 minutes
             return (timezone.now() - self.last_seen).total_seconds() < 300
@@ -201,9 +214,68 @@ class Connector(models.Model):
         return f"Connector {self.connector_id} at {self.station.address}"
 
 
+class Vehicle(models.Model):
+    """Vehicle identity and core capabilities known to the platform."""
+
+    vehicle_identifier = models.CharField(
+        max_length=64,
+        unique=True,
+        db_index=True,
+        help_text="Primary vehicle identifier known to the platform. Defaults to the station-provided idTag when no richer identity is available.",
+    )
+    vin = models.CharField(
+        max_length=64,
+        unique=True,
+        null=True,
+        blank=True,
+        help_text="Vehicle Identification Number when provided by the station or an upstream integration.",
+    )
+    registration_number = models.CharField(
+        max_length=32,
+        null=True,
+        blank=True,
+        db_index=True,
+        help_text="Registration or license plate when known.",
+    )
+    manufacturer = models.CharField(max_length=100, null=True, blank=True)
+    model_name = models.CharField(max_length=100, null=True, blank=True)
+    model_year = models.PositiveIntegerField(null=True, blank=True)
+    trim = models.CharField(max_length=100, null=True, blank=True)
+    color = models.CharField(max_length=50, null=True, blank=True)
+    battery_capacity_kwh = models.DecimalField(max_digits=7, decimal_places=2, null=True, blank=True)
+    last_known_soc_percent = models.FloatField(
+        null=True,
+        blank=True,
+        help_text="Latest known vehicle State of Charge (%) received during charging.",
+    )
+    metadata = models.JSONField(default=dict, blank=True, help_text="Additional vehicle metadata received from the station.")
+    first_seen_at = models.DateTimeField(default=timezone.now)
+    last_seen_at = models.DateTimeField(default=timezone.now)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["vehicle_identifier"]
+
+    def __str__(self):
+        if self.registration_number:
+            return self.registration_number
+        if self.vin:
+            return self.vin
+        return self.vehicle_identifier
+
+
 class Transaction(models.Model):
     """OCPP charging transaction - core charging session data."""
     connector = models.ForeignKey(Connector, on_delete=models.CASCADE, related_name="transactions")
+    vehicle = models.ForeignKey(
+        Vehicle,
+        on_delete=models.SET_NULL,
+        related_name="transactions",
+        null=True,
+        blank=True,
+        help_text="Vehicle associated with this charging session.",
+    )
     
     # OCPP Core Fields
     id_tag = models.CharField(max_length=50, help_text="RFID tag used for this transaction")

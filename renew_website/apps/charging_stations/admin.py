@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Station, Connector, Transaction, MeterValue, UserRFID, CommandLog
+from .models import Station, Connector, Transaction, MeterValue, UserRFID, CommandLog, Vehicle
 
 
 from django.utils.html import format_html
@@ -10,12 +10,13 @@ class StationAdmin(admin.ModelAdmin):
     list_display = [
         'id', 
         'formatted_serial_column', 
+        'runtime_environment',
         'status_badge', 
         'connector_status', 
         'last_seen_column',
         'short_address_with_tooltip',
     ]
-    list_filter = ['status', 'connector_type']
+    list_filter = ['status', 'runtime_environment', 'connector_type']
     search_fields = [
         'serial_number', 
         'address', 
@@ -93,17 +94,17 @@ class ConnectorAdmin(admin.ModelAdmin):
 class TransactionAdmin(admin.ModelAdmin):
     """OCPP Transaction Admin - Core charging session management."""
     list_display = [
-        'id', 'transaction_id', 'id_tag', 'connector', 
+        'id', 'transaction_id', 'vehicle', 'id_tag', 'connector', 
         'status', 'started_at', 'duration_display', 'energy_display'
     ]
     list_filter = ['status', 'started_at']
-    search_fields = ['id_tag', 'connector__station__address', 'transaction_id']
+    search_fields = ['id_tag', 'vehicle__vehicle_identifier', 'vehicle__vin', 'vehicle__registration_number', 'connector__station__address', 'transaction_id']
     date_hierarchy = 'started_at'
     readonly_fields = ['started_at', 'energy_consumed', 'duration']
     
     fieldsets = (
         ('Transaction Information', {
-            'fields': ('transaction_id', 'id_tag', 'connector', 'status')
+            'fields': ('transaction_id', 'vehicle', 'id_tag', 'connector', 'status')
         }),
         ('Timing', {
             'fields': ('started_at', 'stopped_at')
@@ -137,6 +138,29 @@ class TransactionAdmin(admin.ModelAdmin):
             return f"{energy:.2f} kWh"
         return "N/A"
     energy_display.short_description = 'Energy'
+
+
+@admin.register(Vehicle)
+class VehicleAdmin(admin.ModelAdmin):
+    list_display = [
+        'vehicle_identifier', 'registration_number', 'vin', 'manufacturer',
+        'model_name', 'model_year', 'last_known_soc_percent', 'battery_capacity_kwh', 'last_seen_at'
+    ]
+    list_filter = ['manufacturer', 'model_year', 'created_at', 'last_seen_at']
+    search_fields = ['vehicle_identifier', 'registration_number', 'vin', 'manufacturer', 'model_name', 'trim', 'color']
+    readonly_fields = ['created_at', 'updated_at', 'first_seen_at', 'last_seen_at']
+    fieldsets = (
+        ('Identity', {
+            'fields': ('vehicle_identifier', 'vin', 'registration_number')
+        }),
+        ('Vehicle Details', {
+            'fields': ('manufacturer', 'model_name', 'model_year', 'trim', 'color', 'battery_capacity_kwh', 'last_known_soc_percent')
+        }),
+        ('Metadata', {
+            'fields': ('metadata', 'first_seen_at', 'last_seen_at', 'created_at', 'updated_at'),
+            'classes': ('collapse',),
+        }),
+    )
 
 
 @admin.register(MeterValue)

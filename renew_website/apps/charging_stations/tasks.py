@@ -43,16 +43,35 @@ def process_meter_values(station_id, connector_id, transaction_id, power_w, ener
     Записва в базата, ъпдейтва UI и изпраща сигнал към алгоритъма.
     """
     try:
-        # 1. Запис на телеметрията (опционално: само ако транзакцията е активна)
+        tx = None
         if transaction_id:
+            tx = (
+                Transaction.objects
+                .select_related('vehicle')
+                .filter(id=transaction_id)
+                .first()
+            )
+
+        # 1. Запис на телеметрията (опционално: само ако транзакцията е активна)
+        if tx:
             MeterValue.objects.create(
-                transaction_id=transaction_id,
+                transaction=tx,
                 power_w=power_w,
                 energy_wh=energy_wh,
                 soc_percentage=soc_percentage,
                 data=mv_data or {},
                 timestamp=timezone.now()
             )
+
+            if soc_percentage is not None and tx.vehicle_id:
+                vehicle = tx.vehicle
+                if vehicle:
+                    update_fields = ['last_seen_at']
+                    vehicle.last_seen_at = timezone.now()
+                    if vehicle.last_known_soc_percent != soc_percentage:
+                        vehicle.last_known_soc_percent = soc_percentage
+                        update_fields.append('last_known_soc_percent')
+                    vehicle.save(update_fields=update_fields)
 
         # 2. Уведомяване на браузърите (WebSockets / UI)
         if soc_percentage is not None:

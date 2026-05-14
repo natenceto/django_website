@@ -4,13 +4,17 @@ import json
 import logging
 import datetime as py_datetime
 from datetime import timedelta
+from decimal import Decimal
+from enum import Enum
 from typing import Dict, Any, Union, Optional, Tuple
 
+from django.conf import settings
 from django.utils import timezone
 from django.db import transaction as db_transaction
 from channels.generic.websocket import AsyncWebsocketConsumer
 from channels.db import database_sync_to_async
 
+from ocpp import exceptions as ocpp_exceptions
 from ocpp.routing import on
 from ocpp.v16 import ChargePoint as OCPPChargePoint
 from ocpp.v16 import call, call_result
@@ -23,8 +27,35 @@ from ocpp.v16.enums import (
 )
 
 from .logging_config import get_ocpp_logger, get_station_logger
-from .models import Station, Connector, Transaction, UserRFID, MeterValue, CommandLog
+from .models import Station, Connector, Transaction, UserRFID, MeterValue, CommandLog, Vehicle
 from .registry import ACTIVE_STATIONS, station_runtime
+
+
+def _snake_to_camel_case(value: str) -> str:
+    if not isinstance(value, str) or "_" not in value:
+        return value
+    first, *rest = value.split("_")
+    return first + "".join(part[:1].upper() + part[1:] for part in rest if part)
+
+
+def _ws_close_reason(close_code: Optional[int]) -> str:
+    close_reasons = {
+        1000: "normal_closure",
+        1001: "going_away",
+        1002: "protocol_error",
+        1003: "unsupported_data",
+        1005: "no_status_received",
+        1006: "abnormal_closure",
+        1007: "invalid_payload_data",
+        1008: "policy_violation",
+        1009: "message_too_big",
+        1010: "mandatory_extension_missing",
+        1011: "internal_error",
+        1012: "service_restart",
+        1013: "try_again_later",
+        1015: "tls_handshake_failure",
+    }
+    return close_reasons.get(close_code, "unknown")
 
 
 # -------------------------
@@ -32,6 +63,33 @@ from .registry import ACTIVE_STATIONS, station_runtime
 # -------------------------
 ocpp_logger = get_ocpp_logger("consumers")
 logger = logging.getLogger("charging_stations")
+
+
+def _ocpp_configuration_timeout_seconds() -> float:
+    return float(getattr(settings, "OCPP_CONFIGURATION_TIMEOUT_SECONDS", 10.0))
+
+
+def _ocpp_station_configuration_defaults() -> Dict[str, str]:
+    configured = getattr(settings, "OCPP_STATION_CONFIGURATION", {}) or {}
+    defaults = {
+        "HeartbeatInterval": "60",
+        "MeterValueSampleInterval": "30",
+        "ClockAlignedDataInterval": "0",
+        "MeterValuesSampledData": (
+            "Energy.Active.Import.Register,Power.Active.Import,Current.Import,Voltage"
+        ),
+    }
+    merged = {**defaults, **configured}
+
+    sampled_data = merged.get("MeterValuesSampledData", defaults["MeterValuesSampledData"])
+    if isinstance(sampled_data, (list, tuple)):
+        sampled_data = ",".join(str(item) for item in sampled_data if item)
+    merged["MeterValuesSampledData"] = str(sampled_data)
+
+    for numeric_key in ("HeartbeatInterval", "MeterValueSampleInterval", "ClockAlignedDataInterval"):
+        merged[numeric_key] = str(merged[numeric_key])
+
+    return merged
 
 
 # -------------------------
@@ -223,7 +281,335 @@ class ChargePoint(OCPPChargePoint):
         self.pending_session_context: Dict[Tuple[int, str], Dict[str, Any]] = {}
 
         self.last_seen = timezone.now()
-        self.heartbeat_interval = 60
+        self.heartbeat_interval = int(_ocpp_station_configuration_defaults()["HeartbeatInterval"])
+        self.charge_point_model: Optional[str] = None
+        self.charge_point_vendor: Optional[str] = None
+
+    def _log_ocpp_event(self, event_name: str, **fields: Any) -> None:
+        rendered_fields = " ".join(
+            f"{key}={value}"
+            for key, value in fields.items()
+            if value not in (None, "", [], {}, ())
+        )
+        get_station_logger(self.station_id).info(
+            "%s:%s%s",
+            event_name,
+            " " if rendered_fields else "",
+            rendered_fields,
+        )
+
+    def _serialize_ocpp_log_value(self, value: Any) -> Any:
+        if value is None or isinstance(value, (str, int, float, bool)):
+            return value
+        if isinstance(value, Enum):
+            return value.value
+        if isinstance(value, dict):
+            return {
+                _snake_to_camel_case(str(key)): self._serialize_ocpp_log_value(item)
+                for key, item in value.items()
+                if item is not None
+            }
+        if isinstance(value, (list, tuple, set)):
+            return [self._serialize_ocpp_log_value(item) for item in value]
+        if hasattr(value, "_asdict"):
+            return self._serialize_ocpp_log_value(value._asdict())
+        if hasattr(value, "__dict__"):
+            return {
+                _snake_to_camel_case(str(key)): self._serialize_ocpp_log_value(item)
+                for key, item in vars(value).items()
+                if not str(key).startswith("_") and item is not None
+            }
+        return str(value)
+
+    def _format_ocpp_log_payload(self, payload: Any) -> str:
+        serialized = self._serialize_ocpp_log_value(payload)
+        if serialized in (None, ""):
+            serialized = {}
+        return json.dumps(serialized, ensure_ascii=True, sort_keys=True, default=str)
+
+    def _log_ocpp_request(self, action_name: str, payload: Any, direction: str) -> None:
+        station_logger = get_station_logger(self.station_id)
+        if direction == "inbound":
+            station_logger.info("Received %s request", action_name)
+        else:
+            station_logger.info("Sending %s request", action_name)
+        station_logger.info("Request: %s", self._format_ocpp_log_payload(payload))
+
+    def _log_ocpp_response(self, action_name: str, payload: Any, direction: str) -> None:
+        station_logger = get_station_logger(self.station_id)
+        if direction == "inbound":
+            station_logger.info("Sending %s response", action_name)
+        else:
+            station_logger.info("%s response received", action_name)
+        station_logger.info("Response: %s", self._format_ocpp_log_payload(payload))
+
+    def _log_ocpp_response_error(self, action_name: str, exc: Exception, direction: str) -> None:
+        error_payload = {
+            "errorCode": getattr(exc, "code", exc.__class__.__name__),
+            "errorDescription": getattr(exc, "description", str(exc)),
+            "errorDetails": getattr(exc, "details", {}),
+        }
+        station_logger = get_station_logger(self.station_id)
+        if direction == "inbound":
+            station_logger.warning("Sending %s response error", action_name)
+        else:
+            station_logger.warning("%s response error received", action_name)
+        station_logger.warning("ResponseError: %s", self._format_ocpp_log_payload(error_payload))
+
+    async def _call_with_logging(self, action_name: str, request_payload: Any):
+        self._log_ocpp_request(action_name, request_payload, direction="outbound")
+        try:
+            response = await self.call(request_payload)
+        except ocpp_exceptions.OCPPError as exc:
+            self._log_ocpp_response_error(action_name, exc, direction="outbound")
+            raise
+        except Exception:
+            ocpp_logger.exception("%s outbound call failed", action_name)
+            raise
+
+        self._log_ocpp_response(action_name, response, direction="outbound")
+        return response
+
+    def _desired_station_configuration(self) -> Dict[str, str]:
+        return _ocpp_station_configuration_defaults()
+
+    def _configuration_map_from_response(self, response: Any) -> Dict[str, Dict[str, Any]]:
+        config_map: Dict[str, Dict[str, Any]] = {}
+        cfg_list = getattr(response, "configuration_key", None) if response else None
+        if not isinstance(cfg_list, (list, tuple)):
+            return config_map
+
+        for item in cfg_list:
+            key = getattr(item, "key", None)
+            if not key:
+                continue
+            config_map[str(key)] = {
+                "value": getattr(item, "value", None),
+                "readonly": bool(getattr(item, "readonly", False)),
+            }
+        return config_map
+
+    def _extract_vehicle_attributes(self, payload: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        if not isinstance(payload, dict):
+            return {}
+
+        vehicle_payload = payload.get("vehicle") if isinstance(payload.get("vehicle"), dict) else payload
+        battery_payload = payload.get("battery") if isinstance(payload.get("battery"), dict) else {}
+
+        attrs: Dict[str, Any] = {}
+
+        vin = vehicle_payload.get("vin") or payload.get("vin")
+        registration_number = (
+            vehicle_payload.get("registrationNumber")
+            or vehicle_payload.get("registration_number")
+            or payload.get("registrationNumber")
+            or payload.get("licensePlate")
+            or payload.get("plate")
+        )
+        manufacturer = (
+            vehicle_payload.get("manufacturer")
+            or vehicle_payload.get("make")
+            or payload.get("manufacturer")
+            or payload.get("make")
+            or payload.get("brand")
+        )
+        model_name = (
+            vehicle_payload.get("model")
+            or vehicle_payload.get("modelName")
+            or payload.get("vehicleModel")
+            or payload.get("modelName")
+        )
+        model_year = (
+            vehicle_payload.get("modelYear")
+            or vehicle_payload.get("year")
+            or payload.get("modelYear")
+            or payload.get("year")
+        )
+        trim = (
+            vehicle_payload.get("trim")
+            or vehicle_payload.get("variant")
+            or payload.get("trim")
+            or payload.get("variant")
+        )
+        color = (
+            vehicle_payload.get("color")
+            or vehicle_payload.get("exteriorColor")
+            or payload.get("color")
+            or payload.get("exteriorColor")
+        )
+        battery_capacity_kwh = (
+            battery_payload.get("capacityKwh")
+            or vehicle_payload.get("batteryCapacityKwh")
+            or payload.get("batteryCapacityKwh")
+            or payload.get("battery_capacity_kwh")
+        )
+        last_known_soc_percent = (
+            battery_payload.get("socPercent")
+            or vehicle_payload.get("socPercent")
+            or vehicle_payload.get("soc")
+            or payload.get("socPercent")
+            or payload.get("soc")
+            or payload.get("batteryLevel")
+        )
+
+        if vin:
+            attrs["vin"] = str(vin)[:64]
+        if registration_number:
+            attrs["registration_number"] = str(registration_number)[:32]
+        if manufacturer:
+            attrs["manufacturer"] = str(manufacturer)[:100]
+        if model_name:
+            attrs["model_name"] = str(model_name)[:100]
+        if model_year not in (None, ""):
+            try:
+                attrs["model_year"] = int(model_year)
+            except Exception:
+                pass
+        if trim:
+            attrs["trim"] = str(trim)[:100]
+        if color:
+            attrs["color"] = str(color)[:50]
+        if battery_capacity_kwh not in (None, ""):
+            try:
+                attrs["battery_capacity_kwh"] = Decimal(str(battery_capacity_kwh))
+            except Exception:
+                pass
+        if last_known_soc_percent not in (None, ""):
+            try:
+                parsed_soc = float(last_known_soc_percent)
+                if 0 <= parsed_soc <= 100:
+                    attrs["last_known_soc_percent"] = parsed_soc
+            except Exception:
+                pass
+
+        metadata: Dict[str, Any] = {}
+        raw_metadata = payload.get("vehicleMetadata")
+        if isinstance(raw_metadata, dict):
+            metadata.update(raw_metadata)
+
+        extra_metadata_map = {
+            "estimated_range_km": (
+                vehicle_payload.get("estimatedRangeKm")
+                or payload.get("estimatedRangeKm")
+                or payload.get("rangeKm")
+            ),
+            "battery_chemistry": battery_payload.get("chemistry") or payload.get("batteryChemistry"),
+            "charge_port": vehicle_payload.get("chargePort") or payload.get("chargePort"),
+            "odometer_km": vehicle_payload.get("odometerKm") or payload.get("odometerKm") or payload.get("odometer"),
+        }
+        for key, value in extra_metadata_map.items():
+            if value not in (None, ""):
+                metadata[key] = value
+
+        if metadata:
+            attrs["metadata"] = metadata
+
+        return attrs
+
+    def _upsert_vehicle(self, id_tag: str, payload: Optional[Dict[str, Any]] = None) -> Optional[Vehicle]:
+        normalized_identifier = (id_tag or "").strip()[:64]
+        if not normalized_identifier:
+            return None
+
+        attrs = self._extract_vehicle_attributes(payload)
+        now = timezone.now()
+        defaults = {**attrs, "last_seen_at": now}
+
+        vehicle, _ = Vehicle.objects.get_or_create(
+            vehicle_identifier=normalized_identifier,
+            defaults=defaults,
+        )
+
+        changed_fields = []
+        if vehicle.last_seen_at != now:
+            vehicle.last_seen_at = now
+            changed_fields.append("last_seen_at")
+
+        for field_name, field_value in attrs.items():
+            if field_name == "metadata":
+                if field_value and field_value != vehicle.metadata:
+                    merged_metadata = dict(vehicle.metadata or {})
+                    merged_metadata.update(field_value)
+                    vehicle.metadata = merged_metadata
+                    changed_fields.append("metadata")
+                continue
+
+            if field_value not in (None, "") and getattr(vehicle, field_name) != field_value:
+                setattr(vehicle, field_name, field_value)
+                changed_fields.append(field_name)
+
+        if changed_fields:
+            vehicle.save(update_fields=list(dict.fromkeys(changed_fields)))
+
+        return vehicle
+
+    @database_sync_to_async
+    def _update_active_vehicle_from_payload(self, payload: Dict[str, Any]) -> bool:
+        active_tx = (
+            Transaction.objects
+            .filter(connector__station_id=self.station_id, status="active")
+            .select_related("vehicle")
+            .order_by("-started_at", "-id")
+            .first()
+        )
+        if not active_tx:
+            return False
+
+        vehicle = self._upsert_vehicle(active_tx.id_tag, payload)
+        if vehicle and active_tx.vehicle_id != vehicle.id:
+            active_tx.vehicle = vehicle
+            active_tx.save(update_fields=["vehicle"])
+        return vehicle is not None
+
+    def _update_vehicle_soc(self, vehicle: Optional[Vehicle], soc_value: Optional[float], observed_at=None) -> None:
+        if not vehicle or soc_value is None:
+            return
+
+        update_fields = ["last_seen_at"]
+        vehicle.last_seen_at = observed_at or timezone.now()
+        if vehicle.last_known_soc_percent != soc_value:
+            vehicle.last_known_soc_percent = soc_value
+            update_fields.append("last_known_soc_percent")
+        vehicle.save(update_fields=update_fields)
+
+    def _resolve_pending_remote_start(
+        self,
+        connector_id: int,
+        id_tag: str,
+    ) -> tuple[Optional[Tuple[int, str]], Optional[float], Dict[str, Any]]:
+        normalized_id_tag = (id_tag or "")[:20]
+        exact_key = (int(connector_id), normalized_id_tag)
+        if exact_key in self.pending_requested_power or exact_key in self.pending_session_context:
+            return (
+                exact_key,
+                self.pending_requested_power.get(exact_key),
+                dict(self.pending_session_context.get(exact_key, {})),
+            )
+
+        connector_candidates = {
+            key for key in self.pending_requested_power.keys() if key[0] == int(connector_id)
+        } | {
+            key for key in self.pending_session_context.keys() if key[0] == int(connector_id)
+        }
+
+        if len(connector_candidates) != 1:
+            return None, None, {}
+
+        matched_key = next(iter(connector_candidates))
+        if matched_key[1] != normalized_id_tag:
+            ocpp_logger.warning(
+                "StartTransaction idTag mismatch for station=%s connector=%s: station sent %s, pending remote start used %s",
+                self.station_id,
+                connector_id,
+                normalized_id_tag,
+                matched_key[1],
+            )
+
+        return (
+            matched_key,
+            self.pending_requested_power.get(matched_key),
+            dict(self.pending_session_context.get(matched_key, {})),
+        )
 
 
     async def route_message(self, raw_msg: str):
@@ -317,11 +703,13 @@ class ChargePoint(OCPPChargePoint):
         if not consumer or not getattr(consumer, "_connected", False):
             return
 
+        desired_configuration = self._desired_station_configuration()
+        requested_keys = ["NumberOfConnectors", *desired_configuration.keys()]
         config = None
         try:
             config = await asyncio.wait_for(
-                self.call_get_configuration(keys=["NumberOfConnectors"]),
-                timeout=10.0,
+                self.call_get_configuration(keys=requested_keys),
+                timeout=_ocpp_configuration_timeout_seconds(),
             )
         except asyncio.TimeoutError:
             ocpp_logger.warning("GetConfiguration timeout (non-critical)")
@@ -329,15 +717,73 @@ class ChargePoint(OCPPChargePoint):
             ocpp_logger.exception("GetConfiguration failed (non-critical)")
 
         num_connectors = 1
+        configuration_map = self._configuration_map_from_response(config)
         try:
-            cfg_list = getattr(config, "configuration_key", None) if config else None
-            if isinstance(cfg_list, (list, tuple)):
-                for item in cfg_list:
-                    if getattr(item, "key", None) == "NumberOfConnectors":
-                        num_connectors = max(1, int(getattr(item, "value", 1)))
-                        break
+            if "NumberOfConnectors" in configuration_map:
+                num_connectors = max(1, int(configuration_map["NumberOfConnectors"]["value"] or 1))
         except Exception:
             ocpp_logger.exception("Failed to parse NumberOfConnectors; using default 1")
+
+        self._log_ocpp_event(
+            "GetConfiguration",
+            requested_keys=",".join(requested_keys),
+            number_of_connectors=num_connectors,
+            meter_value_sample_interval=configuration_map.get("MeterValueSampleInterval", {}).get("value"),
+            clock_aligned_data_interval=configuration_map.get("ClockAlignedDataInterval", {}).get("value"),
+        )
+
+        for key, desired_value in desired_configuration.items():
+            current_entry = configuration_map.get(key, {})
+            current_value = current_entry.get("value")
+            is_readonly = bool(current_entry.get("readonly", False))
+            if str(current_value) == str(desired_value):
+                self._log_ocpp_event("ChangeConfiguration", key=key, result="unchanged", value=current_value)
+                continue
+            if is_readonly:
+                self._log_ocpp_event(
+                    "ChangeConfiguration",
+                    key=key,
+                    result="readonly",
+                    current_value=current_value,
+                    desired_value=desired_value,
+                )
+                continue
+
+            try:
+                response = await asyncio.wait_for(
+                    self.call_change_configuration(key=key, value=str(desired_value)),
+                    timeout=_ocpp_configuration_timeout_seconds(),
+                )
+                result_status = getattr(response, "status", None)
+                if hasattr(result_status, "value"):
+                    result_status = result_status.value
+                self._log_ocpp_event(
+                    "ChangeConfiguration",
+                    key=key,
+                    result=result_status or "unknown",
+                    desired_value=desired_value,
+                    previous_value=current_value,
+                )
+            except asyncio.TimeoutError:
+                self._log_ocpp_event(
+                    "ChangeConfiguration",
+                    key=key,
+                    result="timeout",
+                    desired_value=desired_value,
+                    previous_value=current_value,
+                )
+            except ocpp_exceptions.OCPPError as exc:
+                error_code = getattr(exc, "code", exc.__class__.__name__)
+                self._log_ocpp_event(
+                    "ChangeConfiguration",
+                    key=key,
+                    result="call_error",
+                    error_code=error_code,
+                    desired_value=desired_value,
+                    previous_value=current_value,
+                )
+            except Exception:
+                ocpp_logger.exception("ChangeConfiguration failed for %s", key)
 
         try:
             await self._batch_create_connectors(num_connectors)
@@ -356,10 +802,29 @@ class ChargePoint(OCPPChargePoint):
     # -------------------------
     @on(Action.BootNotification)
     async def on_boot_notification(self, charge_point_vendor: str, charge_point_model: str, **kwargs):
+        self.charge_point_model = charge_point_model
+        self.charge_point_vendor = charge_point_vendor
+
+        firmware_version = kwargs.get("firmware_version") or kwargs.get("firmwareVersion")
+        self._log_ocpp_request(
+            "BootNotification",
+            {
+                "chargePointVendor": charge_point_vendor,
+                "chargePointModel": charge_point_model,
+                "firmwareVersion": firmware_version,
+                "chargeBoxSerialNumber": kwargs.get("charge_box_serial_number") or kwargs.get("chargeBoxSerialNumber"),
+            },
+            direction="inbound",
+        )
+
         station_id = self.station_id
-        station_logger = get_station_logger(self.station_id)
-        
-        self.heartbeat_interval = int(getattr(self, "default_heartbeat_interval", 60))
+        self.heartbeat_interval = int(
+            getattr(
+                self,
+                "default_heartbeat_interval",
+                int(_ocpp_station_configuration_defaults()["HeartbeatInterval"]),
+            )
+        )
 
         @database_sync_to_async
         def check_station_exists():
@@ -372,7 +837,10 @@ class ChargePoint(OCPPChargePoint):
             station_exists = False
 
         if not station_exists:
-            station_logger.warning(f"BootNotification rejected: Station {station_id} not found in database.")
+            get_station_logger(self.station_id).warning(
+                "BootNotification rejected: Station %s not found in database.",
+                station_id,
+            )
             current_time = (
                 timezone.now()
                 .astimezone(py_datetime.timezone.utc)
@@ -380,22 +848,22 @@ class ChargePoint(OCPPChargePoint):
                 .isoformat()
                 .replace("+00:00", "Z")
             )
-            return call_result.BootNotificationPayload(
+            response = call_result.BootNotificationPayload(
                 status=RegistrationStatus.rejected,
                 current_time=current_time,
                 interval=self.heartbeat_interval,
             )
+            self._log_ocpp_response("BootNotification", response, direction="inbound")
+            return response
 
-        get_station_logger(self.station_id).info("=== OCPP 1.6 BootNotification ===")
-        get_station_logger(self.station_id).info(f"Station ID: {station_id}")
-        get_station_logger(self.station_id).info(f"Vendor: {charge_point_vendor}")
-        get_station_logger(self.station_id).info(f"Model: {charge_point_model}")
-
-        firmware_version = kwargs.get("firmware_version") or kwargs.get("firmwareVersion")
-        if firmware_version:
-            get_station_logger(self.station_id).info(f"Firmware: {firmware_version}")
-
-        get_station_logger(self.station_id).info(f"Heartbeat interval: {self.heartbeat_interval}s")
+        self._log_ocpp_event(
+            "BootNotification",
+            station_id=station_id,
+            vendor=charge_point_vendor,
+            model=charge_point_model,
+            firmware=firmware_version,
+            heartbeat_interval_seconds=self.heartbeat_interval,
+        )
 
         try:
             asyncio.create_task(self._update_station_status_async("active", "boot"))
@@ -412,15 +880,22 @@ class ChargePoint(OCPPChargePoint):
             .replace("+00:00", "Z")
         )
 
-        return call_result.BootNotificationPayload(
+        response = call_result.BootNotificationPayload(
             status=RegistrationStatus.accepted,
             current_time=current_time,
             interval=self.heartbeat_interval,
         )
+        self._log_ocpp_response("BootNotification", response, direction="inbound")
+        return response
 
     @on(Action.Authorize)
     async def on_authorize(self, id_tag: str, **kwargs):
         id_tag = (id_tag or "")[:20]
+        self._log_ocpp_request(
+            "Authorize",
+            {"idTag": id_tag},
+            direction="inbound",
+        )
 
         try:
             is_valid = await database_sync_to_async(
@@ -445,14 +920,25 @@ class ChargePoint(OCPPChargePoint):
             except Exception:
                 ocpp_logger.exception("Error broadcasting authorization success")
 
-        return call_result.AuthorizePayload(id_tag_info={"status": status})
+        response = call_result.AuthorizePayload(id_tag_info={"status": status})
+        self._log_ocpp_response("Authorize", response, direction="inbound")
+        return response
 
     @on(Action.StatusNotification)
     async def on_status_notification(self, connector_id: int, error_code: str, status: str, **kwargs):
         self.last_seen = timezone.now()
         station_id = self.station_id
-        station_logger = get_station_logger(self.station_id)
-
+        self._log_ocpp_request(
+            "StatusNotification",
+            {
+                "connectorId": int(connector_id),
+                "status": status,
+                "errorCode": error_code,
+                "info": kwargs.get("info"),
+                "timestamp": kwargs.get("timestamp"),
+            },
+            direction="inbound",
+        )
         def normalize_status(s: str) -> str:
             s_lower = (s or "").strip().lower()
             mapping = {
@@ -470,8 +956,13 @@ class ChargePoint(OCPPChargePoint):
 
         normalized = normalize_status(status)
 
-        get_station_logger(self.station_id).info(
-            f"StatusNotification: station={station_id} connectorId={connector_id} status={status} -> {normalized} errorCode={error_code}"
+        self._log_ocpp_event(
+            "StatusNotification",
+            station_id=station_id,
+            connector_id=connector_id,
+            status=status,
+            normalized_status=normalized,
+            error_code=error_code,
         )
 
         # connectorId=0 is station-level state
@@ -493,7 +984,9 @@ class ChargePoint(OCPPChargePoint):
                 asyncio.create_task(update_station_last_status())
             except Exception:
                 ocpp_logger.exception("Failed scheduling station status update for connectorId=0")
-            return call_result.StatusNotificationPayload()
+            response = call_result.StatusNotificationPayload()
+            self._log_ocpp_response("StatusNotification", response, direction="inbound")
+            return response
 
         try:
             async with self.db_lock:
@@ -556,7 +1049,9 @@ class ChargePoint(OCPPChargePoint):
         except Exception:
             ocpp_logger.exception("Error processing StatusNotification")
 
-        return call_result.StatusNotificationPayload()
+        response = call_result.StatusNotificationPayload()
+        self._log_ocpp_response("StatusNotification", response, direction="inbound")
+        return response
 
     @on(Action.Heartbeat)
     async def on_heartbeat(self):
@@ -579,8 +1074,11 @@ class ChargePoint(OCPPChargePoint):
         rapid_window_key = f"hb_window_{station_id}"
 
         last_log = cache.get(last_log_key)
+        should_log_heartbeat = not last_log or (now_ts_sec - last_log) >= LOG_THROTTLE
+        if should_log_heartbeat:
+            self._log_ocpp_request("Heartbeat", {}, direction="inbound")
         if not last_log or (now_ts_sec - last_log) >= LOG_THROTTLE:
-            get_station_logger(self.station_id).info("Heartbeat received")
+            self._log_ocpp_event("Heartbeat", station_id=station_id, action="received")
             cache.set(last_log_key, now_ts_sec, timeout=LOG_THROTTLE*2)
 
         last_db = cache.get(last_db_key)
@@ -611,7 +1109,10 @@ class ChargePoint(OCPPChargePoint):
             .isoformat()
             .replace("+00:00", "Z")
         )
-        return call_result.HeartbeatPayload(current_time=current_time)
+        response = call_result.HeartbeatPayload(current_time=current_time)
+        if should_log_heartbeat:
+            self._log_ocpp_response("Heartbeat", response, direction="inbound")
+        return response
 
 
     @on(Action.MeterValues)
@@ -623,6 +1124,15 @@ class ChargePoint(OCPPChargePoint):
         **kwargs,
     ):
         self.last_seen = timezone.now()
+        self._log_ocpp_request(
+            "MeterValues",
+            {
+                "connectorId": int(connector_id),
+                "transactionId": transaction_id,
+                "meterValue": meter_value or [],
+            },
+            direction="inbound",
+        )
 
         soc_percentage: Optional[float] = None
         soc_timestamp: Optional[str] = None
@@ -671,7 +1181,9 @@ class ChargePoint(OCPPChargePoint):
             ocpp_logger.exception("Failed parsing SoC from MeterValues")
 
         if not transaction_id:
-            return call_result.MeterValuesPayload()
+            response = call_result.MeterValuesPayload()
+            self._log_ocpp_response("MeterValues", response, direction="inbound")
+            return response
 
         # ---------------------------
         # Persist safely
@@ -777,9 +1289,22 @@ class ChargePoint(OCPPChargePoint):
                 return {
                     "station_id": self.station_id,
                     "soc_percentage": soc_percentage,
+                    "power_w": power_w,
+                    "energy_wh": energy_wh,
                 }
 
             result = await persist()
+
+        self._log_ocpp_event(
+            "MeterValues",
+            station_id=self.station_id,
+            connector_id=connector_id,
+            transaction_id=transaction_id,
+            power_w=result.get("power_w") if result else None,
+            energy_wh=result.get("energy_wh") if result else None,
+            soc_percentage=round(soc_percentage, 2) if soc_percentage is not None else None,
+            sample_count=sum(len((mv.get("sampled_value") or [])) for mv in (meter_value or [])),
+        )
 
         # ---------------------------
         # Broadcast SoC update
@@ -797,7 +1322,9 @@ class ChargePoint(OCPPChargePoint):
             except Exception:
                 ocpp_logger.exception("Failed broadcasting SoC update")
 
-        return call_result.MeterValuesPayload()
+        response = call_result.MeterValuesPayload()
+        self._log_ocpp_response("MeterValues", response, direction="inbound")
+        return response
 
 
     @on(Action.DataTransfer)
@@ -805,8 +1332,17 @@ class ChargePoint(OCPPChargePoint):
         """
         Supports:
           - Generic / SoCData: data is JSON string {"soc": <num>, "timestamp": "<iso>"}
-          - Optional vendor parsing based on Station.supports_vendor_soc + Station.vendor_id
+                    - Vendor telemetry snapshots that carry SoC outside standard MeterValues
         """
+        self._log_ocpp_request(
+            "DataTransfer",
+            {
+                "vendorId": vendor_id,
+                "messageId": message_id,
+                "data": data,
+            },
+            direction="inbound",
+        )
         # Generic SoCData (your simulator)
         if (vendor_id or "") == "Generic" and (message_id or "") == "SoCData" and data:
             try:
@@ -829,25 +1365,40 @@ class ChargePoint(OCPPChargePoint):
                         await self.consumer.broadcast_soc_update(self.station_id, soc_value)
             except Exception:
                 ocpp_logger.exception("Error processing Generic SoCData")
-            return call_result.DataTransferPayload(status="Accepted")
+            response = call_result.DataTransferPayload(status="Accepted")
+            self._log_ocpp_response("DataTransfer", response, direction="inbound")
+            return response
 
-        # Vendor SoC based on station config
-        try:
-            station_info = await database_sync_to_async(
-                lambda: Station.objects.filter(id=self.station_id).values("vendor_id", "supports_vendor_soc").first()
-            )()
-        except Exception:
-            station_info = None
-
-        if station_info and station_info.get("supports_vendor_soc") and station_info.get("vendor_id") == vendor_id and data:
+        parsed_payload = None
+        if data:
             try:
-                soc_data = self.parse_vendor_soc_data(data, vendor_id)
-                if soc_data:
-                    await self.process_vendor_soc(soc_data)
+                parsed_payload = json.loads(data) if isinstance(data, str) else data
             except Exception:
-                ocpp_logger.exception("Error processing vendor DataTransfer")
+                parsed_payload = None
 
-        return call_result.DataTransferPayload(status="Accepted")
+        if isinstance(parsed_payload, dict):
+            try:
+                await self._update_active_vehicle_from_payload(parsed_payload)
+            except Exception:
+                ocpp_logger.exception("Error updating vehicle metadata from DataTransfer")
+
+        try:
+            soc_data = self.parse_vendor_soc_data(parsed_payload if isinstance(parsed_payload, dict) else data, vendor_id)
+            if soc_data:
+                await self.process_vendor_soc(soc_data)
+                self._log_ocpp_event(
+                    "VendorSoC",
+                    station_id=self.station_id,
+                    vendor_id=vendor_id,
+                    message_id=message_id,
+                    soc_percentage=round(float(soc_data.get("percentage")), 2) if soc_data.get("percentage") is not None else None,
+                )
+        except Exception:
+            ocpp_logger.exception("Error processing vendor DataTransfer")
+
+        response = call_result.DataTransferPayload(status="Accepted")
+        self._log_ocpp_response("DataTransfer", response, direction="inbound")
+        return response
 
     @database_sync_to_async
     def _persist_soc_from_vendor(self, soc_value: float, ts, source: str) -> None:
@@ -863,6 +1414,7 @@ class ChargePoint(OCPPChargePoint):
         MeterValue.objects.create(
             transaction=tx,
             value=tx.meter_start,
+            soc_percentage=float(soc_value),
             timestamp=ts,
             data={
                 "soc_percentage": float(soc_value),
@@ -871,14 +1423,47 @@ class ChargePoint(OCPPChargePoint):
                 "samples": []
             },
         )
+        self._update_vehicle_soc(tx.vehicle, float(soc_value), observed_at=ts)
 
     @on(Action.DiagnosticsStatusNotification)
     async def on_diagnostics_status_notification(self, status: str, **kwargs):
+        self._log_ocpp_request(
+            "DiagnosticsStatusNotification",
+            {"status": status},
+            direction="inbound",
+        )
         ocpp_logger.info(f"DiagnosticsStatusNotification: station={self.station_id} status={status}")
-        return call_result.DiagnosticsStatusNotificationPayload()
+        response = call_result.DiagnosticsStatusNotificationPayload()
+        self._log_ocpp_response("DiagnosticsStatusNotification", response, direction="inbound")
+        return response
+
+    @on(Action.FirmwareStatusNotification)
+    async def on_firmware_status_notification(self, status: str, **kwargs):
+        self._log_ocpp_request(
+            "FirmwareStatusNotification",
+            {"status": status},
+            direction="inbound",
+        )
+        self._log_ocpp_event(
+            "FirmwareStatusNotification",
+            station_id=self.station_id,
+            status=status,
+        )
+        response = call_result.FirmwareStatusNotificationPayload()
+        self._log_ocpp_response("FirmwareStatusNotification", response, direction="inbound")
+        return response
 
     @on(Action.SecurityEventNotification)
     async def on_security_event_notification(self, type: str, timestamp: str, **kwargs):
+        self._log_ocpp_request(
+            "SecurityEventNotification",
+            {
+                "type": type,
+                "timestamp": timestamp,
+                "techInfo": kwargs.get("techInfo"),
+            },
+            direction="inbound",
+        )
         try:
             get_station_logger(self.station_id).info(
                 "SecurityEventNotification: station=%s type=%s timestamp=%s techInfo=%s",
@@ -889,7 +1474,9 @@ class ChargePoint(OCPPChargePoint):
             )
         except Exception:
             pass
-        return call_result.SecurityEventNotificationPayload()
+        response = call_result.SecurityEventNotificationPayload()
+        self._log_ocpp_response("SecurityEventNotification", response, direction="inbound")
+        return response
 
     @on(Action.StartTransaction)
     async def on_start_transaction(
@@ -902,10 +1489,26 @@ class ChargePoint(OCPPChargePoint):
         **kwargs,
     ):
         id_tag = (id_tag or "")[:20]
+        self._log_ocpp_request(
+            "StartTransaction",
+            {
+                "connectorId": int(connector_id),
+                "idTag": id_tag,
+                "timestamp": str(timestamp),
+                "meterStart": meter_start,
+                "reservationId": reservation_id,
+            },
+            direction="inbound",
+        )
+
+        pending_key, requested_power, session_context = self._resolve_pending_remote_start(
+            int(connector_id),
+            id_tag,
+        )
 
         # Заявка от платформата? Ако да, автоматично одобряваме,
         #  без да изискваме RFID чекиране.
-        is_remote_start = (int(connector_id), id_tag) in self.pending_requested_power
+        is_remote_start = pending_key is not None
 
         if is_remote_start:
             is_valid = True
@@ -923,14 +1526,12 @@ class ChargePoint(OCPPChargePoint):
                 is_valid = False
 
         if not is_valid:
-            return call_result.StartTransactionPayload(
+            response = call_result.StartTransactionPayload(
                 transaction_id=0,
                 id_tag_info={"status": AuthorizationStatus.invalid.value},
             )
-
-        pending_key = (int(connector_id), id_tag)
-        requested_power = self.pending_requested_power.get(pending_key)
-        session_context = self.pending_session_context.get(pending_key, {})
+            self._log_ocpp_response("StartTransaction", response, direction="inbound")
+            return response
 
         async with self.db_lock:
 
@@ -943,8 +1544,11 @@ class ChargePoint(OCPPChargePoint):
                         defaults={"status": "available"},
                     )
 
+                    vehicle = self._upsert_vehicle(id_tag, kwargs)
+
                     tx = Transaction.objects.create(
                         connector=conn,
+                        vehicle=vehicle,
                         id_tag=id_tag,
                         meter_start=meter_start,
                         requested_power_kw=requested_power,
@@ -977,8 +1581,9 @@ class ChargePoint(OCPPChargePoint):
 
             tx_pk = await create_tx()
 
-        self.pending_requested_power.pop(pending_key, None)
-        self.pending_session_context.pop(pending_key, None)
+        if pending_key is not None:
+            self.pending_requested_power.pop(pending_key, None)
+            self.pending_session_context.pop(pending_key, None)
 
         try:
             asyncio.create_task(self._update_station_status_async("active", "start"))
@@ -992,10 +1597,12 @@ class ChargePoint(OCPPChargePoint):
                 ocpp_logger.exception("Failed broadcasting connector charging status")
 
         # Return OCPP transactionId (we use DB pk)
-        return call_result.StartTransactionPayload(
+        response = call_result.StartTransactionPayload(
             transaction_id=int(tx_pk),
             id_tag_info={"status": AuthorizationStatus.accepted.value},
         )
+        self._log_ocpp_response("StartTransaction", response, direction="inbound")
+        return response
 
     @on(Action.StopTransaction)
     async def on_stop_transaction(
@@ -1008,6 +1615,18 @@ class ChargePoint(OCPPChargePoint):
         transaction_data: Optional[list] = None,
         **kwargs,
     ):
+        self._log_ocpp_request(
+            "StopTransaction",
+            {
+                "transactionId": int(transaction_id),
+                "timestamp": str(timestamp),
+                "meterStop": meter_stop,
+                "idTag": id_tag,
+                "reason": reason,
+                "transactionData": transaction_data,
+            },
+            direction="inbound",
+        )
         valid_reasons = {
             "EmergencyStop", "EVDisconnected", "HardReset", "Local", "Other", "PowerLoss",
             "Reboot", "Remote", "SoftReset", "UnlockCommand", "DeAuthorized",
@@ -1057,6 +1676,11 @@ class ChargePoint(OCPPChargePoint):
                         conn.save(update_fields=["status"])
 
                     try:
+                        latest_meter = MeterValue.objects.filter(transaction=tx).order_by('-timestamp', '-id').first()
+                        previous_session_context = {}
+                        if latest_meter and isinstance(latest_meter.data, dict):
+                            previous_session_context = latest_meter.data.get("session_context", {}) or {}
+
                         MeterValue.objects.create(
                             transaction=tx,
                             value=normalized_meter_stop,
@@ -1066,6 +1690,7 @@ class ChargePoint(OCPPChargePoint):
                                 "meter_start": tx.meter_start,
                                 "meter_stop": normalized_meter_stop,
                                 "reason": safe_reason,
+                                "session_context": previous_session_context,
                             },
                         )
                     except Exception:
@@ -1081,9 +1706,11 @@ class ChargePoint(OCPPChargePoint):
             except Exception:
                 ocpp_logger.exception("Failed broadcasting connector available status")
 
-        return call_result.StopTransactionPayload(
+        response = call_result.StopTransactionPayload(
             id_tag_info={"status": AuthorizationStatus.accepted.value}
         )
+        self._log_ocpp_response("StopTransaction", response, direction="inbound")
+        return response
 
     # -------------------------
     # Vendor SoC helpers (internal only)
@@ -1098,16 +1725,25 @@ class ChargePoint(OCPPChargePoint):
 
             v = (vendor_id or "").upper()
 
+            timestamp = payload.get("timestamp", timezone.now())
+            if isinstance(timestamp, str):
+                try:
+                    timestamp = timezone.datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+                except Exception:
+                    timestamp = timezone.now()
+
             if "soc" in payload:
-                return {"percentage": payload.get("soc"), "timestamp": payload.get("timestamp", timezone.now()), "source": "vendor"}
+                return {"percentage": payload.get("soc"), "timestamp": timestamp, "source": f"vendor:{v.lower()}"}
             if "batteryLevel" in payload:
-                return {"percentage": payload.get("batteryLevel"), "timestamp": payload.get("timestamp", timezone.now()), "source": "vendor"}
+                return {"percentage": payload.get("batteryLevel"), "timestamp": timestamp, "source": f"vendor:{v.lower()}"}
             if v == "SIEMENS" and isinstance(payload.get("stateOfCharge"), dict):
-                return {"percentage": payload["stateOfCharge"].get("value"), "timestamp": timezone.now(), "source": "vendor"}
+                return {"percentage": payload["stateOfCharge"].get("value"), "timestamp": timestamp, "source": f"vendor:{v.lower()}"}
             if v == "EVBOX" and isinstance(payload.get("vehicle"), dict) and "soc" in payload["vehicle"]:
-                return {"percentage": payload["vehicle"].get("soc"), "timestamp": timezone.now(), "source": "vendor"}
+                return {"percentage": payload["vehicle"].get("soc"), "timestamp": timestamp, "source": f"vendor:{v.lower()}"}
+            if isinstance(payload.get("vehicle"), dict) and "soc" in payload["vehicle"]:
+                return {"percentage": payload["vehicle"].get("soc"), "timestamp": timestamp, "source": f"vendor:{v.lower()}"}
             if "percentage" in payload:
-                return {"percentage": payload.get("percentage"), "timestamp": payload.get("timestamp", timezone.now()), "source": "vendor"}
+                return {"percentage": payload.get("percentage"), "timestamp": timestamp, "source": f"vendor:{v.lower()}"}
 
             return None
         except Exception:
@@ -1145,6 +1781,7 @@ class ChargePoint(OCPPChargePoint):
                 MeterValue.objects.create(
                     transaction=tx, 
                     value=tx.meter_start,
+                    soc_percentage=float(pct) if pct is not None else None,
                     timestamp=ts,
                     data={
                         "soc_percentage": pct,
@@ -1153,6 +1790,7 @@ class ChargePoint(OCPPChargePoint):
                         "samples": []
                     }
                 )
+                self._update_vehicle_soc(tx.vehicle, float(pct) if pct is not None else None, observed_at=ts)
                 return True
 
             ok = await update_mv()
@@ -1166,7 +1804,7 @@ class ChargePoint(OCPPChargePoint):
     # -------------------------
     async def call_authorize(self, id_tag: str):
         req = call.AuthorizePayload(id_tag=(id_tag or "")[:20])
-        return await self.call(req)
+        return await self._call_with_logging("Authorize", req)
 
     async def call_remote_start_transaction(
         self,
@@ -1207,36 +1845,49 @@ class ChargePoint(OCPPChargePoint):
             id_tag=id_tag,
             charging_profile=charging_profile,
         )
-        
-        ocpp_logger.info(f"Sending RemoteStartTransaction: connector_id={connector_id}, id_tag={id_tag}, charging_profile={'present' if charging_profile else 'None'}")
-        
-        return await self.call(req)
+
+        return await self._call_with_logging("RemoteStartTransaction", req)
 
     async def call_remote_stop_transaction(self, transaction_id: int):
         req = call.RemoteStopTransactionPayload(transaction_id=int(transaction_id))
-        return await self.call(req)
+        return await self._call_with_logging("RemoteStopTransaction", req)
 
     async def call_change_availability(self, connector_id: int, availability_type: Union[str, AvailabilityType]):
         t = availability_type
         if isinstance(t, str):
             t = AvailabilityType(t)
         req = call.ChangeAvailabilityPayload(connector_id=int(connector_id), type=t)
-        return await self.call(req)
+        return await self._call_with_logging("ChangeAvailability", req)
 
     async def call_reset(self, reset_type: Union[str, ResetType] = "Soft"):
         t = reset_type
         if isinstance(t, str):
             t = ResetType(t)
         req = call.ResetPayload(type=t)
-        return await self.call(req)
+        return await self._call_with_logging("Reset", req)
 
     async def call_unlock_connector(self, connector_id: int):
         req = call.UnlockConnectorPayload(connector_id=int(connector_id))
-        return await self.call(req)
+        return await self._call_with_logging("UnlockConnector", req)
+
+    async def call_clear_cache(self):
+        req = call.ClearCachePayload()
+        return await self._call_with_logging("ClearCache", req)
 
     async def call_get_configuration(self, keys=None):
         req = call.GetConfigurationPayload(key=keys)
-        return await self.call(req)
+        return await self._call_with_logging("GetConfiguration", req)
+
+    async def call_change_configuration(self, key: str, value: str):
+        req = call.ChangeConfigurationPayload(key=str(key), value=str(value))
+        return await self._call_with_logging("ChangeConfiguration", req)
+
+    async def call_trigger_message(self, requested_message: str, connector_id: Optional[int] = None):
+        payload_kwargs = {"requested_message": str(requested_message)}
+        if connector_id is not None:
+            payload_kwargs["connector_id"] = int(connector_id)
+        req = call.TriggerMessagePayload(**payload_kwargs)
+        return await self._call_with_logging("TriggerMessage", req)
 
 
 # -------------------------
@@ -1348,9 +1999,10 @@ class ChargePointConsumer(AsyncWebsocketConsumer):
     async def disconnect(self, close_code):
         try:
             get_station_logger(getattr(self, "station_id", "?")).warning(
-                "WS disconnect: station=%s close_code=%s connected=%s closing=%s",
+                "WS disconnect: station=%s close_code=%s close_reason=%s connected=%s closing=%s",
                 getattr(self, "station_id", None),
                 close_code,
+                _ws_close_reason(close_code),
                 getattr(self, "_connected", None),
                 getattr(self, "_is_closing", None),
             )
@@ -1410,8 +2062,19 @@ class ChargePointConsumer(AsyncWebsocketConsumer):
             connector_id = event.get("connector_id")
             id_tag = event.get("id_tag")
             requested_power = event.get("requested_power")
-            session_context = event.get("session_context") or {}
+            session_context = dict(event.get("session_context") or {})
             command_id = event.get("command_id")
+
+            runtime_model = getattr(self.cp, "charge_point_model", None)
+            runtime_vendor = getattr(self.cp, "charge_point_vendor", None)
+            runtime_signature = " ".join(part for part in [runtime_model, runtime_vendor] if part).lower()
+            if runtime_model:
+                session_context.setdefault("runtime_charge_point_model", runtime_model)
+            if runtime_vendor:
+                session_context.setdefault("runtime_charge_point_vendor", runtime_vendor)
+            if any(signature in runtime_signature for signature in {"simulator", "simulation", "avt-express"}):
+                session_context.setdefault("runtime_type", "simulated")
+                session_context.setdefault("session_source", "simulated")
             
             ocpp_logger.info(f"RemoteStartTransaction command received: station={self.station_id}, connector={connector_id}, id_tag={id_tag}, power={requested_power}")
             
@@ -1701,7 +2364,8 @@ class ChargePointConsumer(AsyncWebsocketConsumer):
             st = await self._get_station(int(station_id))
             async with self.db_lock:
                 st.status = status
-                st.last_seen = timezone.now()
+                if status == "active":
+                    st.last_seen = timezone.now()
                 await self._save_station(st)
 
             await self.broadcast_station_status(int(station_id), status=status, reason=reason)
