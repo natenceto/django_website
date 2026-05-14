@@ -1,62 +1,52 @@
-let stationsTable = null;
+// Global reference to DataTable for WebSocket updates
+var stationsTable = null;
 
 document.addEventListener("DOMContentLoaded", function () {
-
-  // =========================
-  // INIT DATA TABLE
-  // =========================
-  const tableEl = document.getElementById("dataTable");
-
-  if (tableEl) {
+  if (window.$ && $('#dataTable').length) {
     stationsTable = $('#dataTable').DataTable({
       paging: false,
       searching: false,
-      info: false,
-      destroy: true
+      info: false
     });
   }
 
-  // =========================
-  // ELEMENTS
-  // =========================
+  const checkboxes = document.querySelectorAll("input[name='station_ids']");
   const btnStart = document.getElementById("btn-start");
   const btnStop = document.getElementById("btn-stop");
   const powerSelect = document.getElementById("power-select");
   const selectAll = document.getElementById("select-all");
-  const messageContainer = document.getElementById("message-container");
 
-  // =========================
-  // HELPERS
-  // =========================
-  function getCheckboxes() {
-    return document.querySelectorAll("input[name='station_ids']");
+  function updateActionButtons() {
+    const anyChecked = Array.from(checkboxes).some(cb => cb.checked);
+    if (btnStart) btnStart.disabled = !anyChecked;
+    if (btnStop) btnStop.disabled = !anyChecked;
+    if (powerSelect) powerSelect.disabled = !anyChecked;
   }
 
-  function getSelectedStations() {
-    return Array.from(getCheckboxes())
-      .filter(cb => cb.checked)
-      .map(cb => cb.value);
+  checkboxes.forEach(cb => cb.addEventListener("change", updateActionButtons));
+
+  if (selectAll) {
+    selectAll.addEventListener("change", () => {
+      const checked = selectAll.checked;
+      checkboxes.forEach(cb => cb.checked = checked);
+      updateActionButtons();
+    });
   }
 
   function getCSRFToken() {
-    return document.querySelector('[name=csrfmiddlewaretoken]')?.value;
+    return document.querySelector('[name=csrfmiddlewaretoken]').value;
   }
 
-  // =========================
-  // UI: MESSAGE
-  // =========================
-  function showMessage(message, type = "info") {
-    if (!messageContainer) return;
+  function showMessage(message, type = 'info') {
+    const alertClass = {
+      'success': 'alert-success',
+      'error': 'alert-danger',
+      'warning': 'alert-warning',
+      'info': 'alert-info'
+    }[type] || 'alert-info';
 
-    const map = {
-      success: "alert-success",
-      error: "alert-danger",
-      warning: "alert-warning",
-      info: "alert-info"
-    };
-
-    messageContainer.innerHTML = `
-      <div class="alert ${map[type] || "alert-info"} alert-dismissible fade show">
+    const alertHtml = `
+      <div class="alert ${alertClass} alert-dismissible fade show" role="alert">
         ${message}
         <button type="button" class="close" data-dismiss="alert">
           <span>&times;</span>
@@ -64,231 +54,521 @@ document.addEventListener("DOMContentLoaded", function () {
       </div>
     `;
 
+    const messageContainer = document.getElementById('message-container');
+    if (!messageContainer) {
+      console.error('Message container not found');
+      return;
+    }
+
+    const existingAlerts = messageContainer.querySelectorAll('.alert');
+    existingAlerts.forEach(alert => alert.remove());
+    messageContainer.innerHTML = alertHtml;
+
     setTimeout(() => {
-      messageContainer.querySelector(".alert")?.remove();
+      const alert = messageContainer.querySelector('.alert');
+      if (alert) alert.remove();
     }, 5000);
   }
 
-  // =========================
-  // STATE MANAGEMENT
-  // =========================
-  function updateActionButtons() {
-    const anyChecked = getSelectedStations().length > 0;
-
-    if (btnStart) btnStart.disabled = !anyChecked;
-    if (btnStop) btnStop.disabled = !anyChecked;
-    if (powerSelect) powerSelect.disabled = !anyChecked;
-  }
-
-  function syncSelectAllState() {
-    if (!selectAll) return;
-
-    const checkboxes = getCheckboxes();
-    const total = checkboxes.length;
-    const checked = Array.from(checkboxes).filter(cb => cb.checked).length;
-
-    if (checked === 0) {
-      selectAll.checked = false;
-      selectAll.indeterminate = false;
-    } else if (checked === total) {
-      selectAll.checked = true;
-      selectAll.indeterminate = false;
-    } else {
-      selectAll.checked = false;
-      selectAll.indeterminate = true;
-    }
-  }
-
-  // =========================
-  // EVENTS (DELEGATED)
-  // =========================
-  document.addEventListener("change", function (e) {
-    if (e.target && e.target.name === "station_ids") {
-      updateActionButtons();
-      syncSelectAllState();
-    }
-  });
-
-  if (selectAll) {
-    selectAll.addEventListener("change", function () {
-      const checkboxes = getCheckboxes();
-      checkboxes.forEach(cb => {
-        cb.checked = selectAll.checked;
-      });
-
-      updateActionButtons();
-      syncSelectAllState();
-    });
-  }
-
-  // =========================
-  // COMMAND SENDING
-  // =========================
   function sendCommand(action, extraData = {}) {
-
-    const selectedStations = getSelectedStations();
+    const selectedStations = Array.from(checkboxes)
+      .filter(cb => cb.checked)
+      .map(cb => cb.value);
 
     if (selectedStations.length === 0) {
-      showMessage("Please select at least one station.", "warning");
+      showMessage('Please select at least one station.', 'warning');
       return;
     }
 
     const formData = new FormData();
-    formData.append("csrfmiddlewaretoken", getCSRFToken());
-    formData.append("action", action);
+    formData.append('csrfmiddlewaretoken', getCSRFToken());
+    formData.append('action', action);
+    selectedStations.forEach(id => formData.append('station_ids', id));
 
-    selectedStations.forEach(id => {
-      formData.append("station_ids", id);
+    Object.keys(extraData).forEach(key => {
+      formData.append(key, extraData[key]);
     });
 
-    Object.entries(extraData).forEach(([key, value]) => {
-      if (value !== null && value !== undefined) {
-        formData.append(key, value);
-      }
-    });
-
-    showMessage(`Sending ${action} command...`, "info");
+    const actionText = action.charAt(0).toUpperCase() + action.slice(1);
+    showMessage(`Sending ${actionText} command...`, 'info');
 
     fetch(window.location.pathname, {
-      method: "POST",
+      method: 'POST',
       body: formData,
       headers: {
-        "X-Requested-With": "XMLHttpRequest"
+        'X-Requested-With': 'XMLHttpRequest'
       }
     })
-      .then(async r => {
-        const text = await r.text();
-        try {
-          return JSON.parse(text);
-        } catch {
-          throw new Error(text);
+      .then(response => response.json())
+      .then(data => {
+        if (data.success) {
+          showMessage(data.message || `${actionText} command completed.`, 'success');
+        } else {
+          showMessage(data.message || `${actionText} command failed.`, 'error');
         }
       })
-      .then(data => {
-        showMessage(
-          data.message || (data.success ? "Success" : "Error"),
-          data.success ? "success" : "error"
-        );
-      })
-      .catch(() => {
-        showMessage("Request failed", "error");
+      .catch(error => {
+        console.error('Error:', error);
+        showMessage(`Error sending ${actionText} command.`, 'error');
       });
   }
 
-  // =========================
-  // BUTTONS
-  // =========================
   if (btnStart) {
-    btnStart.addEventListener("click", function (e) {
+    btnStart.addEventListener('click', (e) => {
       e.preventDefault();
-      sendCommand("start", {
-        power: powerSelect ? powerSelect.value : null
-      });
+      const powerValue = powerSelect ? powerSelect.value : null;
+      sendCommand('start', { power: powerValue });
     });
   }
 
   if (btnStop) {
-    btnStop.addEventListener("click", function (e) {
+    btnStop.addEventListener('click', (e) => {
       e.preventDefault();
-      sendCommand("stop");
+      sendCommand('stop');
     });
   }
 
-  // =========================
-  // WEBSOCKET
-  // =========================
+  let statusSocket = null;
+  let dashboardMetrics = {
+    totalStations: parseInt(document.getElementById('metric-total')?.textContent) || checkboxes.length,
+    onlineStations: parseInt(document.getElementById('metric-online')?.textContent) || 0,
+    activeSessions: parseInt(document.getElementById('metric-sessions')?.textContent) || 0,
+    energyToday: parseFloat(document.getElementById('metric-energy')?.textContent) || 0
+  };
+
   function updateConnectionStatus(connected) {
-    const dot = document.getElementById("ws-status-dot");
-    const text = document.getElementById("ws-status-text");
+    const dot = document.getElementById('ws-status-dot');
+    const text = document.getElementById('ws-status-text');
+    const lastUpdate = document.getElementById('last-update');
 
-    if (!dot || !text) return;
-
-    dot.className = connected
-      ? "status-dot bg-success mr-2"
-      : "status-dot bg-danger mr-2";
-
-    text.textContent = connected
-      ? "Live updates active"
-      : "Reconnecting...";
-  }
-
-  function updateVehicleSoc(id, soc) {
-    const cell = document.getElementById(`soc-${id}`);
-    if (!cell) return;
-
-    cell.innerHTML = soc !== null && soc !== undefined
-      ? `${Number(soc).toFixed(2)} %`
-      : "--";
-  }
-
-  function updatePowerState(id, state = {}) {
-    const req = document.getElementById(`requested-power-${id}`);
-    const mode = document.getElementById(`requested-power-mode-${id}`);
-    const act = document.getElementById(`actual-power-${id}`);
-    const ems = document.getElementById(`ems-limit-${id}`);
-
-    if (req && req.firstElementChild) {
-      req.firstElementChild.textContent = state.requested_power_display || "--";
+    if (dot && text) {
+      if (connected) {
+        dot.className = 'status-dot bg-success mr-2';
+        dot.style.cssText = 'width: 10px; height: 10px; border-radius: 50%; display: inline-block; animation: pulse 2s infinite;';
+        text.textContent = 'Live updates active';
+        text.className = 'text-success';
+      } else {
+        dot.className = 'status-dot bg-danger mr-2';
+        dot.style.cssText = 'width: 10px; height: 10px; border-radius: 50%; display: inline-block;';
+        text.textContent = 'Reconnecting...';
+        text.className = 'text-danger';
+      }
     }
-
-    if (mode) {
-      mode.textContent = state.requested_power_mode || "--";
-    }
-
-    if (act && act.firstElementChild) {
-      act.firstElementChild.textContent = state.actual_power_kw
-        ? `${Number(state.actual_power_kw).toFixed(2)} kW`
-        : "--";
-    }
-
-    if (ems) {
-      ems.textContent = state.ems_limit_kw
-        ? `EMS ${Number(state.ems_limit_kw).toFixed(2)} kW`
-        : "EMS --";
+    if (lastUpdate && connected) {
+      lastUpdate.textContent = 'Last update: ' + new Date().toLocaleTimeString();
     }
   }
 
-  function connectWebSocket() {
-    const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const ws = new WebSocket(`${proto}//${window.location.host}/ws/stations/status/`);
+  function updateStationStatusBadge(stationId, status) {
+    const statusCell = document.getElementById(`status-${stationId}`);
+    if (statusCell) {
+      let statusClass = 'badge-secondary';
+      let statusText = status;
 
-    ws.onopen = () => updateConnectionStatus(true);
-    ws.onclose = () => updateConnectionStatus(false);
-    ws.onerror = () => updateConnectionStatus(false);
+      if (status === 'active') {
+        statusClass = 'badge-success';
+        statusText = 'Active';
+      } else if (status === 'inactive') {
+        statusClass = 'badge-secondary';
+        statusText = 'Inactive';
+      } else if (status === 'maintenance') {
+        statusClass = 'badge-warning';
+        statusText = 'Maintenance';
+      }
 
-    ws.onmessage = (event) => {
+      statusCell.innerHTML = `<span class="badge ${statusClass}">${statusText}</span>`;
+    }
+  }
+
+  function updateSessionStatusBadge(statusLabel) {
+    const badge = document.getElementById('metric-session-status');
+    if (!badge) {
+      return;
+    }
+
+    let badgeClass = 'badge badge-light';
+    const normalized = String(statusLabel || '').toLowerCase();
+    if (normalized.includes('active') || normalized.includes('charging')) {
+      badgeClass = 'badge badge-success';
+    } else if (normalized.includes('preparing') || normalized.includes('finishing')) {
+      badgeClass = 'badge badge-info';
+    } else if (normalized.includes('completed') || normalized.includes('available')) {
+      badgeClass = 'badge badge-secondary';
+    } else if (normalized.includes('offline') || normalized.includes('inactive')) {
+      badgeClass = 'badge badge-dark';
+    } else if (normalized.includes('maintenance')) {
+      badgeClass = 'badge badge-warning';
+    }
+
+    badge.className = badgeClass;
+    badge.textContent = statusLabel;
+  }
+
+  function updateDashboardCard(elementId, value, animate = true) {
+    const element = document.getElementById(elementId);
+    if (!element) {
+      return;
+    }
+
+    if (animate) {
+      element.style.transition = 'transform 0.3s ease';
+      element.style.transform = 'scale(1.1)';
+      setTimeout(() => {
+        element.textContent = value;
+        element.style.transform = 'scale(1)';
+      }, 150);
+      return;
+    }
+
+    element.textContent = value;
+  }
+
+  function updateVehicleSoc(stationId, socPercentage, updateSummary = true) {
+    const tableCell = document.getElementById(`soc-${stationId}`);
+
+    if (socPercentage === null || socPercentage === undefined || socPercentage === '') {
+      if (tableCell) {
+        tableCell.innerHTML = '<span>--</span>';
+      }
+      if (updateSummary) {
+        updateDashboardCard('metric-vehicle-soc', '--', false);
+      }
+      return;
+    }
+
+    const numericSoc = Number(socPercentage);
+    if (Number.isNaN(numericSoc)) {
+      if (tableCell) {
+        tableCell.innerHTML = '<span>--</span>';
+      }
+      if (updateSummary) {
+        updateDashboardCard('metric-vehicle-soc', '--', false);
+      }
+      return;
+    }
+
+    const formattedSoc = `${numericSoc.toFixed(2)} %`;
+    if (tableCell) {
+      tableCell.innerHTML = `<span>${formattedSoc}</span>`;
+    }
+    if (updateSummary) {
+      updateDashboardCard('metric-vehicle-soc', formattedSoc, false);
+    }
+  }
+
+  function humanizeRequestedMode(requestedMode) {
+    if (requestedMode === 'station-default') {
+      return 'Station Default';
+    }
+    return String(requestedMode || '--').replace(/-/g, ' ');
+  }
+
+  function updatePowerState(stationId, powerState = {}, updateSummary = true) {
+    const requestedCell = document.getElementById(`requested-power-${stationId}`);
+    const requestedModeCell = document.getElementById(`requested-power-mode-${stationId}`);
+    const actualCell = document.getElementById(`actual-power-${stationId}`);
+    const emsLimitCell = document.getElementById(`ems-limit-${stationId}`);
+
+    const requestedDisplay = powerState.requested_power_display || '--';
+    const requestedMode = powerState.requested_power_mode || '--';
+    const actualPowerKw = powerState.actual_power_kw;
+    const emsLimitKw = powerState.ems_limit_kw;
+    const energyKwh = powerState.energy_kwh;
+
+    if (requestedCell && requestedCell.firstElementChild) {
+      requestedCell.firstElementChild.textContent = requestedDisplay;
+    }
+    if (requestedModeCell) {
+      requestedModeCell.textContent = humanizeRequestedMode(requestedMode);
+    }
+    if (actualCell && actualCell.firstElementChild) {
+      const actualValue = actualPowerKw === null || actualPowerKw === undefined || Number.isNaN(Number(actualPowerKw))
+        ? '--'
+        : `${Number(actualPowerKw).toFixed(2)} kW`;
+      actualCell.firstElementChild.textContent = actualValue;
+    }
+    if (emsLimitCell) {
+      const emsValue = emsLimitKw === null || emsLimitKw === undefined || Number.isNaN(Number(emsLimitKw))
+        ? 'EMS --'
+        : `EMS ${Number(emsLimitKw).toFixed(2)} kW`;
+      emsLimitCell.textContent = emsValue;
+    }
+
+    if (updateSummary) {
+      updateDashboardCard('metric-requested-power', requestedDisplay, false);
+      const requestedModeSummary = document.getElementById('metric-requested-power-mode');
+      if (requestedModeSummary) {
+        requestedModeSummary.textContent = humanizeRequestedMode(requestedMode);
+      }
+      updateDashboardCard(
+        'metric-actual-power',
+        actualPowerKw === null || actualPowerKw === undefined || Number.isNaN(Number(actualPowerKw))
+          ? '--'
+          : `${Number(actualPowerKw).toFixed(2)} kW`,
+        false,
+      );
+      updateDashboardCard(
+        'metric-ems-limit',
+        emsLimitKw === null || emsLimitKw === undefined || Number.isNaN(Number(emsLimitKw))
+          ? '--'
+          : `${Number(emsLimitKw).toFixed(2)} kW`,
+        false,
+      );
+      updateDashboardCard(
+        'metric-energy-session',
+        energyKwh === null || energyKwh === undefined || Number.isNaN(Number(energyKwh))
+          ? '--'
+          : `${Number(energyKwh).toFixed(2)} kWh`,
+        false,
+      );
+    }
+  }
+
+  function resetPowerState(stationId, updateSummary = false) {
+    updatePowerState(stationId, {
+      requested_power_display: '--',
+      requested_power_mode: '--',
+      actual_power_kw: null,
+      ems_limit_kw: null,
+    }, updateSummary);
+  }
+
+  function connectStatusWebSocket() {
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${protocol}//${window.location.host}/ws/stations/status/`;
+
+    statusSocket = new WebSocket(wsUrl);
+
+    statusSocket.onopen = function () {
+      console.log('Connected to station status updates');
+      updateConnectionStatus(true);
+    };
+
+    statusSocket.onclose = function () {
+      console.log('Disconnected from station status updates');
+      updateConnectionStatus(false);
+      if (!statusSocket.reconnectAttempt) {
+        statusSocket.reconnectAttempt = true;
+        setTimeout(() => {
+          statusSocket.reconnectAttempt = false;
+          connectStatusWebSocket();
+        }, 5000);
+      }
+    };
+
+    statusSocket.onerror = function (error) {
+      console.error('WebSocket error:', error);
+      updateConnectionStatus(false);
+    };
+
+    statusSocket.onmessage = function (event) {
       try {
         const data = JSON.parse(event.data);
+        const messageType = data.type || '';
 
-        if (data.type === "soc_update") {
+        if (messageType === 'status_snapshot' && data.stations) {
+          data.stations.forEach(station => {
+            updateStationStatusBadge(station.station_id, station.status);
+          });
+
+          const onlineStations = document.getElementById('metric-online');
+          if (onlineStations) {
+            const onlineCount = data.stations.filter(station => station.online).length;
+            onlineStations.textContent = onlineCount;
+            dashboardMetrics.onlineStations = onlineCount;
+          }
+
+          const lastUpdate = document.getElementById('last-update');
+          if (lastUpdate) {
+            lastUpdate.textContent = new Date().toLocaleTimeString();
+          }
+          return;
+        }
+
+        const lastUpdate = document.getElementById('last-update');
+        if (lastUpdate) {
+          lastUpdate.textContent = 'Last update: ' + new Date().toLocaleTimeString();
+        }
+
+        if (messageType === 'connector_status_update' || data.connector_status || data.status === 'charging') {
+          const stationId = data.station_id;
+          const connectorStatus = data.connector_status || (data.status === 'charging' ? 'charging' : null);
+          const stationStatus = data.status;
+
+          const statusCell = document.getElementById(`status-${stationId}`);
+          if (statusCell) {
+            const wasActive = statusCell.innerHTML.includes('Active');
+
+            if (stationStatus === 'active') {
+              statusCell.innerHTML = '<span class="badge badge-success">Active</span>';
+              if (!wasActive) {
+                dashboardMetrics.onlineStations++;
+                updateDashboardCard('metric-online', dashboardMetrics.onlineStations);
+              }
+            } else if (stationStatus === 'inactive') {
+              statusCell.innerHTML = '<span class="badge badge-secondary">Inactive</span>';
+              if (wasActive) {
+                dashboardMetrics.onlineStations = Math.max(0, dashboardMetrics.onlineStations - 1);
+                updateDashboardCard('metric-online', dashboardMetrics.onlineStations);
+              }
+            }
+          }
+
+          const connectorCell = document.getElementById(`connector-status-${stationId}`);
+          if (connectorCell && connectorStatus) {
+            const wasCharging = connectorCell.innerHTML.includes('Charging');
+            let statusClass = 'badge-secondary';
+            let statusText = connectorStatus;
+
+            if (connectorStatus === 'charging') {
+              statusClass = 'badge-primary';
+              statusText = 'Charging';
+              updateSessionStatusBadge('Active');
+              if (!wasCharging) {
+                dashboardMetrics.activeSessions++;
+                updateDashboardCard('metric-sessions', dashboardMetrics.activeSessions);
+              }
+            } else if (connectorStatus === 'available') {
+              statusClass = 'badge-success';
+              statusText = 'Available';
+              updateSessionStatusBadge('Completed');
+              updateVehicleSoc(stationId, null, false);
+              resetPowerState(stationId, false);
+              if (wasCharging) {
+                dashboardMetrics.activeSessions = Math.max(0, dashboardMetrics.activeSessions - 1);
+                updateDashboardCard('metric-sessions', dashboardMetrics.activeSessions);
+              }
+            } else if (connectorStatus === 'preparing') {
+              statusClass = 'badge-info';
+              statusText = 'Preparing';
+              updateSessionStatusBadge('Preparing');
+            } else if (connectorStatus === 'finishing') {
+              statusClass = 'badge-warning';
+              statusText = 'Finishing';
+              updateSessionStatusBadge('Finishing');
+            } else if (connectorStatus === 'faulted') {
+              statusClass = 'badge-danger';
+              statusText = 'Faulted';
+            } else if (connectorStatus === 'offline') {
+              statusClass = 'badge-dark';
+              statusText = 'Offline';
+              updateSessionStatusBadge('Offline');
+              updateVehicleSoc(stationId, null, false);
+              resetPowerState(stationId, false);
+              if (wasCharging) {
+                dashboardMetrics.activeSessions = Math.max(0, dashboardMetrics.activeSessions - 1);
+                updateDashboardCard('metric-sessions', dashboardMetrics.activeSessions);
+              }
+            }
+
+            connectorCell.innerHTML = `<span class="badge ${statusClass}">${statusText}</span>`;
+          }
+        }
+
+        if (messageType === 'soc_update' && data.station_id) {
           updateVehicleSoc(data.station_id, data.soc_percentage);
         }
 
-        if (data.type === "station_power_update") {
+        if (messageType === 'station_power_update' && data.station_id) {
           updatePowerState(data.station_id, data);
         }
 
-        if (data.status) {
-          const cell = document.getElementById(`status-${data.station_id}`);
-          if (cell) {
-            cell.innerHTML = `<span class="badge badge-success">${data.status}</span>`;
+        if (messageType === 'transaction_stopped') {
+          const stationId = data.station_id;
+          const connectorCell = document.getElementById(`connector-status-${stationId}`);
+          if (connectorCell) {
+            connectorCell.innerHTML = '<span class="badge badge-success">Available</span>';
+          }
+        }
+
+        if (messageType === 'station_status_update' || messageType === 'status_update' || messageType === 'station_status') {
+          const statusCell = document.getElementById(`status-${data.station_id}`);
+          if (statusCell) {
+            const wasActive = statusCell.innerHTML.includes('Active');
+            let statusClass = 'badge-secondary';
+            let statusText = data.status;
+
+            if (data.status === 'active') {
+              statusClass = 'badge-success';
+              statusText = 'Active';
+              updateSessionStatusBadge('Active');
+              if (!wasActive) {
+                dashboardMetrics.onlineStations++;
+                updateDashboardCard('metric-online', dashboardMetrics.onlineStations);
+              }
+            } else if (data.status === 'inactive') {
+              statusClass = 'badge-secondary';
+              statusText = 'Inactive';
+              updateSessionStatusBadge('Offline');
+              if (wasActive) {
+                dashboardMetrics.onlineStations = Math.max(0, dashboardMetrics.onlineStations - 1);
+                updateDashboardCard('metric-online', dashboardMetrics.onlineStations);
+              }
+              const connectorCell = document.getElementById(`connector-status-${data.station_id}`);
+              if (connectorCell) {
+                const wasCharging = connectorCell.innerHTML.includes('Charging');
+                connectorCell.innerHTML = '<span class="badge badge-dark">Offline</span>';
+                updateVehicleSoc(data.station_id, null, false);
+                resetPowerState(data.station_id, false);
+                if (wasCharging) {
+                  dashboardMetrics.activeSessions = Math.max(0, dashboardMetrics.activeSessions - 1);
+                  updateDashboardCard('metric-sessions', dashboardMetrics.activeSessions);
+                }
+              }
+            } else if (data.status === 'maintenance') {
+              statusClass = 'badge-warning';
+              statusText = 'Maintenance';
+              updateSessionStatusBadge('Maintenance');
+            }
+
+            statusCell.innerHTML = `<span class="badge ${statusClass}">${statusText}</span>`;
+          }
+        }
+
+        if (data.station_id && data.connector_status && !messageType) {
+          const statusCell = document.getElementById(`status-${data.station_id}`);
+          const isStationActive = statusCell && statusCell.textContent.includes('Active');
+
+          if (isStationActive) {
+            const connectorCell = document.getElementById(`connector-status-${data.station_id}`);
+            if (connectorCell) {
+              let statusClass = 'badge-secondary';
+              let statusText = data.connector_status;
+
+              if (data.connector_status === 'charging') {
+                statusClass = 'badge-primary';
+                statusText = 'Charging';
+              } else if (data.connector_status === 'available') {
+                statusClass = 'badge-success';
+                statusText = 'Available';
+              } else if (data.connector_status === 'preparing') {
+                statusClass = 'badge-info';
+                statusText = 'Preparing';
+              } else if (data.connector_status === 'finishing') {
+                statusClass = 'badge-warning';
+                statusText = 'Finishing';
+              } else if (data.connector_status === 'faulted') {
+                statusClass = 'badge-danger';
+                statusText = 'Faulted';
+              } else if (data.connector_status === 'offline') {
+                statusClass = 'badge-dark';
+                statusText = 'Offline';
+              }
+
+              connectorCell.innerHTML = `<span class="badge ${statusClass}">${statusText}</span>`;
+            }
           }
         }
 
         if (data.message) {
-          showMessage(data.message, data.message_type || "info");
+          showMessage(data.message, data.message_type || 'info');
         }
-
-      } catch (e) {
-        console.error("WS error:", e);
+      } catch (error) {
+        console.error('Error parsing WebSocket message:', error);
       }
     };
   }
 
-  // =========================
-  // INIT
-  // =========================
+  connectStatusWebSocket();
   updateActionButtons();
-  syncSelectAllState();
-  connectWebSocket();
 });

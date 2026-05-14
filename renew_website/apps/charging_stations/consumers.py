@@ -29,6 +29,7 @@ from ocpp.v16.enums import (
 from .logging_config import get_ocpp_logger, get_station_logger
 from .models import Station, Connector, Transaction, UserRFID, MeterValue, CommandLog, Vehicle, StationStatusHistory
 from .registry import ACTIVE_STATIONS, station_runtime
+from .live_state import get_station_live_states, update_station_live_state_from_event
 
 
 def _snake_to_camel_case(value: str) -> str:
@@ -330,6 +331,14 @@ class ChargePoint(OCPPChargePoint):
             " " if rendered_fields else "",
             rendered_fields,
         )
+
+    def _latest_session_context(self, tx: Transaction) -> Dict[str, Any]:
+        latest_meter = tx.meter_values.order_by('-timestamp', '-id').first()
+        if latest_meter and isinstance(latest_meter.data, dict):
+            session_context = latest_meter.data.get("session_context")
+            if isinstance(session_context, dict) and session_context:
+                return dict(session_context)
+        return {}
 
     def _serialize_ocpp_log_value(self, value: Any) -> Any:
         if value is None or isinstance(value, (str, int, float, bool)):
@@ -1320,6 +1329,7 @@ class ChargePoint(OCPPChargePoint):
                     "soc_percentage": soc_percentage,
                     "power_w": power_w,
                     "energy_wh": energy_wh,
+                    "energy_kwh": round(max(((energy_wh or 0) - (tx.meter_start or 0)) / 1000.0, 0), 3) if energy_wh is not None else None,
                 }
 
             result = await persist()
@@ -1354,6 +1364,7 @@ class ChargePoint(OCPPChargePoint):
                     requested_power_mode=result.get("requested_power_mode"),
                     actual_power_kw=(float(result["power_w"]) / 1000.0) if result.get("power_w") is not None else None,
                     ems_limit_kw=result.get("ems_limit_kw"),
+                    energy_kwh=result.get("energy_kwh"),
                     source="meter_values",
                 )
             except Exception:
@@ -1606,7 +1617,7 @@ class ChargePoint(OCPPChargePoint):
                             "value": meter_start,
                             "data": {
                                 "start": {"ocpp_timestamp": str(timestamp), "meter_start": meter_start},
-                                "session_context": session_context,
+                                "session_context": dict(session_context or {}),
                                 "samples": [],
                             },
                         },
@@ -1620,6 +1631,7 @@ class ChargePoint(OCPPChargePoint):
                         "requested_power_kw": tx.requested_power_kw,
                         "requested_power_mode": tx.requested_power_mode,
                         "last_applied_ems_limit_kw": float(tx.last_applied_ems_limit_kw) if tx.last_applied_ems_limit_kw is not None else None,
+                        "energy_kwh": 0.0,
                     }
 
             tx_snapshot = await create_tx()
@@ -1642,6 +1654,7 @@ class ChargePoint(OCPPChargePoint):
                     requested_power_mode=tx_snapshot.get("requested_power_mode"),
                     actual_power_kw=None,
                     ems_limit_kw=tx_snapshot.get("last_applied_ems_limit_kw"),
+                    energy_kwh=tx_snapshot.get("energy_kwh"),
                     source="start_transaction",
                 )
             except Exception:
@@ -1747,13 +1760,28 @@ class ChargePoint(OCPPChargePoint):
                     except Exception:
                         pass
 
-                    return int(conn.connector_id) if conn else None
+                    return {
+                        "connector_id": int(conn.connector_id) if conn else None,
+                        "requested_power_kw": tx.requested_power_kw,
+                        "requested_power_mode": tx.requested_power_mode,
+                        "last_applied_ems_limit_kw": float(tx.last_applied_ems_limit_kw) if tx.last_applied_ems_limit_kw is not None else None,
+                        "energy_kwh": float(tx.energy_consumed) if tx.energy_consumed is not None else None,
+                    }
 
-            conn_id = await stop_tx()
+            tx_snapshot = await stop_tx()
 
-        if getattr(self, "consumer", None) and conn_id:
+        if getattr(self, "consumer", None) and tx_snapshot and tx_snapshot.get("connector_id"):
             try:
-                await self.consumer.broadcast_connector_status(self.station_id, "available", int(conn_id))
+                await self.consumer.broadcast_connector_status(self.station_id, "available", int(tx_snapshot["connector_id"]))
+                await self.consumer.broadcast_power_update(
+                    self.station_id,
+                    requested_power_kw=tx_snapshot.get("requested_power_kw"),
+                    requested_power_mode=tx_snapshot.get("requested_power_mode"),
+                    actual_power_kw=0.0,
+                    ems_limit_kw=tx_snapshot.get("last_applied_ems_limit_kw"),
+                    energy_kwh=tx_snapshot.get("energy_kwh"),
+                    source="stop_transaction",
+                )
             except Exception:
                 ocpp_logger.exception("Failed broadcasting connector available status")
 
@@ -1838,6 +1866,7 @@ class ChargePoint(OCPPChargePoint):
                         "soc_percentage": pct,
                         "soc_timestamp": ts.isoformat() if hasattr(ts, 'isoformat') else ts,
                         "soc_source": src,
+                        "session_context": self._latest_session_context(tx),
                         "samples": []
                     }
                 )
@@ -1872,8 +1901,9 @@ class ChargePoint(OCPPChargePoint):
         id_tag = (id_tag or "")[:20]
         if requested_power_kw is None and requested_power is not None:
             requested_power_kw = requested_power
-        self.pending_requested_power[(int(connector_id), id_tag)] = requested_power_kw
-        self.pending_session_context[(int(connector_id), id_tag)] = session_context or {}
+        pending_key = (int(connector_id), id_tag)
+        self.pending_requested_power[pending_key] = requested_power_kw
+        self.pending_session_context[pending_key] = dict(session_context or {})
 
         charging_profile = None
         if requested_power_kw is not None:
@@ -2304,6 +2334,7 @@ class ChargePointConsumer(AsyncWebsocketConsumer):
     # -------------------------
     async def _ui_send(self, data: Dict[str, Any]) -> None:
         logger.info(f"Sending UI message: {data}")
+        await database_sync_to_async(update_station_live_state_from_event)(data)
         await self.channel_layer.group_send(
             UI_STATUS_GROUP,
             {"type": "broadcast", "data": data},
@@ -2405,6 +2436,7 @@ class ChargePointConsumer(AsyncWebsocketConsumer):
         requested_power_mode: Optional[str],
         actual_power_kw: Optional[float],
         ems_limit_kw: Optional[float],
+        energy_kwh: Optional[float] = None,
         source: str = "runtime",
     ):
         try:
@@ -2424,6 +2456,7 @@ class ChargePointConsumer(AsyncWebsocketConsumer):
                 "requested_power_display": requested_power_display,
                 "actual_power_kw": float(actual_power_kw) if actual_power_kw is not None else None,
                 "ems_limit_kw": float(ems_limit_kw) if ems_limit_kw is not None else None,
+                "energy_kwh": float(energy_kwh) if energy_kwh is not None else None,
                 "source": source,
                 "timestamp": timezone.now().isoformat(),
             })
@@ -2557,19 +2590,13 @@ class StationStatusConsumer(AsyncWebsocketConsumer):
     @database_sync_to_async
     def _snapshot(self) -> Dict[str, Any]:
         stations = list(Station.objects.all().prefetch_related("connectors"))
-        active_keys = set(ACTIVE_STATIONS.keys())
+        live_states = get_station_live_states([st.id for st in stations])
 
         out = []
         for st in stations:
-            # Use database status to determine online status
-            # If station status is 'active', consider it online
-            online = (st.status == 'active')
-            if not online and st.id in active_keys:
-                # Fallback to ACTIVE_STATIONS if database says inactive but station is connected
-                online = True
-            
-            # Use status from database
-            status = st.status if st.status else ("active" if online else "inactive")
+            live_state = live_states.get(st.id) or {}
+            online = bool(live_state.get("online")) if live_state.get("last_event_ts") else (st.status == 'active')
+            status = live_state.get("status") or st.status or ("active" if online else "inactive")
             out.append({
                 "station_id": st.id,
                 "online": online,

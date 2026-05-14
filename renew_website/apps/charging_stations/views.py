@@ -13,6 +13,7 @@ from django.utils import timezone
 from django.urls import reverse
 
 from .models import Station, MeterValue, Transaction, StationStatusHistory
+from .live_state import get_latest_live_snapshot, get_station_live_states
 
 from .services import execute_station_action
 
@@ -29,6 +30,12 @@ def _format_power_value(power_kw):
     if power_kw is None:
         return "--"
     return f"{float(power_kw):.2f} kW"
+
+
+def _format_energy_value(transaction):
+    if not transaction or transaction.energy_consumed is None:
+        return "--"
+    return f"{float(transaction.energy_consumed):.2f} kWh"
 
 
 def _build_requested_power_label(transaction):
@@ -49,11 +56,21 @@ def _attach_station_live_power_state(stations_list):
         .order_by('-started_at', '-id')
     )
 
+    recent_transactions = list(
+        Transaction.objects
+        .select_related('connector', 'vehicle')
+        .order_by('-started_at', '-id')[:50]
+    )
+
     latest_tx_by_station = {}
     latest_meter_by_tx = {}
     for transaction in active_transactions:
         latest_tx_by_station.setdefault(transaction.connector.station_id, transaction)
         latest_meter_by_tx[transaction.id] = transaction.meter_values.order_by('-timestamp', '-id').first()
+
+    for transaction in recent_transactions:
+        latest_tx_by_station.setdefault(transaction.connector.station_id, transaction)
+        latest_meter_by_tx.setdefault(transaction.id, transaction.meter_values.order_by('-timestamp', '-id').first())
 
     latest_session_snapshot = {
         'vehicle_soc': None,
@@ -61,10 +78,12 @@ def _attach_station_live_power_state(stations_list):
         'requested_power_mode_label': '--',
         'actual_power_display': '--',
         'ems_limit_display': '--',
+        'energy_display': '--',
+        'session_status_label': 'No recent session',
     }
 
-    if active_transactions:
-        latest_transaction = active_transactions[0]
+    latest_transaction = active_transactions[0] if active_transactions else (recent_transactions[0] if recent_transactions else None)
+    if latest_transaction:
         latest_meter = latest_meter_by_tx.get(latest_transaction.id)
         latest_soc = None
         if latest_meter and latest_meter.soc_percentage is not None:
@@ -82,6 +101,8 @@ def _attach_station_live_power_state(stations_list):
             'requested_power_mode_label': latest_transaction.get_requested_power_mode_display(),
             'actual_power_display': _format_power_value(latest_actual_power_kw),
             'ems_limit_display': _format_power_value(latest_transaction.last_applied_ems_limit_kw),
+            'energy_display': _format_energy_value(latest_transaction),
+            'session_status_label': latest_transaction.get_status_display(),
         }
 
     for station in stations_list:
@@ -107,17 +128,52 @@ def _attach_station_live_power_state(stations_list):
             station.requested_power_mode = transaction.get_requested_power_mode_display()
             station.ems_limit_kw = float(transaction.last_applied_ems_limit_kw) if transaction.last_applied_ems_limit_kw is not None else None
 
-    return latest_session_snapshot
+    live_states = get_station_live_states([station.id for station in stations_list])
+    for station in stations_list:
+        live_state = live_states.get(station.id) or {}
+        if not live_state.get('last_event_ts'):
+            continue
+        if live_state.get('vehicle_soc') is not None:
+            station.vehicle_soc = round(float(live_state['vehicle_soc']), 2)
+        if live_state.get('requested_power_display'):
+            station.requested_power_label = live_state['requested_power_display']
+        if live_state.get('requested_power_mode_label'):
+            station.requested_power_mode = live_state['requested_power_mode_label']
+        if live_state.get('actual_power_kw') is not None:
+            station.actual_power_kw = float(live_state['actual_power_kw'])
+        if live_state.get('ems_limit_kw') is not None:
+            station.ems_limit_kw = float(live_state['ems_limit_kw'])
+        if live_state.get('status'):
+            station.status = live_state['status']
+
+        first_connector = next(iter(station.connectors.all()), None)
+        if first_connector and live_state.get('connector_status'):
+            first_connector.status = live_state['connector_status']
+
+    latest_live_snapshot = get_latest_live_snapshot(live_states)
+    if latest_live_snapshot:
+        latest_session_snapshot = {
+            'vehicle_soc': latest_live_snapshot.get('vehicle_soc'),
+            'requested_power_display': latest_live_snapshot.get('requested_power_display') or latest_session_snapshot['requested_power_display'],
+            'requested_power_mode_label': latest_live_snapshot.get('requested_power_mode_label') or latest_session_snapshot['requested_power_mode_label'],
+            'actual_power_display': _format_power_value(latest_live_snapshot.get('actual_power_kw')),
+            'ems_limit_display': _format_power_value(latest_live_snapshot.get('ems_limit_kw')),
+            'energy_display': '--' if latest_live_snapshot.get('energy_kwh') is None else f"{float(latest_live_snapshot['energy_kwh']):.2f} kWh",
+            'session_status_label': latest_live_snapshot.get('session_status_label') or latest_session_snapshot['session_status_label'],
+        }
+
+    return latest_session_snapshot, live_states
 
 
-def _build_station_stats(stations_list, latest_session_snapshot):
-    from .consumers import ACTIVE_STATIONS
+def _build_station_stats(stations_list, latest_session_snapshot, live_states):
     from django.db.models import Sum
     from django.utils import timezone
 
     total_stations = len(stations_list)
     online_stations = sum(
-        1 for station in stations_list if station.id in ACTIVE_STATIONS or str(station.id) in ACTIVE_STATIONS
+        1
+        for station in stations_list
+        if ((live_states.get(station.id) or {}).get('online') if (live_states.get(station.id) or {}).get('last_event_ts') else station.status == 'active')
     )
     active_sessions = Transaction.objects.filter(status='active').count()
 
@@ -137,6 +193,8 @@ def _build_station_stats(stations_list, latest_session_snapshot):
         'requested_power_mode_label': latest_session_snapshot['requested_power_mode_label'],
         'actual_power_display': latest_session_snapshot['actual_power_display'],
         'ems_limit_display': latest_session_snapshot['ems_limit_display'],
+        'energy_display': latest_session_snapshot['energy_display'],
+        'session_status_label': latest_session_snapshot['session_status_label'],
     }
 
 def stations(request: HttpRequest) -> HttpResponse:
@@ -148,8 +206,8 @@ def stations(request: HttpRequest) -> HttpResponse:
     """
     stations_list = list(Station.objects.prefetch_related('connectors'))
 
-    latest_session_snapshot = _attach_station_live_power_state(stations_list)
-    stats = _build_station_stats(stations_list, latest_session_snapshot)
+    latest_session_snapshot, live_states = _attach_station_live_power_state(stations_list)
+    stats = _build_station_stats(stations_list, latest_session_snapshot, live_states)
 
     if request.method == "POST":
         if "action" in request.POST:
