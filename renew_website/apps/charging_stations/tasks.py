@@ -24,6 +24,14 @@ def send_to_ui(data):
     except Exception as e:
         logger.error(f"Грешка при изпращане към UI: {e}")
 
+
+def _format_requested_power_display(tx):
+    if tx.requested_power_mode == 'auto' and tx.requested_power_kw is None:
+        return 'Auto'
+    if tx.requested_power_kw is not None:
+        return f"{float(tx.requested_power_kw):.2f} kW"
+    return 'Station default'
+
 # ==========================================
 # 1. СИГНАЛИ (Event Signals) към други модули
 # ==========================================
@@ -72,6 +80,17 @@ def process_meter_values(station_id, connector_id, transaction_id, power_w, ener
                         vehicle.last_known_soc_percent = soc_percentage
                         update_fields.append('last_known_soc_percent')
                     vehicle.save(update_fields=update_fields)
+
+            send_to_ui({
+                "type": "station_power_update",
+                "station_id": int(str(station_id)),
+                "requested_power_kw": tx.requested_power_kw,
+                "requested_power_mode": tx.requested_power_mode,
+                "requested_power_display": _format_requested_power_display(tx),
+                "actual_power_kw": round(float(power_w) / 1000.0, 2) if power_w is not None else None,
+                "ems_limit_kw": float(tx.last_applied_ems_limit_kw) if tx.last_applied_ems_limit_kw is not None else None,
+                "timestamp": timezone.now().isoformat(),
+            })
 
         # 2. Уведомяване на браузърите (WebSockets / UI)
         if soc_percentage is not None:
@@ -190,6 +209,10 @@ def set_charging_power_limit(station_id, max_power_watts):
         logger.info(f"Команда за ограничаване на мощност към станция {station_id}: {max_power_watts}W")
         
         power_kw = max_power_watts / 1000.0
+        Transaction.objects.filter(
+            connector__station_id=station_id,
+            status='active',
+        ).update(last_applied_ems_limit_kw=power_kw)
         
         # We assume connector_id = 1 for now (or loop through them if multiple)
         # PowerManager.set_charging_power expects kW

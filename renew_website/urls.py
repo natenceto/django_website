@@ -18,6 +18,7 @@ from django.contrib import admin
 from django.urls import path, include
 from django.views.generic import TemplateView
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
+from renew_website.apps.accounts.views import AccountSettingsView
 from .views import health_check
 
 urlpatterns = [
@@ -31,7 +32,7 @@ urlpatterns = [
     path("deye/", include("renew_website.apps.api.deye.urls")),
     
     # Account Settings page
-    path("account/", TemplateView.as_view(template_name="public/account.html"), name="account"),
+    path("account/", AccountSettingsView.as_view(), name="account"),
     
     # Activity Log page
     path("activity/", TemplateView.as_view(template_name="public/activity.html"), name="activity"),

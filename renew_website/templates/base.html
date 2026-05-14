@@ -197,6 +197,46 @@
         <i class="fas fa-angle-up"></i>
     </a>
 
+    <div class="modal fade" id="alertDetailsModal" tabindex="-1" role="dialog" aria-labelledby="alertDetailsModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-lg" role="document">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="alertDetailsModalLabel">Alert Details</h5>
+                    <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                        <span aria-hidden="true">&times;</span>
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <div class="d-flex align-items-center justify-content-between mb-3">
+                        <div>
+                            <span id="alertDetailsSeverity" class="badge badge-secondary"></span>
+                            <span id="alertDetailsCategory" class="badge badge-light ml-2"></span>
+                        </div>
+                        <small id="alertDetailsCreatedAt" class="text-muted"></small>
+                    </div>
+                    <h5 id="alertDetailsTitle" class="mb-3"></h5>
+                    <p id="alertDetailsMessage" class="mb-3 text-gray-700"></p>
+                    <dl class="row mb-0">
+                        <dt class="col-sm-3">Source</dt>
+                        <dd class="col-sm-9" id="alertDetailsSource">N/A</dd>
+                        <dt class="col-sm-3">Station</dt>
+                        <dd class="col-sm-9" id="alertDetailsStation">N/A</dd>
+                        <dt class="col-sm-3">Transaction</dt>
+                        <dd class="col-sm-9" id="alertDetailsTransaction">N/A</dd>
+                    </dl>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" id="alertAcknowledgeButton">
+                        <i class="fas fa-check mr-1"></i>Acknowledge
+                    </button>
+                    <button type="button" class="btn btn-primary" id="alertResolveButton">
+                        <i class="fas fa-check-double mr-1"></i>Resolve
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     {% block scripts %}
     <!-- Custom scripts -->
     <script src="{% static 'theme/vendor/jquery/jquery.min.js' %}"></script>
@@ -702,75 +742,31 @@
             loadAlerts();
         });
         
-        // Alerts functionality
-        async function loadAlerts() {
-            try {
-                const response = await fetch('/accounts/alerts/?limit=5');
-                const data = await response.json();
-                renderAlerts(data.alerts);
-                updateAlertCounter(data.statistics.total_active);
-            } catch (error) {
-                console.error('Error loading alerts:', error);
-                // Show fallback alerts
-                renderFallbackAlerts();
+        const alertCache = new Map();
+        let activeAlertId = null;
+
+        function getAlertCsrfToken() {
+            const cookieValue = document.cookie
+                .split(';')
+                .map((cookie) => cookie.trim())
+                .find((cookie) => cookie.startsWith('csrftoken='));
+            return cookieValue ? decodeURIComponent(cookieValue.split('=')[1]) : '';
+        }
+
+        function escapeAlertHtml(value) {
+            const div = document.createElement('div');
+            div.textContent = value === null || value === undefined ? '' : String(value);
+            return div.innerHTML;
+        }
+
+        function formatAlertTimestamp(value) {
+            if (!value) {
+                return 'Unknown';
             }
+            const date = new Date(value);
+            return Number.isNaN(date.getTime()) ? 'Unknown' : date.toLocaleString();
         }
-        
-        function renderAlerts(alerts) {
-            const container = document.getElementById('alertsList');
-            
-            if (alerts.length === 0) {
-                container.innerHTML = `
-                    <div class="text-center py-3">
-                        <i class="fas fa-check-circle fa-2x text-success mb-2"></i>
-                        <p class="small text-muted">No active alerts</p>
-                    </div>
-                `;
-                return;
-            }
-            
-            let html = '';
-            alerts.forEach(alert => {
-                const iconClass = getAlertIcon(alert.severity);
-                const bgClass = getAlertBgClass(alert.severity);
-                const timeAgo = getTimeAgo(new Date(alert.created_at));
-                
-                html += `
-                    <a class="dropdown-item d-flex align-items-center" href="#" onclick="handleAlertClick(${alert.id}); return false;">
-                        <div class="mr-3">
-                            <div class="icon-circle ${bgClass}">
-                                <i class="${iconClass} text-white"></i>
-                            </div>
-                        </div>
-                        <div class="flex-grow-1">
-                            <div class="small text-gray-500">${timeAgo}</div>
-                            <span class="${alert.severity === 'critical' || alert.severity === 'error' ? 'font-weight-bold' : ''}">${alert.title}</span>
-                            ${alert.is_acknowledged ? '<span class="badge badge-secondary ml-2">Acknowledged</span>' : ''}
-                        </div>
-                    </a>
-                `;
-            });
-            
-            container.innerHTML = html;
-        }
-        
-        function renderFallbackAlerts() {
-            const container = document.getElementById('alertsList');
-            container.innerHTML = `
-                <a class="dropdown-item d-flex align-items-center" href="#">
-                    <div class="mr-3">
-                        <div class="icon-circle bg-primary">
-                            <i class="fas fa-info text-white"></i>
-                        </div>
-                    </div>
-                    <div>
-                        <div class="small text-gray-500">System</div>
-                        <span>System alerts loading...</span>
-                    </div>
-                </a>
-            `;
-        }
-        
+
         function getAlertIcon(severity) {
             const icons = {
                 'info': 'fas fa-info',
@@ -780,7 +776,7 @@
             };
             return icons[severity] || 'fas fa-info';
         }
-        
+
         function getAlertBgClass(severity) {
             const classes = {
                 'info': 'bg-info',
@@ -790,7 +786,17 @@
             };
             return classes[severity] || 'bg-info';
         }
-        
+
+        function getAlertBadgeClass(severity) {
+            const classes = {
+                'info': 'badge-info',
+                'warning': 'badge-warning',
+                'error': 'badge-danger',
+                'critical': 'badge-danger'
+            };
+            return classes[severity] || 'badge-secondary';
+        }
+
         function getTimeAgo(date) {
             const seconds = Math.floor((new Date() - date) / 1000);
             
@@ -799,37 +805,179 @@
             if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
             return `${Math.floor(seconds / 86400)}d ago`;
         }
-        
+
         function updateAlertCounter(count) {
             const counter = document.querySelector('.badge-counter');
-            if (counter) {
-                if (count === 0) {
-                    counter.style.display = 'none';
-                } else if (count > 99) {
-                    counter.textContent = '99+';
-                } else {
-                    counter.textContent = count;
+            if (!counter) {
+                return;
+            }
+            if (count === 0) {
+                counter.style.display = 'none';
+                counter.textContent = '0';
+                return;
+            }
+            counter.style.display = 'inline-block';
+            counter.textContent = count > 99 ? '99+' : String(count);
+        }
+
+        function populateAlertModal(alert) {
+            document.getElementById('alertDetailsSeverity').className = `badge ${getAlertBadgeClass(alert.severity)}`;
+            document.getElementById('alertDetailsSeverity').textContent = (alert.severity || 'info').toUpperCase();
+            document.getElementById('alertDetailsCategory').textContent = alert.category || 'general';
+            document.getElementById('alertDetailsCreatedAt').textContent = formatAlertTimestamp(alert.created_at);
+            document.getElementById('alertDetailsTitle').textContent = alert.title || 'Alert';
+            document.getElementById('alertDetailsMessage').textContent = alert.message || 'No additional details.';
+            document.getElementById('alertDetailsSource').textContent = alert.source || 'System';
+            document.getElementById('alertDetailsStation').textContent = alert.station_id || 'N/A';
+            document.getElementById('alertDetailsTransaction').textContent = alert.transaction_id || 'N/A';
+            document.getElementById('alertAcknowledgeButton').classList.toggle('d-none', !!alert.is_acknowledged || !!alert.is_resolved);
+            document.getElementById('alertResolveButton').classList.toggle('d-none', !!alert.is_resolved);
+        }
+
+        async function loadAlerts() {
+            try {
+                const response = await fetch('/accounts/alerts/?limit=5', {
+                    headers: {
+                        'X-Requested-With': 'XMLHttpRequest'
+                    }
+                });
+                const contentType = response.headers.get('content-type') || '';
+                if (!response.ok || !contentType.includes('application/json')) {
+                    throw new Error('Alerts endpoint returned a non-JSON response');
                 }
+                const data = await response.json();
+                alertCache.clear();
+                (data.alerts || []).forEach((alert) => {
+                    alertCache.set(alert.id, alert);
+                });
+                renderAlerts(data.alerts || []);
+                updateAlertCounter((data.statistics && data.statistics.total_active) || 0);
+            } catch (error) {
+                console.error('Error loading alerts:', error);
+                renderFallbackAlerts();
+                updateAlertCounter(0);
             }
         }
-        
+
+        function renderAlerts(alerts) {
+            const container = document.getElementById('alertsList');
+            if (!container) {
+                return;
+            }
+
+            if (alerts.length === 0) {
+                container.innerHTML = `
+                    <div class="text-center py-3">
+                        <i class="fas fa-check-circle fa-2x text-success mb-2"></i>
+                        <p class="small text-muted mb-0">No active alerts</p>
+                    </div>
+                `;
+                return;
+            }
+
+            let html = '';
+            alerts.forEach((alert) => {
+                const iconClass = getAlertIcon(alert.severity);
+                const bgClass = getAlertBgClass(alert.severity);
+                const timeAgo = getTimeAgo(new Date(alert.created_at));
+                const title = escapeAlertHtml(alert.title || 'Alert');
+                const messagePreview = escapeAlertHtml((alert.message || '').slice(0, 96));
+
+                html += `
+                    <a class="dropdown-item d-flex align-items-start" href="#" onclick="handleAlertClick(${alert.id}); return false;">
+                        <div class="mr-3">
+                            <div class="icon-circle ${bgClass}">
+                                <i class="${iconClass} text-white"></i>
+                            </div>
+                        </div>
+                        <div class="flex-grow-1">
+                            <div class="small text-gray-500">${escapeAlertHtml(timeAgo)}</div>
+                            <div class="${alert.severity === 'critical' || alert.severity === 'error' ? 'font-weight-bold' : ''}">${title}${alert.is_acknowledged ? '<span class="badge badge-secondary ml-2">Acknowledged</span>' : ''}</div>
+                            <div class="small text-muted mt-1">${messagePreview || 'No additional details.'}</div>
+                        </div>
+                    </a>
+                `;
+            });
+
+            container.innerHTML = html;
+        }
+
+        function renderFallbackAlerts() {
+            const container = document.getElementById('alertsList');
+            if (!container) {
+                return;
+            }
+            container.innerHTML = `
+                <div class="text-center py-3 px-3">
+                    <i class="fas fa-exclamation-triangle fa-2x text-warning mb-2"></i>
+                    <p class="small text-muted mb-2">Alerts are temporarily unavailable.</p>
+                    <button type="button" class="btn btn-sm btn-outline-primary" onclick="loadAlerts()">Retry</button>
+                </div>
+            `;
+        }
+
         function handleAlertClick(alertId) {
-            // Show alert details modal or navigate to alert details
             showAlertDetails(alertId);
         }
-        
+
         function showAlertDetails(alertId) {
-            // Placeholder for alert details functionality
-            console.log('Show details for alert:', alertId);
-            // Could implement modal with alert details and actions (acknowledge, resolve)
+            const alert = alertCache.get(alertId);
+            if (!alert) {
+                return;
+            }
+            activeAlertId = alertId;
+            populateAlertModal(alert);
+            $('#alertDetailsModal').modal('show');
         }
-        
+
+        async function performAlertAction(action) {
+            if (activeAlertId === null) {
+                return;
+            }
+            try {
+                const response = await fetch(`/accounts/alerts/${activeAlertId}/`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': getAlertCsrfToken(),
+                        'X-Requested-With': 'XMLHttpRequest'
+                    },
+                    body: JSON.stringify({ action: action })
+                });
+                const contentType = response.headers.get('content-type') || '';
+                const payload = contentType.includes('application/json') ? await response.json() : {};
+                if (!response.ok) {
+                    throw new Error(payload.error || 'Failed to update alert');
+                }
+                $('#alertDetailsModal').modal('hide');
+                activeAlertId = null;
+                await loadAlerts();
+                window.dispatchEvent(new CustomEvent('alerts:updated', { detail: payload }));
+            } catch (error) {
+                console.error('Error updating alert:', error);
+                alert(error.message || 'Failed to update alert');
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', function() {
+            const acknowledgeButton = document.getElementById('alertAcknowledgeButton');
+            const resolveButton = document.getElementById('alertResolveButton');
+            if (acknowledgeButton) {
+                acknowledgeButton.addEventListener('click', function() {
+                    performAlertAction('acknowledge');
+                });
+            }
+            if (resolveButton) {
+                resolveButton.addEventListener('click', function() {
+                    performAlertAction('resolve');
+                });
+            }
+        });
+
         function showAllAlerts() {
-            // Navigate to alerts page or show modal with all alerts
-            console.log('Show all alerts');
-            // Could implement a dedicated alerts page
+            window.location.href = '{% url "account" %}#alert-center';
         }
-        
+
         // Auto-refresh alerts every 30 seconds
         setInterval(loadAlerts, 30000);
     </script>

@@ -40,7 +40,7 @@ environ.Env.read_env(os.path.join(BASE_DIR, '.env'))
 SECRET_KEY = env('SECRET_KEY')
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = env.bool('DEBUG', default=True)
+DEBUG = env.bool('DEBUG', default=False)
 
 # Allowed hosts - in development allow all, in production configure via env
 if DEBUG:
@@ -82,11 +82,12 @@ INSTALLED_APPS = [
 ]
 
 # Channel Layers Configuration
-# Use Redis in production, InMemory for development
+# In development, prefer the in-memory channel layer so browser/OCPP websockets
+# stay alive even if Redis restarts. Production can opt into Redis explicitly.
 REDIS_URL = env('REDIS_URL', default=None)
+USE_REDIS_CHANNEL_LAYER = env.bool('USE_REDIS_CHANNEL_LAYER', default=(not DEBUG and bool(REDIS_URL)))
 
-if REDIS_URL and not DEBUG:
-    # Production: Use Redis channel layer (scalable, persistent)
+if USE_REDIS_CHANNEL_LAYER and REDIS_URL:
     CHANNEL_LAYERS = {
         "default": {
             "BACKEND": "channels_redis.core.RedisChannelLayer",
@@ -98,12 +99,14 @@ if REDIS_URL and not DEBUG:
         },
     }
 else:
-    # Development: Use InMemory channel layer (single process only)
     CHANNEL_LAYERS = {
         "default": {
             "BACKEND": "channels.layers.InMemoryChannelLayer"
         }
     }
+
+if not DEBUG and ALLOWED_HOSTS == ['*']:
+    raise RuntimeError('ALLOWED_HOSTS cannot be wildcard when DEBUG is disabled')
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
@@ -248,6 +251,15 @@ if not DEBUG:
 # Logging Configuration
 # =============================================================================
 
+CELERY_TASK_TIME_LIMIT = env.int('CELERY_TASK_TIME_LIMIT', default=300)
+CELERY_TASK_SOFT_TIME_LIMIT = env.int('CELERY_TASK_SOFT_TIME_LIMIT', default=240)
+CELERY_TASK_ACKS_LATE = env.bool('CELERY_TASK_ACKS_LATE', default=True)
+CELERY_WORKER_PREFETCH_MULTIPLIER = env.int('CELERY_WORKER_PREFETCH_MULTIPLIER', default=1)
+CELERY_TASK_REJECT_ON_WORKER_LOST = env.bool('CELERY_TASK_REJECT_ON_WORKER_LOST', default=True)
+CELERY_BROKER_TRANSPORT_OPTIONS = {
+    'visibility_timeout': env.int('CELERY_VISIBILITY_TIMEOUT', default=3600),
+}
+
 LOGGING = {
     'version': 1,
     'disable_existing_loggers': False,
@@ -304,7 +316,7 @@ OCPP_STATION_CONFIGURATION = {
     'ClockAlignedDataInterval': str(env.int('OCPP_CLOCK_ALIGNED_DATA_INTERVAL_SECONDS', default=0)),
     'MeterValuesSampledData': env(
         'OCPP_METER_VALUES_SAMPLED_DATA',
-        default='Energy.Active.Import.Register,Power.Active.Import,Current.Import,Voltage',
+        default='Energy.Active.Import.Register,Power.Active.Import,Current.Import,Voltage,SoC',
     ),
 }
 

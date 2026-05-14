@@ -51,11 +51,11 @@
                         </div>
                         <div class="form-group">
                             <label for="firstName">First Name</label>
-                            <input type="text" class="form-control" id="firstName" placeholder="Enter first name">
+                            <input type="text" class="form-control" id="firstName" placeholder="Enter first name" value="{{ user.first_name }}">
                         </div>
                         <div class="form-group">
                             <label for="lastName">Last Name</label>
-                            <input type="text" class="form-control" id="lastName" placeholder="Enter last name">
+                            <input type="text" class="form-control" id="lastName" placeholder="Enter last name" value="{{ user.last_name }}">
                         </div>
                         <div class="form-group">
                             <label for="phone">Phone Number</label>
@@ -134,35 +134,85 @@
                     </h6>
                 </div>
                 <div class="card-body">
-                    <div class="row">
-                        <div class="col-md-6">
-                            <div class="custom-control custom-switch mb-3">
-                                <input type="checkbox" class="custom-control-input" id="emailNotifications" checked>
-                                <label class="custom-control-label" for="emailNotifications">Email Notifications</label>
-                            </div>
-                            <div class="custom-control custom-switch mb-3">
-                                <input type="checkbox" class="custom-control-input" id="stationAlerts" checked>
-                                <label class="custom-control-label" for="stationAlerts">Station Status Alerts</label>
-                            </div>
-                            <div class="custom-control custom-switch mb-3">
-                                <input type="checkbox" class="custom-control-input" id="transactionAlerts" checked>
-                                <label class="custom-control-label" for="transactionAlerts">Transaction Alerts</label>
+                    <p class="text-muted mb-3">Set the minimum severity and delivery channel for each alert category. These preferences are stored per account and used by the backend notification service.</p>
+                    <div class="table-responsive">
+                        <table class="table table-sm table-bordered mb-3">
+                            <thead class="thead-light">
+                                <tr>
+                                    <th>Category</th>
+                                    <th>Minimum Severity</th>
+                                    <th class="text-center">Web</th>
+                                    <th class="text-center">Email</th>
+                                </tr>
+                            </thead>
+                            <tbody id="alertPreferencesTableBody">
+                                {% for preference in initial_alert_preferences %}
+                                <tr data-category="{{ preference.category }}">
+                                    <td class="align-middle font-weight-bold">{{ preference.label }}</td>
+                                    <td>
+                                        <select class="form-control form-control-sm alert-severity-select">
+                                            {% for severity_value, severity_label in alert_severities %}
+                                            <option value="{{ severity_value }}" {% if preference.severity_min == severity_value %}selected{% endif %}>{{ severity_label }}</option>
+                                            {% endfor %}
+                                        </select>
+                                    </td>
+                                    <td class="text-center align-middle">
+                                        <input type="checkbox" class="alert-web-toggle" {% if preference.is_web_enabled %}checked{% endif %}>
+                                    </td>
+                                    <td class="text-center align-middle">
+                                        <input type="checkbox" class="alert-email-toggle" {% if preference.is_email_enabled %}checked{% endif %}>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="d-flex justify-content-between align-items-center">
+                        <small class="text-muted" id="alertPreferencesStatus">Preferences synced from the server.</small>
+                        <div class="btn-group" role="group">
+                            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="loadAlertPreferences()">
+                                <i class="fas fa-sync"></i> Refresh
+                            </button>
+                            <button type="button" class="btn btn-sm btn-primary" onclick="saveAlertPreferences()">
+                                <i class="fas fa-save"></i> Save Alert Preferences
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card shadow mb-4" id="alert-center">
+                <div class="card-header py-3 d-flex flex-row align-items-center justify-content-between">
+                    <h6 class="m-0 font-weight-bold text-primary">
+                        <i class="fas fa-exclamation-circle mr-2"></i>Active Alerts Center
+                    </h6>
+                    <button type="button" class="btn btn-sm btn-outline-primary" onclick="loadRecentAlerts()">
+                        <i class="fas fa-sync"></i> Refresh Alerts
+                    </button>
+                </div>
+                <div class="card-body">
+                    <div class="row mb-3">
+                        <div class="col-md-4 mb-2">
+                            <div class="border rounded p-3 h-100">
+                                <div class="text-xs text-uppercase text-muted mb-1">Total Active</div>
+                                <div class="h5 mb-0 font-weight-bold" id="alertSummaryTotal">0</div>
                             </div>
                         </div>
-                        <div class="col-md-6">
-                            <div class="custom-control custom-switch mb-3">
-                                <input type="checkbox" class="custom-control-input" id="systemAlerts" checked>
-                                <label class="custom-control-label" for="systemAlerts">System Alerts</label>
-                            </div>
-                            <div class="custom-control custom-switch mb-3">
-                                <input type="checkbox" class="custom-control-input" id="weeklyReports">
-                                <label class="custom-control-label" for="weeklyReports">Weekly Reports</label>
-                            </div>
-                            <div class="custom-control custom-switch mb-3">
-                                <input type="checkbox" class="custom-control-input" id="maintenanceAlerts" checked>
-                                <label class="custom-control-label" for="maintenanceAlerts">Maintenance Alerts</label>
+                        <div class="col-md-4 mb-2">
+                            <div class="border rounded p-3 h-100">
+                                <div class="text-xs text-uppercase text-muted mb-1">Unacknowledged</div>
+                                <div class="h5 mb-0 font-weight-bold" id="alertSummaryUnacknowledged">0</div>
                             </div>
                         </div>
+                        <div class="col-md-4 mb-2">
+                            <div class="border rounded p-3 h-100">
+                                <div class="text-xs text-uppercase text-muted mb-1">Critical</div>
+                                <div class="h5 mb-0 font-weight-bold text-danger" id="alertSummaryCritical">0</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div id="accountAlertsList" class="list-group list-group-flush border rounded">
+                        <div class="list-group-item text-center py-4 text-muted">Loading active alerts...</div>
                     </div>
                 </div>
             </div>
@@ -282,6 +332,7 @@
         </div>
     </div>
 </div>
+{{ account_settings|json_script:"account-settings-data" }}
 
 <!-- Password Change Modal -->
 <div class="modal fade" id="passwordModal" tabindex="-1" role="dialog">
@@ -327,26 +378,11 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 function loadUserSettings() {
-    // Simulate loading user settings from API
-    const settings = {
-        firstName: 'John',
-        lastName: 'Doe',
-        phone: '+359 888 123 456',
-        company: 'RENEW Energy',
-        role: 'admin',
-        emailNotifications: true,
-        stationAlerts: true,
-        transactionAlerts: true,
-        systemAlerts: true,
-        weeklyReports: false,
-        maintenanceAlerts: true,
-        language: 'en',
-        timezone: 'Europe/Sofia',
-        dateFormat: 'MM/DD/YYYY',
-        theme: 'light',
-        webhookUrl: 'https://api.renew-energy.com/webhook',
-        transactionWebhook: 'https://api.renew-energy.com/transactions'
-    };
+    const settingsElement = document.getElementById('account-settings-data');
+    if (!settingsElement) {
+        return;
+    }
+    const settings = JSON.parse(settingsElement.textContent);
     
     // Populate form fields
     Object.keys(settings).forEach(key => {
@@ -359,6 +395,9 @@ function loadUserSettings() {
             }
         }
     });
+
+    loadAlertPreferences();
+    loadRecentAlerts();
 }
 
 function setupFormValidation() {
@@ -389,7 +428,7 @@ function validateForm(form) {
     return isValid;
 }
 
-function saveSettings() {
+async function saveSettings() {
     const settings = {};
     const form = document.getElementById('profileForm');
     
@@ -403,13 +442,6 @@ function saveSettings() {
         }
     });
     
-    // Collect notification preferences
-    const notifications = ['emailNotifications', 'stationAlerts', 'transactionAlerts', 'systemAlerts', 'weeklyReports', 'maintenanceAlerts'];
-    notifications.forEach(id => {
-        const element = document.getElementById(id);
-        if (element) settings[id] = element.checked;
-    });
-    
     // Collect system preferences
     const systemPrefs = ['language', 'timezone', 'dateFormat', 'theme'];
     systemPrefs.forEach(id => {
@@ -417,9 +449,9 @@ function saveSettings() {
         if (element) settings[id] = element.value;
     });
     
-    // Simulate API call
+    await saveAlertPreferences(true);
     console.log('Saving settings:', settings);
-    showSuccessMessage('All settings have been saved successfully!');
+    showSuccessMessage('Alert preferences have been saved successfully!');
 }
 
 function resetSettings() {
@@ -652,6 +684,167 @@ async function terminateAllSessions() {
     }
 }
 
+function getAlertPreferencePayload() {
+    return Array.from(document.querySelectorAll('#alertPreferencesTableBody tr')).map((row) => ({
+        category: row.dataset.category,
+        severity_min: row.querySelector('.alert-severity-select').value,
+        is_web_enabled: row.querySelector('.alert-web-toggle').checked,
+        is_email_enabled: row.querySelector('.alert-email-toggle').checked,
+    }));
+}
+
+function updateAlertPreferencesStatus(message, isError) {
+    const statusElement = document.getElementById('alertPreferencesStatus');
+    if (!statusElement) {
+        return;
+    }
+    statusElement.textContent = message;
+    statusElement.className = isError ? 'text-danger small' : 'text-muted small';
+}
+
+function applyAlertPreferences(preferences) {
+    preferences.forEach((preference) => {
+        const row = document.querySelector(`#alertPreferencesTableBody tr[data-category="${preference.category}"]`);
+        if (!row) {
+            return;
+        }
+        row.querySelector('.alert-severity-select').value = preference.severity_min;
+        row.querySelector('.alert-web-toggle').checked = !!preference.is_web_enabled;
+        row.querySelector('.alert-email-toggle').checked = !!preference.is_email_enabled;
+    });
+}
+
+async function loadAlertPreferences() {
+    try {
+        const response = await fetch('/accounts/alert-preferences/');
+        const data = await response.json();
+        applyAlertPreferences(data.preferences || []);
+        updateAlertPreferencesStatus('Preferences synced from the server.', false);
+    } catch (error) {
+        console.error('Error loading alert preferences:', error);
+        updateAlertPreferencesStatus('Failed to load alert preferences.', true);
+    }
+}
+
+async function saveAlertPreferences(silent) {
+    try {
+        const response = await fetch('/accounts/alert-preferences/', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': getCookie('csrftoken')
+            },
+            body: JSON.stringify({ preferences: getAlertPreferencePayload() })
+        });
+        const data = await response.json();
+        if (!response.ok) {
+            throw new Error(data.error || 'Failed to save preferences');
+        }
+        applyAlertPreferences(data.preferences || []);
+        updateAlertPreferencesStatus('Alert preferences saved successfully.', false);
+        if (!silent) {
+            showSuccessMessage('Alert preferences saved successfully!');
+        }
+    } catch (error) {
+        console.error('Error saving alert preferences:', error);
+        updateAlertPreferencesStatus(error.message || 'Failed to save preferences.', true);
+        if (!silent) {
+            showErrorMessage(error.message || 'Failed to save alert preferences.');
+        }
+    }
+}
+
+function escapeHtml(value) {
+    const div = document.createElement('div');
+    div.textContent = value === null || value === undefined ? '' : String(value);
+    return div.innerHTML;
+}
+
+function renderRecentAlerts(alerts) {
+    const container = document.getElementById('accountAlertsList');
+    if (!container) {
+        return;
+    }
+    if (!alerts.length) {
+        container.innerHTML = '<div class="list-group-item text-center py-4 text-muted">No active alerts.</div>';
+        return;
+    }
+
+    container.innerHTML = alerts.map((alert) => {
+        const severityClass = alert.severity === 'critical' || alert.severity === 'error'
+            ? 'danger'
+            : (alert.severity === 'warning' ? 'warning' : 'info');
+        const acknowledgeButton = alert.is_acknowledged
+            ? ''
+            : `<button type="button" class="btn btn-sm btn-outline-secondary" onclick="runAlertAction(${alert.id}, 'acknowledge')">Acknowledge</button>`;
+        return `
+            <div class="list-group-item">
+                <div class="d-flex justify-content-between align-items-start flex-wrap">
+                    <div class="pr-3 mb-2 mb-md-0">
+                        <div class="d-flex align-items-center flex-wrap mb-1">
+                            <span class="badge badge-${severityClass} mr-2">${escapeHtml((alert.severity || 'info').toUpperCase())}</span>
+                            <span class="font-weight-bold mr-2">${escapeHtml(alert.title || 'Alert')}</span>
+                            <span class="badge badge-light">${escapeHtml(alert.category || 'general')}</span>
+                        </div>
+                        <div class="text-muted small mb-1">${new Date(alert.created_at).toLocaleString()}</div>
+                        <div>${escapeHtml(alert.message || 'No additional details.')}</div>
+                    </div>
+                    <div class="btn-group btn-group-sm" role="group">
+                        ${acknowledgeButton}
+                        <button type="button" class="btn btn-sm btn-primary" onclick="runAlertAction(${alert.id}, 'resolve')">Resolve</button>
+                    </div>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+function updateAlertSummary(statistics) {
+    document.getElementById('alertSummaryTotal').textContent = statistics.total_active || 0;
+    document.getElementById('alertSummaryUnacknowledged').textContent = statistics.unacknowledged || 0;
+    document.getElementById('alertSummaryCritical').textContent = (statistics.by_severity && statistics.by_severity.critical) || 0;
+}
+
+async function loadRecentAlerts() {
+    try {
+        const response = await fetch('/accounts/alerts/?limit=10');
+        const data = await response.json();
+        renderRecentAlerts(data.alerts || []);
+        updateAlertSummary(data.statistics || {});
+    } catch (error) {
+        console.error('Error loading alerts:', error);
+        const container = document.getElementById('accountAlertsList');
+        if (container) {
+            container.innerHTML = '<div class="list-group-item text-center py-4 text-danger">Unable to load alerts.</div>';
+        }
+    }
+}
+
+async function runAlertAction(alertId, action) {
+    try {
+        const response = await fetch(`/accounts/alerts/${alertId}/`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': getCookie('csrftoken')
+            },
+            body: JSON.stringify({ action: action })
+        });
+        const data = await response.json();
+        if (!response.ok) {
+            throw new Error(data.error || 'Failed to update alert');
+        }
+        showSuccessMessage(`Alert ${action}d successfully.`);
+        await loadRecentAlerts();
+        if (typeof loadAlerts === 'function') {
+            loadAlerts();
+        }
+    } catch (error) {
+        console.error('Error updating alert:', error);
+        showErrorMessage(error.message || 'Failed to update alert.');
+    }
+}
+
 function getCookie(name) {
     let cookieValue = null;
     if (document.cookie && document.cookie !== '') {
@@ -716,14 +909,14 @@ function showInfoMessage(message) {
 
 function createAlert(message, type) {
     // Remove existing alerts
-    const existingAlert = document.querySelector('.alert');
+    const existingAlert = document.querySelector('.account-page-alert');
     if (existingAlert) {
         existingAlert.remove();
     }
     
     // Create new alert
     const alert = document.createElement('div');
-    alert.className = `alert alert-${type} alert-dismissible fade show`;
+    alert.className = `alert alert-${type} alert-dismissible fade show account-page-alert`;
     alert.innerHTML = `
         ${message}
         <button type="button" class="close" data-dismiss="alert">

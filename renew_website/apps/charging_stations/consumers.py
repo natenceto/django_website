@@ -27,7 +27,7 @@ from ocpp.v16.enums import (
 )
 
 from .logging_config import get_ocpp_logger, get_station_logger
-from .models import Station, Connector, Transaction, UserRFID, MeterValue, CommandLog, Vehicle
+from .models import Station, Connector, Transaction, UserRFID, MeterValue, CommandLog, Vehicle, StationStatusHistory
 from .registry import ACTIVE_STATIONS, station_runtime
 
 
@@ -65,6 +65,39 @@ ocpp_logger = get_ocpp_logger("consumers")
 logger = logging.getLogger("charging_stations")
 
 
+def _persist_station_status_transition(
+    station_id: int,
+    status: str,
+    reason: str = "",
+    touch_last_seen: bool = False,
+) -> bool:
+    now = timezone.now()
+    with db_transaction.atomic():
+        station = Station.objects.select_for_update().filter(id=station_id).first()
+        if not station:
+            return False
+
+        changed = station.status != status
+        station.status = status
+
+        update_fields = ["status"]
+        if touch_last_seen:
+            station.last_seen = now
+            update_fields.append("last_seen")
+
+        station.save(update_fields=update_fields)
+
+        if changed or not StationStatusHistory.objects.filter(station_id=station_id).exists():
+            StationStatusHistory.objects.create(
+                station=station,
+                status=status,
+                reason=(reason or "")[:64],
+                observed_at=now,
+            )
+
+        return changed
+
+
 def _ocpp_configuration_timeout_seconds() -> float:
     return float(getattr(settings, "OCPP_CONFIGURATION_TIMEOUT_SECONDS", 10.0))
 
@@ -76,7 +109,7 @@ def _ocpp_station_configuration_defaults() -> Dict[str, str]:
         "MeterValueSampleInterval": "30",
         "ClockAlignedDataInterval": "0",
         "MeterValuesSampledData": (
-            "Energy.Active.Import.Register,Power.Active.Import,Current.Import,Voltage"
+            "Energy.Active.Import.Register,Power.Active.Import,Current.Import,Voltage,SoC"
         ),
     }
     merged = {**defaults, **configured}
@@ -657,20 +690,13 @@ class ChargePoint(OCPPChargePoint):
     async def _update_station_status_async(self, status: str, reason: str = "") -> bool:
         station_id = self.station_id
 
-        @database_sync_to_async
-        def update_db() -> bool:
-            with db_transaction.atomic():
-                st = Station.objects.select_for_update().filter(id=station_id).first()
-                if not st:
-                    return False
-                changed = (st.status != status)
-                st.status = status
-                st.last_seen = timezone.now()
-                st.save(update_fields=["status", "last_seen"])
-                return changed
-
         try:
-            changed = await update_db()
+            changed = await database_sync_to_async(_persist_station_status_transition)(
+                station_id=station_id,
+                status=status,
+                reason=reason,
+                touch_last_seen=True,
+            )
         except Exception:
             ocpp_logger.exception("Error updating station status in DB")
             return False
@@ -1279,6 +1305,9 @@ class ChargePoint(OCPPChargePoint):
 
                 return {
                     "station_id": self.station_id,
+                    "requested_power_kw": tx.requested_power_kw,
+                    "requested_power_mode": tx.requested_power_mode,
+                    "ems_limit_kw": float(tx.last_applied_ems_limit_kw) if tx.last_applied_ems_limit_kw is not None else None,
                     "soc_percentage": soc_percentage,
                     "power_w": power_w,
                     "energy_wh": energy_wh,
@@ -1302,16 +1331,24 @@ class ChargePoint(OCPPChargePoint):
         # ---------------------------
         if (
             result
-            and result.get("soc_percentage") is not None
             and getattr(self, "consumer", None)
         ):
             try:
-                await self.consumer.broadcast_soc_update(
+                if result.get("soc_percentage") is not None:
+                    await self.consumer.broadcast_soc_update(
+                        self.station_id,
+                        float(result["soc_percentage"]),
+                    )
+                await self.consumer.broadcast_power_update(
                     self.station_id,
-                    float(result["soc_percentage"]),
+                    requested_power_kw=result.get("requested_power_kw"),
+                    requested_power_mode=result.get("requested_power_mode"),
+                    actual_power_kw=(float(result["power_w"]) / 1000.0) if result.get("power_w") is not None else None,
+                    ems_limit_kw=result.get("ems_limit_kw"),
+                    source="meter_values",
                 )
             except Exception:
-                ocpp_logger.exception("Failed broadcasting SoC update")
+                ocpp_logger.exception("Failed broadcasting live power update")
 
         response = call_result.MeterValuesPayload()
         self._log_ocpp_response("MeterValues", response, direction="inbound")
@@ -1543,6 +1580,7 @@ class ChargePoint(OCPPChargePoint):
                         id_tag=id_tag,
                         meter_start=meter_start,
                         requested_power_kw=requested_power,
+                        requested_power_mode=(session_context.get("requested_power_mode") or "station-default")[:20],
                         status="active",
                     )
 
@@ -1567,9 +1605,14 @@ class ChargePoint(OCPPChargePoint):
                     conn.status = "charging"
                     conn.save(update_fields=["status"])
 
-                    return int(getattr(tx, "transaction_id", tx.id))
+                    return {
+                        "transaction_id": int(getattr(tx, "transaction_id", tx.id)),
+                        "requested_power_kw": tx.requested_power_kw,
+                        "requested_power_mode": tx.requested_power_mode,
+                        "last_applied_ems_limit_kw": float(tx.last_applied_ems_limit_kw) if tx.last_applied_ems_limit_kw is not None else None,
+                    }
 
-            tx_pk = await create_tx()
+            tx_snapshot = await create_tx()
 
         if pending_key is not None:
             self.pending_requested_power.pop(pending_key, None)
@@ -1583,12 +1626,20 @@ class ChargePoint(OCPPChargePoint):
         if getattr(self, "consumer", None):
             try:
                 await self.consumer.broadcast_connector_status(self.station_id, "charging", int(connector_id))
+                await self.consumer.broadcast_power_update(
+                    self.station_id,
+                    requested_power_kw=tx_snapshot.get("requested_power_kw"),
+                    requested_power_mode=tx_snapshot.get("requested_power_mode"),
+                    actual_power_kw=None,
+                    ems_limit_kw=tx_snapshot.get("last_applied_ems_limit_kw"),
+                    source="start_transaction",
+                )
             except Exception:
                 ocpp_logger.exception("Failed broadcasting connector charging status")
 
         # Return OCPP transactionId (we use DB pk)
         response = call_result.StartTransactionPayload(
-            transaction_id=int(tx_pk),
+            transaction_id=int(tx_snapshot["transaction_id"]),
             id_tag_info={"status": AuthorizationStatus.accepted.value},
         )
         self._log_ocpp_response("StartTransaction", response, direction="inbound")
@@ -2251,6 +2302,38 @@ class ChargePointConsumer(AsyncWebsocketConsumer):
         except Exception:
             ocpp_logger.exception("broadcast_soc_update failed")
 
+    async def broadcast_power_update(
+        self,
+        station_id: int,
+        requested_power_kw: Optional[float],
+        requested_power_mode: Optional[str],
+        actual_power_kw: Optional[float],
+        ems_limit_kw: Optional[float],
+        source: str = "runtime",
+    ):
+        try:
+            requested_power_display = "--"
+            if requested_power_mode == "auto" and requested_power_kw is None:
+                requested_power_display = "Auto"
+            elif requested_power_kw is not None:
+                requested_power_display = f"{float(requested_power_kw):.2f} kW"
+            elif requested_power_mode == "station-default":
+                requested_power_display = "Station default"
+
+            await self._ui_send({
+                "type": "station_power_update",
+                "station_id": int(station_id),
+                "requested_power_kw": float(requested_power_kw) if requested_power_kw is not None else None,
+                "requested_power_mode": requested_power_mode,
+                "requested_power_display": requested_power_display,
+                "actual_power_kw": float(actual_power_kw) if actual_power_kw is not None else None,
+                "ems_limit_kw": float(ems_limit_kw) if ems_limit_kw is not None else None,
+                "source": source,
+                "timestamp": timezone.now().isoformat(),
+            })
+        except Exception:
+            ocpp_logger.exception("broadcast_power_update failed")
+
     # -------------------------
     # Station DB status update (used by disconnect/watchdog)
     # -------------------------
@@ -2265,12 +2348,13 @@ class ChargePointConsumer(AsyncWebsocketConsumer):
 
     async def update_station_status(self, station_id: int, status: str, reason: str = "") -> bool:
         try:
-            st = await self._get_station(int(station_id))
             async with self.db_lock:
-                st.status = status
-                if status == "active":
-                    st.last_seen = timezone.now()
-                await self._save_station(st)
+                await database_sync_to_async(_persist_station_status_transition)(
+                    station_id=int(station_id),
+                    status=status,
+                    reason=reason,
+                    touch_last_seen=(status == "active"),
+                )
 
             await self.broadcast_station_status(int(station_id), status=status, reason=reason)
             return True

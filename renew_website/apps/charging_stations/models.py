@@ -128,6 +128,25 @@ class Station(models.Model):
                 );
             """)
         return result
+
+
+class StationStatusHistory(models.Model):
+    """Immutable status timeline used for historical availability analytics."""
+
+    station = models.ForeignKey(Station, on_delete=models.CASCADE, related_name="status_history")
+    status = models.CharField(max_length=20, choices=Station.STATUS_CHOICES)
+    reason = models.CharField(max_length=64, blank=True, default="")
+    observed_at = models.DateTimeField(default=timezone.now, db_index=True)
+
+    class Meta:
+        ordering = ["-observed_at", "-id"]
+        indexes = [
+            models.Index(fields=["station", "observed_at"]),
+            models.Index(fields=["status", "observed_at"]),
+        ]
+
+    def __str__(self):
+        return f"Station {self.station_id} -> {self.status} at {self.observed_at:%Y-%m-%d %H:%M:%S}"
     
 
 class Connector(models.Model):
@@ -266,6 +285,12 @@ class Vehicle(models.Model):
 
 class Transaction(models.Model):
     """OCPP charging transaction - core charging session data."""
+    REQUESTED_POWER_MODE_CHOICES = [
+        ('manual', 'Manual Limit'),
+        ('auto', 'Auto / EV Negotiated'),
+        ('station-default', 'Station Default'),
+    ]
+
     connector = models.ForeignKey(Connector, on_delete=models.CASCADE, related_name="transactions")
     vehicle = models.ForeignKey(
         Vehicle,
@@ -289,6 +314,19 @@ class Transaction(models.Model):
     
     # Power Management
     requested_power_kw = models.IntegerField(null=True, blank=True, help_text="Requested charging power in kW")
+    requested_power_mode = models.CharField(
+        max_length=20,
+        choices=REQUESTED_POWER_MODE_CHOICES,
+        default='station-default',
+        help_text="How the requested charging power was selected for this session.",
+    )
+    last_applied_ems_limit_kw = models.DecimalField(
+        max_digits=6,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Latest EMS-applied charging power ceiling for this session in kW.",
+    )
     
     # Transaction Status (OCPP Standard)
     STATUS_CHOICES = [
@@ -324,6 +362,25 @@ class Transaction(models.Model):
         if self.meter_start is not None and self.meter_stop is not None:
             return (self.meter_stop - self.meter_start) / 1000  # Convert Wh to kWh
         return None
+
+    @property
+    def latest_meter_value(self):
+        return self.meter_values.order_by('-timestamp', '-id').first()
+
+    @property
+    def latest_actual_power_kw(self):
+        latest_meter = self.latest_meter_value
+        if latest_meter and latest_meter.power_w is not None:
+            return latest_meter.power_w / 1000
+        return None
+
+    @property
+    def requested_power_display(self):
+        if self.requested_power_mode == 'auto' and self.requested_power_kw is None:
+            return 'Auto'
+        if self.requested_power_kw is not None:
+            return f"{self.requested_power_kw:.2f} kW"
+        return 'Station default'
 
 
 class MeterValue(models.Model):

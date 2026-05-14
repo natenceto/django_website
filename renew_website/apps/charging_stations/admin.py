@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Station, Connector, Transaction, MeterValue, UserRFID, Vehicle
+from .models import Station, StationStatusHistory, Connector, Transaction, MeterValue, UserRFID, CommandLog, Vehicle
 
 
 from django.utils.html import format_html
@@ -82,6 +82,15 @@ class StationAdmin(admin.ModelAdmin):
     connector_status.short_description = 'Connector Status'
 
 
+@admin.register(StationStatusHistory)
+class StationStatusHistoryAdmin(admin.ModelAdmin):
+    list_display = ['station', 'status', 'reason', 'observed_at']
+    list_filter = ['status', 'reason', 'observed_at']
+    search_fields = ['station__address', 'station__ocpp_identity', 'reason']
+    date_hierarchy = 'observed_at'
+    ordering = ['-observed_at']
+
+
 @admin.register(Connector)
 class ConnectorAdmin(admin.ModelAdmin):
     list_display = ['id', 'station', 'connector_id', 'status']
@@ -95,12 +104,13 @@ class TransactionAdmin(admin.ModelAdmin):
     """OCPP Transaction Admin - Core charging session management."""
     list_display = [
         'id', 'transaction_id', 'vehicle', 'id_tag', 'connector', 
-        'status', 'started_at', 'duration_display', 'energy_display'
+        'requested_power_mode', 'requested_power_kw', 'latest_actual_power_display',
+        'last_applied_ems_limit_kw', 'status', 'started_at', 'duration_display', 'energy_display'
     ]
     list_filter = ['status', 'started_at']
     search_fields = ['id_tag', 'vehicle__vehicle_identifier', 'vehicle__vin', 'vehicle__registration_number', 'connector__station__address', 'transaction_id']
     date_hierarchy = 'started_at'
-    readonly_fields = ['started_at', 'energy_consumed', 'duration']
+    readonly_fields = ['started_at', 'energy_consumed', 'duration', 'latest_actual_power_display']
     
     fieldsets = (
         ('Transaction Information', {
@@ -110,7 +120,7 @@ class TransactionAdmin(admin.ModelAdmin):
             'fields': ('started_at', 'stopped_at')
         }),
         ('Energy Data', {
-            'fields': ('meter_start', 'meter_stop', 'requested_power_kw', 'energy_consumed')
+            'fields': ('meter_start', 'meter_stop', 'requested_power_mode', 'requested_power_kw', 'last_applied_ems_limit_kw', 'latest_actual_power_display', 'energy_consumed')
         }),
         ('Cost', {
             'fields': ('cost', 'pricing_plan'),
@@ -139,6 +149,13 @@ class TransactionAdmin(admin.ModelAdmin):
         return "N/A"
     energy_display.short_description = 'Energy'
 
+    def latest_actual_power_display(self, obj):
+        latest_power_kw = obj.latest_actual_power_kw
+        if latest_power_kw is None:
+            return "N/A"
+        return f"{latest_power_kw:.2f} kW"
+    latest_actual_power_display.short_description = 'Actual Power'
+
 
 @admin.register(Vehicle)
 class VehicleAdmin(admin.ModelAdmin):
@@ -165,9 +182,18 @@ class VehicleAdmin(admin.ModelAdmin):
 
 @admin.register(MeterValue)
 class MeterValueAdmin(admin.ModelAdmin):
-    list_display = ['transaction', 'timestamp', 'value']
+    list_display = ['transaction', 'timestamp', 'power_w', 'energy_wh', 'soc_percentage', 'value']
     list_filter = ['timestamp']
     date_hierarchy = 'timestamp'
+
+
+@admin.register(CommandLog)
+class CommandLogAdmin(admin.ModelAdmin):
+    list_display = ['command_id', 'command_type', 'station', 'status', 'created_at', 'executed_at']
+    list_filter = ['command_type', 'status', 'created_at']
+    search_fields = ['command_id', 'station__address', 'detail', 'error_message']
+    readonly_fields = ['command_id', 'created_at', 'executed_at', 'payload']
+    date_hierarchy = 'created_at'
 
 
 from django.urls import path

@@ -39,21 +39,28 @@
 
     <!-- Dashboard Summary Cards -->
     <div class="row mb-4" id="dashboard-cards">
-        <!-- Vehicle SoC Card -->
+        <!-- Live Session Snapshot Card -->
         <div class="col-xl-3 col-md-6 mb-4">
             <div class="card border-left-primary shadow h-100 py-2">
                 <div class="card-body">
                     <div class="row no-gutters align-items-center">
                         <div class="col mr-2">
                             <div class="text-xs font-weight-bold text-primary text-uppercase mb-1">
-                                Vehicle SoC</div>
+                                Live Session Snapshot</div>
                             <div class="h5 mb-0 font-weight-bold text-gray-800" id="metric-vehicle-soc">
                                 {% if stats.vehicle_soc is not None %}
-                                {{ stats.vehicle_soc|floatformat:2 }}%
+                                {{ stats.vehicle_soc|floatformat:2 }} %
                                 {% else %}
                                 --
                                 {% endif %}
                             </div>
+                            <div class="small text-muted mt-2">Requested Power</div>
+                            <div class="small font-weight-bold text-gray-800" id="metric-requested-power">{{ stats.requested_power_display }}</div>
+                            <div class="small text-muted" id="metric-requested-power-mode">{{ stats.requested_power_mode_label }}</div>
+                            <div class="small text-muted mt-2">Charging Power (Actual)</div>
+                            <div class="small font-weight-bold text-gray-800" id="metric-actual-power">{{ stats.actual_power_display }}</div>
+                            <div class="small text-muted mt-2">EMS Limit</div>
+                            <div class="small font-weight-bold text-gray-800" id="metric-ems-limit">{{ stats.ems_limit_display }}</div>
                         </div>
                         <div class="col-auto">
                             <i class="fas fa-car-battery fa-2x text-gray-300"></i>

@@ -9,6 +9,7 @@ admin_required = user_passes_test(lambda u: u.is_staff)
 urlpatterns = [
     path("stations/", login_required(admin_required(views.stations)), name="stations"),
     path("statistics/", login_required(admin_required(views.statistics)), name="statistics"),
+    path("statistics/export/<str:export_kind>/", login_required(admin_required(views.statistics_export)), name="statistics_export"),
     path("tables/", login_required(admin_required(views.tables)), name="tables"),
 
     # SoC API endpoints

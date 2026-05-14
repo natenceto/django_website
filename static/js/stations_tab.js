@@ -222,18 +222,90 @@ document.addEventListener("DOMContentLoaded", function () {
   }
 
   function updateVehicleSoc(_stationId, socPercentage) {
+    const tableCell = document.getElementById(`soc-${_stationId}`);
+
     if (socPercentage === null || socPercentage === undefined || socPercentage === '') {
+      if (tableCell) {
+        tableCell.innerHTML = '<span>--</span>';
+      }
       updateDashboardCard('metric-vehicle-soc', '--', false);
       return;
     }
 
     const numericSoc = Number(socPercentage);
     if (Number.isNaN(numericSoc)) {
+      if (tableCell) {
+        tableCell.innerHTML = '<span>--</span>';
+      }
       updateDashboardCard('metric-vehicle-soc', '--', false);
       return;
     }
 
-    updateDashboardCard('metric-vehicle-soc', `${numericSoc.toFixed(2)}%`, false);
+    const formattedSoc = `${numericSoc.toFixed(2)} %`;
+    if (tableCell) {
+      tableCell.innerHTML = `<span>${formattedSoc}</span>`;
+    }
+    updateDashboardCard('metric-vehicle-soc', formattedSoc, false);
+  }
+
+  function updatePowerState(stationId, powerState = {}) {
+    const requestedCell = document.getElementById(`requested-power-${stationId}`);
+    const requestedModeCell = document.getElementById(`requested-power-mode-${stationId}`);
+    const actualCell = document.getElementById(`actual-power-${stationId}`);
+    const emsLimitCell = document.getElementById(`ems-limit-${stationId}`);
+
+    const requestedDisplay = powerState.requested_power_display || '--';
+    const requestedMode = powerState.requested_power_mode || '--';
+    const actualPowerKw = powerState.actual_power_kw;
+    const emsLimitKw = powerState.ems_limit_kw;
+
+    if (requestedCell) {
+      requestedCell.firstElementChild.textContent = requestedDisplay;
+    }
+    if (requestedModeCell) {
+      requestedModeCell.textContent = requestedMode === 'station-default' ? 'Station Default' : requestedMode.replace('-', ' ');
+    }
+    if (actualCell) {
+      const actualValue = actualPowerKw === null || actualPowerKw === undefined || Number.isNaN(Number(actualPowerKw))
+        ? '--'
+        : `${Number(actualPowerKw).toFixed(2)} kW`;
+      actualCell.firstElementChild.textContent = actualValue;
+    }
+    if (emsLimitCell) {
+      const emsValue = emsLimitKw === null || emsLimitKw === undefined || Number.isNaN(Number(emsLimitKw))
+        ? 'EMS --'
+        : `EMS ${Number(emsLimitKw).toFixed(2)} kW`;
+      emsLimitCell.textContent = emsValue;
+    }
+
+    updateDashboardCard('metric-requested-power', requestedDisplay, false);
+    const requestedModeSummary = document.getElementById('metric-requested-power-mode');
+    if (requestedModeSummary) {
+      requestedModeSummary.textContent = requestedMode === 'station-default' ? 'Station Default' : requestedMode.replace('-', ' ');
+    }
+    updateDashboardCard(
+      'metric-actual-power',
+      actualPowerKw === null || actualPowerKw === undefined || Number.isNaN(Number(actualPowerKw))
+        ? '--'
+        : `${Number(actualPowerKw).toFixed(2)} kW`,
+      false,
+    );
+    updateDashboardCard(
+      'metric-ems-limit',
+      emsLimitKw === null || emsLimitKw === undefined || Number.isNaN(Number(emsLimitKw))
+        ? '--'
+        : `${Number(emsLimitKw).toFixed(2)} kW`,
+      false,
+    );
+  }
+
+  function resetPowerState(stationId) {
+    updatePowerState(stationId, {
+      requested_power_display: '--',
+      requested_power_mode: '--',
+      actual_power_kw: null,
+      ems_limit_kw: null,
+    });
   }
   
   function connectStatusWebSocket() {
@@ -360,6 +432,7 @@ document.addEventListener("DOMContentLoaded", function () {
               statusClass = "badge-success";
               statusText = "Available";
               updateVehicleSoc(stationId, null);
+              resetPowerState(stationId);
               // Update active sessions if just stopped charging
               if (wasCharging) {
                 dashboardMetrics.activeSessions = Math.max(0, dashboardMetrics.activeSessions - 1);
@@ -375,6 +448,7 @@ document.addEventListener("DOMContentLoaded", function () {
               statusClass = "badge-dark";
               statusText = "Offline";
               updateVehicleSoc(stationId, null);
+              resetPowerState(stationId);
               if (wasCharging) {
                 dashboardMetrics.activeSessions = Math.max(0, dashboardMetrics.activeSessions - 1);
                 updateDashboardCard('metric-sessions', dashboardMetrics.activeSessions);
@@ -388,6 +462,10 @@ document.addEventListener("DOMContentLoaded", function () {
 
         if (messageType === 'soc_update' && data.station_id) {
           updateVehicleSoc(data.station_id, data.soc_percentage);
+        }
+
+        if (messageType === 'station_power_update' && data.station_id) {
+          updatePowerState(data.station_id, data);
         }
         
         // Handle transaction stopped
@@ -431,6 +509,7 @@ document.addEventListener("DOMContentLoaded", function () {
                 const wasCharging = connectorCell.innerHTML.includes('Charging');
                 connectorCell.innerHTML = `<span class="badge badge-dark">Offline</span>`;
                 updateVehicleSoc(data.station_id, null);
+                resetPowerState(data.station_id);
                 if (wasCharging) {
                   dashboardMetrics.activeSessions = Math.max(0, dashboardMetrics.activeSessions - 1);
                   updateDashboardCard('metric-sessions', dashboardMetrics.activeSessions);

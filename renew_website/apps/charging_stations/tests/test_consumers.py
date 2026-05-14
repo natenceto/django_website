@@ -70,6 +70,7 @@ class ChargePointPendingRemoteStartTests(SimpleTestCase):
         self.assertEqual(config["MeterValueSampleInterval"], "30")
         self.assertEqual(config["ClockAlignedDataInterval"], "0")
         self.assertIn("Energy.Active.Import.Register", config["MeterValuesSampledData"])
+        self.assertIn("SoC", config["MeterValuesSampledData"])
 
     def test_configuration_map_from_response_extracts_values_and_readonly(self):
         charge_point = ChargePoint(1, _DummyWebSocket(), consumer=None)
