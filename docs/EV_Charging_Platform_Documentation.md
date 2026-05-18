@@ -168,7 +168,7 @@ source venv/bin/activate  # Linux/Mac
 # venv\Scripts\activate   # Windows
 
 # 3. Инсталация на зависимости
-pip install -r requirements.txt
+pip install -r requirements/prod.txt
 
 # 4. Конфигурация на база данни
 createdb ev_charging_platform
@@ -947,8 +947,8 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python dependencies
-COPY requirements.txt .
-RUN pip install -r requirements.txt
+COPY prod.txt .
+RUN pip install -r requirements/prod.txt
 
 # Copy application
 COPY . .

@@ -1,10 +1,13 @@
 from django.test import SimpleTestCase
+from django.core.cache import cache
+from django.test.utils import override_settings
 from types import SimpleNamespace
 from datetime import datetime, timezone as dt_timezone
 from asgiref.sync import async_to_sync
 from channels.testing import WebsocketCommunicator
 
 from renew_website.apps.charging_stations.consumers import ChargePoint
+from renew_website.apps.charging_stations.live_state import get_station_live_state, update_station_live_state_from_event
 from renew_website.asgi import application
 
 
@@ -189,3 +192,87 @@ class StationStatusConsumerAuthTests(SimpleTestCase):
             self.assertIsNotNone(close_code)
 
         async_to_sync(run_test)()
+
+
+@override_settings(
+    CACHES={
+        "default": {
+            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+            "LOCATION": "station-live-state-tests",
+        }
+    }
+)
+class StationLiveStateTests(SimpleTestCase):
+    def tearDown(self):
+        cache.clear()
+
+    def test_preparing_does_not_override_active_session_when_power_is_live(self):
+        update_station_live_state_from_event(
+            {
+                "type": "station_power_update",
+                "station_id": 17,
+                "actual_power_kw": 7.4,
+                "energy_kwh": 0.12,
+                "source": "meter_values",
+                "timestamp": "2026-05-15T10:00:00Z",
+            }
+        )
+
+        state = update_station_live_state_from_event(
+            {
+                "type": "connector_status_update",
+                "station_id": 17,
+                "connector_status": "preparing",
+                "timestamp": "2026-05-15T10:00:01Z",
+            }
+        )
+
+        self.assertEqual(state["connector_status"], "charging")
+        self.assertEqual(state["session_status_label"], "Active")
+        self.assertEqual(get_station_live_state(17)["connector_status"], "charging")
+
+    def test_start_transaction_power_update_marks_session_active_before_meter_values(self):
+        state = update_station_live_state_from_event(
+            {
+                "type": "station_power_update",
+                "station_id": 18,
+                "actual_power_kw": None,
+                "energy_kwh": 0.0,
+                "source": "start_transaction",
+                "timestamp": "2026-05-15T10:01:00Z",
+            }
+        )
+
+        self.assertEqual(state["connector_status"], "charging")
+        self.assertEqual(state["session_status_label"], "Active")
+        self.assertTrue(state["online"])
+
+    def test_power_update_upgrades_preparing_to_charging_when_live_power_arrives(self):
+        # First, connector reports "preparing"
+        update_station_live_state_from_event(
+            {
+                "type": "connector_status_update",
+                "station_id": 19,
+                "connector_status": "preparing",
+                "timestamp": "2026-05-15T10:02:00Z",
+            }
+        )
+
+        state = get_station_live_state(19)
+        self.assertEqual(state["connector_status"], "preparing")
+
+        # Then power update arrives with live power
+        state = update_station_live_state_from_event(
+            {
+                "type": "station_power_update",
+                "station_id": 19,
+                "actual_power_kw": 11.5,
+                "energy_kwh": 0.18,
+                "source": "meter_values",
+                "timestamp": "2026-05-15T10:02:01Z",
+            }
+        )
+
+        self.assertEqual(state["connector_status"], "charging")
+        self.assertEqual(state["session_status_label"], "Active")
+        self.assertEqual(get_station_live_state(19)["connector_status"], "charging")

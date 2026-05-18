@@ -72,14 +72,35 @@ REDIS_URL=redis://localhost:6379/0
 USE_REDIS_CHANNEL_LAYER=True
 POSTGRES_CONN_MAX_AGE=60
 SECURE_SSL_REDIRECT=False
+DJANGO_LOG_LEVEL=INFO
+DEYE_APP_ID=your-deye-app-id
+DEYE_APP_SECRET=your-deye-app-secret
+DEYE_EMAIL=your-deye-account-email
+DEYE_PASSWORD=your-deye-account-password
+DEYE_DATACENTER=eu
+DEYE_COMPANY_ID=0
+OCPP_SERVER_HOST=192.168.88.247
+OCPP_SERVER_PORT=8000
 ```
 
 Important notes:
 
 - `POSTGRES_PASSWORD` must be set explicitly. There is no weak fallback in Compose anymore.
 - Redis is the expected backend for Channels, Celery, and cache in containerized runs.
+- `REDIS_URL` is mandatory when `DEBUG=False`.
 - API docs are enabled only when `ENABLE_API_DOCS=True`.
 - `SECURE_SSL_REDIRECT` should stay `False` until you actually terminate TLS in front of Django.
+- For browser/frontend integrations, include both HTTP and HTTPS origins where needed. The default CORS list also includes `http://localhost:3000`.
+- In production-style setups, include HTTPS hosts in both `CSRF_TRUSTED_ORIGINS` and `CORS_ALLOWED_ORIGINS`.
+- `DEYE_*` variables are required for DeyeCloud integrations.
+
+## API Documentation Endpoints
+
+When `ENABLE_API_DOCS=True`, these routes are available:
+
+- `/api/schema/`
+- `/api/docs/`
+- `/api/redoc/`
 
 ## Local Docker Workflow
 
@@ -170,6 +191,7 @@ For manual local runs you still need PostgreSQL and Redis running separately.
 - Celery worker executes background tasks.
 - Celery Beat schedules periodic tasks.
 - Nginx is used in the production-style stack.
+- On ASGI startup, station and connector statuses are reset to avoid stale online/active state from previous runs.
 
 ## OCPP Endpoints
 
@@ -181,6 +203,7 @@ Charging station connections:
 Browser status socket:
 
 - `/ws/stations/status/`
+- `/ws/station/{station_id}/`
 
 The browser status socket now requires an authenticated Django user session.
 

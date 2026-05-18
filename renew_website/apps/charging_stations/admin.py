@@ -1,8 +1,8 @@
 from django.contrib import admin
-from django.contrib.auth import get_user_model
-from django.http import HttpResponseRedirect
-from django.shortcuts import redirect, render
-from django.urls import path, reverse
+from .models import Station, StationStatusHistory, Connector, Transaction, MeterValue, UserRFID, CommandLog, Vehicle
+
+
+from django.utils.html import format_html
 from django.utils import timezone
 from django.utils.html import format_html
 
@@ -161,11 +161,10 @@ class TransactionAdmin(admin.ModelAdmin):
         'requested_power_mode', 'requested_power_kw', 'latest_actual_power_display',
         'last_applied_ems_limit_kw', 'status', 'started_at', 'duration_display', 'energy_display'
     ]
-    list_filter = ['status', 'requested_power_mode', 'started_at']
+    list_filter = ['status', 'started_at']
     search_fields = ['id_tag', 'vehicle__vehicle_identifier', 'vehicle__vin', 'vehicle__registration_number', 'connector__station__address', 'transaction_id']
     date_hierarchy = 'started_at'
     readonly_fields = ['started_at', 'energy_consumed', 'duration', 'latest_actual_power_display']
-    autocomplete_fields = ['connector', 'vehicle']
     
     fieldsets = (
         ('Transaction Information', {
@@ -251,7 +250,13 @@ class CommandLogAdmin(admin.ModelAdmin):
     search_fields = ['command_id', 'station__address', 'detail', 'error_message']
     readonly_fields = ['command_id', 'created_at', 'executed_at', 'payload']
     date_hierarchy = 'created_at'
-    autocomplete_fields = ['station']
+
+
+from django.urls import path
+from django.shortcuts import render, redirect
+from django.contrib import messages
+from django.http import HttpResponseRedirect
+from django.urls import reverse
 
 @admin.register(UserRFID)
 class UserRFIDAdmin(admin.ModelAdmin):
@@ -341,43 +346,25 @@ class UserRFIDAdmin(admin.ModelAdmin):
             'all': ('admin/css/userrfid_admin.css',)
         }
 
+from .models import PricingPlan, StationPricing, ChargingSession, PaymentMethod, Invoice
+from django.contrib.auth import get_user_model
+
 @admin.register(PricingPlan)
 class PricingPlanAdmin(admin.ModelAdmin):
     list_display = ['name', 'price_per_kwh', 'currency', 'is_active']
     list_filter = ['currency', 'is_active']
-    search_fields = ['name', 'description']
+    search_fields = ['name']
 
 @admin.register(StationPricing)
 class StationPricingAdmin(admin.ModelAdmin):
-    list_display = ['station', 'pricing_plan', 'is_default', 'valid_from', 'valid_until']
+    list_display = ['station', 'pricing_plan', 'is_default']
     list_filter = ['is_default']
     autocomplete_fields = ['station', 'pricing_plan']
 
 @admin.register(ChargingSession)
 class ChargingSessionAdmin(admin.ModelAdmin):
-    list_display = ['id', 'transaction', 'user_info', 'pricing_plan', 'total_cost', 'currency', 'created_at']
-    list_filter = ['currency', 'payment_status', 'created_at', 'updated_at']
-    search_fields = ['transaction__transaction_id', 'transaction__id_tag', 'user_id', 'payment_reference']
-    readonly_fields = ['created_at', 'updated_at']
-    autocomplete_fields = ['transaction', 'pricing_plan']
-    fieldsets = (
-        ('Relationships', {
-            'fields': ('transaction', 'user_id', 'pricing_plan')
-        }),
-        ('Billing', {
-            'fields': ('energy_cost', 'connection_fee', 'idle_fee', 'total_cost', 'currency')
-        }),
-        ('Payment', {
-            'fields': ('payment_status', 'payment_reference', 'paid_at')
-        }),
-        ('Session Metrics', {
-            'fields': ('energy_kwh', 'duration_minutes', 'idle_minutes')
-        }),
-        ('Timestamps', {
-            'fields': ('created_at', 'updated_at'),
-            'classes': ('collapse',),
-        }),
-    )
+    list_display = ['id', 'user_info', 'total_cost', 'currency', 'created_at']
+    list_filter = ['currency', 'created_at']
     
     def user_info(self, obj):
         if obj.user_id:
@@ -392,25 +379,7 @@ class ChargingSessionAdmin(admin.ModelAdmin):
 
 @admin.register(PaymentMethod)
 class PaymentMethodAdmin(admin.ModelAdmin):
-    list_display = ['id', 'type', 'print_user', 'provider', 'card_brand', 'card_last_four', 'is_default', 'is_active']
-    list_filter = ['type', 'provider', 'is_default', 'is_active']
-    search_fields = ['user_id', 'provider_payment_method_id', 'card_last_four', 'card_brand']
-    readonly_fields = ['created_at', 'updated_at']
-    fieldsets = (
-        ('Owner', {
-            'fields': ('user_id', 'type')
-        }),
-        ('Payment Details', {
-            'fields': ('provider', 'provider_payment_method_id', 'card_brand', 'card_last_four', 'card_expiry_month', 'card_expiry_year')
-        }),
-        ('Flags', {
-            'fields': ('is_default', 'is_active')
-        }),
-        ('Timestamps', {
-            'fields': ('created_at', 'updated_at'),
-            'classes': ('collapse',),
-        }),
-    )
+    list_display = ['id', 'type', 'print_user', 'is_default']
     
     def print_user(self, obj):
          return f"User ID {obj.user_id}"
@@ -418,28 +387,5 @@ class PaymentMethodAdmin(admin.ModelAdmin):
 
 @admin.register(Invoice)
 class InvoiceAdmin(admin.ModelAdmin):
-    list_display = ['invoice_number', 'user_id', 'total', 'currency', 'status', 'issue_date', 'due_date']
-    list_filter = ['status', 'currency', 'issue_date', 'due_date']
-    search_fields = ['invoice_number', 'user_id', 'notes']
-    filter_horizontal = ['sessions']
-    autocomplete_fields = ['payment_method']
-    readonly_fields = ['created_at', 'updated_at']
-    date_hierarchy = 'issue_date'
-    fieldsets = (
-        ('Invoice Details', {
-            'fields': ('invoice_number', 'user_id', 'issue_date', 'due_date', 'status')
-        }),
-        ('Amounts', {
-            'fields': ('subtotal', 'tax_amount', 'tax_rate', 'total', 'currency')
-        }),
-        ('Relationships', {
-            'fields': ('sessions', 'payment_method')
-        }),
-        ('Payment and Notes', {
-            'fields': ('paid_at', 'notes')
-        }),
-        ('Timestamps', {
-            'fields': ('created_at', 'updated_at'),
-            'classes': ('collapse',),
-        }),
-    )
+    list_display = ['invoice_number', 'user_id', 'total', 'status', 'issue_date']
+    list_filter = ['status']

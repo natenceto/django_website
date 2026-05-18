@@ -1,67 +1,74 @@
-# Django EV Charging Platform - Production Dockerfile
+# =========================
+# Django EV Charging Platform
+# =========================
 FROM python:3.12-slim
 
-# -----------------------
-# Environment Variables
-# -----------------------
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
-ENV PIP_NO_CACHE_DIR=1
-ENV PATH="/home/appuser/.local/bin:${PATH}"
+# -------------------------
+# Environment variables
+# -------------------------
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PATH="/home/appuser/.local/bin:${PATH}"
 
-# -----------------------
-# Work directory
-# -----------------------
-WORKDIR /app
-
-# -----------------------
-# Install system dependencies
-# -----------------------
+# -------------------------
+# System dependencies
+# -------------------------
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libpq-dev \
+    gcc \
     curl \
+    git \
     && rm -rf /var/lib/apt/lists/*
 
-# -----------------------
-# Create non-root user and directories
-# -----------------------
-RUN useradd -m -u 1000 appuser && \
-    mkdir -p /app/logs /app/staticfiles && \
-    chown -R appuser:appuser /app
+# -------------------------
+# Create non-root user
+# -------------------------
+RUN useradd -m -u 1000 appuser
 
-# Switch to non-root user
-USER appuser
+WORKDIR /app
 
-# -----------------------
-# Copy project files
-# -----------------------
+# -------------------------
+# Install Python deps FIRST (better caching)
+# -------------------------
+COPY requirements/ /app/requirements/
+
+RUN pip install --upgrade pip && \
+    pip install -r /app/requirements/prod.txt
+
+# -------------------------
+# Copy project code
+# -------------------------
 COPY --chown=appuser:appuser . .
 
-# -----------------------
-# Copy entrypoint and make executable
-# -----------------------
-COPY --chown=appuser:appuser ./entrypoint.sh /app/entrypoint.sh
+# -------------------------
+# Logs & static dirs
+# -------------------------
+RUN mkdir -p /app/logs /app/staticfiles && \
+    chown -R appuser:appuser /app
+
+# -------------------------
+# Entrypoint
+# -------------------------
+COPY --chown=appuser:appuser entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
 
-# -----------------------
-# Install Python dependencies
-# -----------------------
-COPY --chown=appuser:appuser requirements/prod.txt requirements.txt
-RUN pip install --upgrade pip && pip install -r requirements.txt
+USER appuser
 
-# -----------------------
-# Verify Django installation
-# -----------------------
-RUN python -c "import django; print('Django version:', django.get_version())"
+# -------------------------
+# Django sanity check
+# -------------------------
+RUN python -c "import django; print('Django OK:', django.get_version())"
 
-# -----------------------
+# -------------------------
 # Expose port
-# -----------------------
+# -------------------------
 EXPOSE 8000
 
-# -----------------------
-# Entrypoint & CMD
-# -----------------------
+# -------------------------
+# Run
+# -------------------------
 ENTRYPOINT ["/app/entrypoint.sh"]
+
 CMD ["gunicorn", "renew_website.asgi:application", "-k", "uvicorn.workers.UvicornWorker", "--bind", "0.0.0.0:8000"]

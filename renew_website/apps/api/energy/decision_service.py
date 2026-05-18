@@ -1,173 +1,119 @@
-from dataclasses import asdict, dataclass, replace
-from decimal import Decimal
-from typing import Any, Dict, List, Optional
+from __future__ import annotations
 
-from django.conf import settings
+from dataclasses import dataclass
+
 from django.utils import timezone
 
-from renew_website.apps.algorithm.conditions import EVSession, SystemState
-from renew_website.apps.algorithm.engine import DecisionEngine
-from renew_website.apps.api.weather.intelligence import WeatherScoringService
-from renew_website.apps.api.weather.models import WeatherLog
-from renew_website.apps.charging_stations.models import MeterValue, Transaction
+from renew_website.apps.charging_stations.models import Transaction
 
-from .models import InverterReading
+from .services import InverterDataService
 
 
-@dataclass
-class EMSDecision:
-    state: Optional[SystemState]
-    constraint_state: Dict[str, Any]
-    allocation_plan: Dict[str, Any]
-    strategy: Any
+@dataclass(slots=True)
+class EnergyState:
+    battery_soc: float
+    pv_production_kw: float
+    building_load_kw: float
+    weather_condition: str | None
+    cloud_cover_percent: float | None
+    weather_solar_score: float | None
+    weather_risk_score: float | None
+    is_night_tariff: bool
+    active_ev_sessions: int
+    total_ev_demand_kw: float
 
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            'strategy': self.strategy,
-            'allocation_plan': self.allocation_plan,
-            'constraint_state': self.constraint_state,
-            'state': self.state,
-        }
+
+@dataclass(slots=True)
+class EnergyDecision:
+    strategy: str
+    allocation_plan: dict
+    state: EnergyState
 
 
 class EnergyOrchestrator:
-    """Single source of truth for EMS state aggregation and decision evaluation."""
+    """Lightweight energy decision service used by the energy API views."""
 
-    def build_current_state(self) -> Optional[SystemState]:
-        latest_reading = InverterReading.objects.order_by('-timestamp').first()
-        if not latest_reading:
-            return None
+    def __init__(self):
+        self.inverter_service = InverterDataService()
 
-        latest_weather = WeatherLog.objects.order_by('-timestamp').first()
-        weather_intelligence = WeatherScoringService.calculate(latest_weather)
-        station_data = latest_reading.station_data or {}
-        current_hour = timezone.localtime().hour
-        ev_sessions = self._build_ev_sessions()
-        total_ev_demand_kw = sum(session.demand_kw() for session in ev_sessions)
+    def _build_state(self) -> EnergyState:
+        summary = self.inverter_service.get_current_generation_summary()
+        readings = summary.get('readings') or []
+        station_data = {}
+        if readings:
+            # Current generation summary is derived from the latest reading set.
+            latest_readings = self.inverter_service.get_latest_readings()
+            if latest_readings:
+                station_data = latest_readings[0].station_data or {}
 
-        return SystemState(
-            battery_soc=float(latest_reading.battery_soc or 0.0),
-            is_grid_available=bool(float(station_data.get('grid_voltage', 230.0) or 230.0) > 190.0),
-            pv_production_kw=float(latest_reading.generation_power or 0.0) / 1000.0,
-            building_load_kw=float(station_data.get('load_power', 0.0) or 0.0) / 1000.0,
-            active_ev_sessions=len(ev_sessions),
-            total_ev_demand_kw=round(total_ev_demand_kw, 2),
-            cloud_cover_percent=float(getattr(latest_weather, 'cloud_cover', 0.0) or 0.0),
-            is_raining=float(getattr(latest_weather, 'precipitation_mm', 0.0) or 0.0) > 0,
-            weather_condition='rain' if float(getattr(latest_weather, 'precipitation_mm', 0.0) or 0.0) > 0.1 else ('cloudy' if float(getattr(latest_weather, 'cloud_cover', 0.0) or 0.0) > 50 else 'clear'),
-            is_night_tariff=(current_hour >= 22 or current_hour < 6),
-            weather_solar_score=weather_intelligence.solar_reliability_score,
-            weather_risk_score=weather_intelligence.grid_dependency_risk,
-            weather_confidence=weather_intelligence.confidence,
-            ev_sessions=ev_sessions,
-            forecasted_pv_kw_30m=(float(latest_reading.generation_power or 0.0) / 1000.0) * weather_intelligence.expected_pv_factor,
-            site_max_import_kw=float(getattr(settings, 'EMS_SITE_MAX_IMPORT_KW', 0.0) or 0.0),
-            main_breaker_limit_kw=float(getattr(settings, 'EMS_MAIN_BREAKER_LIMIT_KW', 0.0) or 0.0),
-            grid_policy_preference=str(getattr(settings, 'EMS_GRID_POLICY', 'disabled') or 'disabled').lower(),
+        active_transactions = list(
+            Transaction.objects.filter(status='active').select_related('connector__station')
         )
-
-    def evaluate_current_decision(self) -> EMSDecision:
-        state = self.build_current_state()
-        if not state:
-            return EMSDecision(
-                state=None,
-                constraint_state={'labels': ['No Telemetry']},
-                allocation_plan={
-                    'pv_to_ev_kw': 0.0,
-                    'battery_to_ev_kw': 0.0,
-                    'grid_to_ev_kw': 0.0,
-                    'ev_charge_limit_kw': 0.0,
-                    'per_session_limit_kw': 0.0,
-                    'battery_discharge_allowed': False,
-                    'battery_discharge_limit_kw': 0.0,
-                    'grid_assist_allowed': False,
-                    'selected_strategy': '',
-                    'constraint_labels': ['No Telemetry'],
-                    'summary': 'No inverter telemetry available.',
-                    'session_allocations': [],
-                },
-                strategy=None,
-            )
-
-        decision = DecisionEngine.evaluate(state)
-        return EMSDecision(
-            state=state,
-            constraint_state=decision.get('constraint_state', {}),
-            allocation_plan=decision.get('allocation_plan', {}),
-            strategy=decision.get('strategy') or decision.get('mode'),
-        )
-
-    def evaluate_capacity_scenario(self, active_sessions: int, requested_demand_kw: float) -> EMSDecision:
-        base_state = self.build_current_state()
-        if not base_state:
-            return self.evaluate_current_decision()
-
-        per_session_kw = requested_demand_kw / active_sessions if active_sessions else 0.0
-        synthetic_sessions = [
-            EVSession(
-                session_id=f'scenario-{index + 1}',
-                vehicle_soc=50.0,
-                requested_power_kw=per_session_kw,
-                max_acceptance_kw=per_session_kw,
-                target_soc=80.0,
-                estimated_departure_hours=4.0,
-                priority=1.0,
-            )
-            for index in range(active_sessions)
-        ]
-        scenario_state = replace(
-            base_state,
-            active_ev_sessions=active_sessions,
-            total_ev_demand_kw=requested_demand_kw,
-            ev_sessions=synthetic_sessions,
-        )
-        decision = DecisionEngine.evaluate(scenario_state)
-        return EMSDecision(
-            state=scenario_state,
-            constraint_state=decision.get('constraint_state', {}),
-            allocation_plan=decision.get('allocation_plan', {}),
-            strategy=decision.get('strategy') or decision.get('mode'),
-        )
-
-    def _build_ev_sessions(self) -> List[EVSession]:
-        active_transactions = Transaction.objects.filter(stopped_at__isnull=True).select_related('connector__station')
-        sessions: List[EVSession] = []
-
+        total_ev_demand_kw = 0.0
         for transaction in active_transactions:
-            latest_meter = transaction.meter_values.order_by('-timestamp').first()
-            requested_power_kw = self._coerce_kw(transaction.requested_power_kw)
-            connector_limit_kw = self._coerce_kw(transaction.connector.max_power_kw)
-            data = latest_meter.data if latest_meter and isinstance(latest_meter.data, dict) else {}
-            session_context = data.get('session_context', {}) if isinstance(data, dict) else {}
+            if transaction.requested_power_kw is not None:
+                total_ev_demand_kw += float(transaction.requested_power_kw)
+            else:
+                total_ev_demand_kw += float(transaction.connector.station.power_output or 0)
 
-            sessions.append(
-                EVSession(
-                    session_id=str(transaction.transaction_id or transaction.id),
-                    vehicle_soc=(
-                        float(latest_meter.soc_percentage)
-                        if latest_meter and latest_meter.soc_percentage is not None
-                        else self._coerce_optional_float(session_context.get('vehicle_soc'))
-                    ),
-                    requested_power_kw=requested_power_kw or self._coerce_kw(session_context.get('requested_power_kw')) or connector_limit_kw,
-                    max_acceptance_kw=self._coerce_kw(session_context.get('max_acceptance_kw')) or connector_limit_kw,
-                    target_soc=float(session_context.get('target_soc', 80.0) or 80.0),
-                    estimated_departure_hours=self._coerce_optional_float(session_context.get('estimated_departure_hours')),
-                    priority=self._coerce_optional_float(session_context.get('priority_weight')),
-                )
-            )
+        now = timezone.localtime()
+        return EnergyState(
+            battery_soc=float(summary.get('average_battery_soc') or 0.0),
+            pv_production_kw=round(float(summary.get('total_generation_watts') or 0.0) / 1000.0, 2),
+            building_load_kw=round(float(station_data.get('consumptionPower') or station_data.get('load_power') or 0.0) / 1000.0, 2),
+            weather_condition=None,
+            cloud_cover_percent=None,
+            weather_solar_score=None,
+            weather_risk_score=None,
+            is_night_tariff=bool(now.hour < 7 or now.hour >= 22),
+            active_ev_sessions=len(active_transactions),
+            total_ev_demand_kw=round(total_ev_demand_kw, 2),
+        )
 
-        return sessions
+    def _decide_strategy(self, state: EnergyState, target_ev_sessions: int, target_ev_demand_kw: float) -> EnergyDecision:
+        available_solar_kw = max(state.pv_production_kw - state.building_load_kw, 0.0)
+        battery_support_kw = 0.0
+        if state.battery_soc >= 80:
+            battery_support_kw = 11.0
+        elif state.battery_soc >= 60:
+            battery_support_kw = 5.5
 
-    @staticmethod
-    def _coerce_kw(value: Any) -> float:
-        if value is None:
-            return 0.0
-        if isinstance(value, Decimal):
-            return float(value)
-        return float(value or 0.0)
+        total_available_kw = round(available_solar_kw + battery_support_kw, 2)
 
-    @staticmethod
-    def _coerce_optional_float(value: Any) -> Optional[float]:
-        if value in (None, ''):
-            return None
-        return float(value)
+        if total_available_kw >= target_ev_demand_kw and total_available_kw > 0:
+            strategy = 'DYNAMIC_MAX_RENEWABLE'
+            ev_limit_kw = target_ev_demand_kw
+        elif available_solar_kw > 0:
+            strategy = 'DYNAMIC_ECO_SOLAR_ONLY'
+            ev_limit_kw = min(available_solar_kw, target_ev_demand_kw)
+        elif state.is_night_tariff and state.battery_soc < 40:
+            strategy = 'CHARGE_BATTERY'
+            ev_limit_kw = 0.0
+        elif state.battery_soc < 20:
+            strategy = 'PROTECT_BATTERY'
+            ev_limit_kw = 0.0
+        else:
+            strategy = 'FAST_CHARGE_GRID'
+            ev_limit_kw = target_ev_demand_kw
+
+        per_station_limit_kw = round(ev_limit_kw / target_ev_sessions, 2) if target_ev_sessions else 0.0
+        allocation_plan = {
+            'mode': strategy,
+            'ev_charge_limit_kw': round(ev_limit_kw, 2),
+            'per_station_limit_kw': per_station_limit_kw,
+            'available_solar_kw': round(available_solar_kw, 2),
+            'battery_support_kw': round(battery_support_kw, 2),
+            'target_ev_sessions': target_ev_sessions,
+            'target_ev_demand_kw': round(target_ev_demand_kw, 2),
+        }
+        return EnergyDecision(strategy=strategy, allocation_plan=allocation_plan, state=state)
+
+    def evaluate_current_decision(self) -> EnergyDecision:
+        state = self._build_state()
+        target_sessions = max(state.active_ev_sessions, 1)
+        target_demand_kw = state.total_ev_demand_kw if state.total_ev_demand_kw > 0 else 11.0
+        return self._decide_strategy(state, target_sessions, target_demand_kw)
+
+    def evaluate_capacity_scenario(self, target_ev_sessions: int, target_ev_demand_kw: float) -> EnergyDecision:
+        state = self._build_state()
+        return self._decide_strategy(state, max(int(target_ev_sessions), 0), max(float(target_ev_demand_kw), 0.0))

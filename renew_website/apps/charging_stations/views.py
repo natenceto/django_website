@@ -10,7 +10,6 @@ from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.contrib import messages
 from django.db.models import F, Sum
 from django.utils import timezone
-from django.urls import reverse
 
 from .models import Station, MeterValue, Transaction, StationStatusHistory
 from .live_state import get_latest_live_snapshot, get_station_live_states
@@ -198,12 +197,7 @@ def _build_station_stats(stations_list, latest_session_snapshot, live_states):
     }
 
 def stations(request: HttpRequest) -> HttpResponse:
-    """
-    Operational stations view.
-
-    Station master data CRUD lives in Django Admin.
-    This page is reserved for monitoring and start/stop charging actions.
-    """
+    """Operational charging stations view; CRUD is handled via Django admin."""
     stations_list = list(Station.objects.prefetch_related('connectors'))
 
     latest_session_snapshot, live_states = _attach_station_live_power_state(stations_list)
@@ -248,11 +242,8 @@ def stations(request: HttpRequest) -> HttpResponse:
 
             return redirect(request.path)
 
-        messages.info(
-            request,
-            'Station records are managed in Django Admin. Use the Add/ Edit Station button to open the Stations admin page.',
-        )
-        return redirect(reverse('admin:charging_stations_station_changelist'))
+        messages.info(request, 'Use the Add/ Edit Station button to manage stations in Django admin.')
+        return redirect('admin:charging_stations_station_changelist')
 
     return render(
         request,
