@@ -31,6 +31,34 @@ def _normalize_status(status: Any) -> str | None:
     return normalized
 
 
+def _as_float(value: Any) -> float | None:
+    try:
+        if value in (None, ""):
+            return None
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _has_active_session_signal(state: dict[str, Any]) -> bool:
+    actual_power_kw = _as_float(state.get("actual_power_kw"))
+    energy_kwh = _as_float(state.get("energy_kwh"))
+
+    return (
+        (actual_power_kw is not None and actual_power_kw > 0)
+        or (energy_kwh is not None and energy_kwh > 0)
+        or str(state.get("connector_status") or "").strip().lower() == "charging"
+        or str(state.get("session_status_label") or "").strip().lower() == "active"
+    )
+
+
+def _mark_active_session(state: dict[str, Any]) -> None:
+    state["status"] = "active"
+    state["online"] = True
+    state["connector_status"] = "charging"
+    state["session_status_label"] = "Active"
+
+
 def _default_state(station_id: int | str) -> dict[str, Any]:
     return {
         "station_id": int(station_id),
@@ -95,6 +123,8 @@ def update_station_live_state_from_event(data: dict[str, Any]) -> dict[str, Any]
     if event_type in {"connector_status_update", "connector_status"} or data.get("connector_status"):
         connector_status = str(data.get("connector_status") or data.get("status") or "").strip().lower() or None
         if connector_status:
+            if connector_status in {"preparing", "finishing"} and _has_active_session_signal(current):
+                connector_status = "charging"
             current["connector_status"] = connector_status
             if connector_status == "offline":
                 current["status"] = "inactive"
@@ -124,6 +154,14 @@ def update_station_live_state_from_event(data: dict[str, Any]) -> dict[str, Any]
         current["actual_power_kw"] = data.get("actual_power_kw")
         current["ems_limit_kw"] = data.get("ems_limit_kw")
         current["energy_kwh"] = data.get("energy_kwh")
+        
+        if data.get("source") == "start_transaction" or _has_active_session_signal(current):
+            _mark_active_session(current)
+        
+        # Independent check: if power data arrives and connector is "preparing"/"finishing", upgrade to "charging"
+        if current.get("connector_status") in {"preparing", "finishing"} and _has_active_session_signal(current):
+            current["connector_status"] = "charging"
+            current["session_status_label"] = "Active"
 
     if data.get("status") and event_type not in {"station_power_update", "soc_update"}:
         status = _normalize_status(data.get("status"))

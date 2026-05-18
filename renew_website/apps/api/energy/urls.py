@@ -1,14 +1,17 @@
 """
 URL configuration for energy management API endpoints.
 """
+from django.contrib.auth.decorators import login_required, user_passes_test
 from django.urls import path
 from . import views
 
 app_name = 'energy'
 
+staff_required = user_passes_test(lambda u: u.is_staff)
+
 urlpatterns = [
     # Dashboard page
-    path('', views.energy_dashboard, name='dashboard-page'),
+    path('', login_required(staff_required(views.energy_dashboard)), name='dashboard-page'),
     
     # Inverter monitoring
     path('inverters/status/', views.InverterStatusView.as_view(), name='inverter-status'),
