@@ -1,3 +1,36 @@
+  // Update all snapshot metrics in the dashboard card
+  function updateSnapshotMetrics(stationId, soc, requestedPower, actualPower, energy, emsLimit) {
+    // SoC
+    if (soc === null || soc === undefined || isNaN(Number(soc))) {
+      updateDashboardCard('metric-vehicle-soc', '--', false);
+    } else {
+      updateDashboardCard('metric-vehicle-soc', `${Number(soc).toFixed(2)} %`, false);
+    }
+    // Requested Power
+    if (requestedPower === null || requestedPower === undefined || isNaN(Number(requestedPower))) {
+      updateDashboardCard('metric-requested-power', '--', false);
+    } else {
+      updateDashboardCard('metric-requested-power', `${Number(requestedPower).toFixed(2)} kW`, false);
+    }
+    // Actual Power
+    if (actualPower === null || actualPower === undefined || isNaN(Number(actualPower))) {
+      updateDashboardCard('metric-actual-power', '--', false);
+    } else {
+      updateDashboardCard('metric-actual-power', `${Number(actualPower).toFixed(2)} kW`, false);
+    }
+    // Energy
+    if (energy === null || energy === undefined || isNaN(Number(energy))) {
+      updateDashboardCard('metric-energy-session', '--', false);
+    } else {
+      updateDashboardCard('metric-energy-session', `${Number(energy).toFixed(2)} kWh`, false);
+    }
+    // EMS Limit
+    if (emsLimit === null || emsLimit === undefined || isNaN(Number(emsLimit))) {
+      updateDashboardCard('metric-ems-limit', '--', false);
+    } else {
+      updateDashboardCard('metric-ems-limit', `${Number(emsLimit).toFixed(2)} kW`, false);
+    }
+  }
 // Global reference to DataTable for WebSocket updates
 var stationsTable = null;
 
@@ -316,36 +349,14 @@ document.addEventListener("DOMContentLoaded", function () {
   }
 
   function updateVehicleSoc(stationId, socPercentage, updateSummary = true) {
-    const tableCell = document.getElementById(`soc-${stationId}`);
-
-    if (socPercentage === null || socPercentage === undefined || socPercentage === '') {
-      if (tableCell) {
-        tableCell.innerHTML = '<span>--</span>';
-      }
-      if (updateSummary) {
-        updateDashboardCard('metric-vehicle-soc', '--', false);
-      }
+    // Always update the snapshot SoC in the dashboard card in real time with two decimals
+    if (socPercentage === null || socPercentage === undefined || socPercentage === '' || isNaN(Number(socPercentage))) {
+      updateDashboardCard('metric-vehicle-soc', '--', false);
       return;
     }
-
     const numericSoc = Number(socPercentage);
-    if (Number.isNaN(numericSoc)) {
-      if (tableCell) {
-        tableCell.innerHTML = '<span>--</span>';
-      }
-      if (updateSummary) {
-        updateDashboardCard('metric-vehicle-soc', '--', false);
-      }
-      return;
-    }
-
-    const formattedSoc = formatSocValue(numericSoc);
-    if (tableCell) {
-      tableCell.innerHTML = `<span>${formattedSoc}</span>`;
-    }
-    if (updateSummary) {
-      updateDashboardCard('metric-vehicle-soc', formattedSoc, false);
-    }
+    const formattedSoc = `${numericSoc.toFixed(2)} %`;
+    updateDashboardCard('metric-vehicle-soc', formattedSoc, false);
   }
 
   function humanizeRequestedMode(requestedMode) {
@@ -563,11 +574,27 @@ document.addEventListener("DOMContentLoaded", function () {
         }
 
         if (messageType === 'soc_update' && data.station_id) {
-          updateVehicleSoc(data.station_id, data.soc_percentage);
+          // Update SoC in snapshot
+          updateSnapshotMetrics(
+            data.station_id,
+            data.soc_percentage,
+            null,
+            null,
+            null,
+            null
+          );
         }
 
         if (messageType === 'station_power_update' && data.station_id) {
-          updatePowerState(data.station_id, data);
+          // Update all snapshot metrics
+          updateSnapshotMetrics(
+            data.station_id,
+            data.soc_percentage,
+            data.requested_power_kw,
+            data.actual_power_kw,
+            data.energy_kwh,
+            data.ems_limit_kw
+          );
         }
 
         if (messageType === 'transaction_stopped') {

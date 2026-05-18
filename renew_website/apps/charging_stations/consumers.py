@@ -238,13 +238,13 @@ def _normalize_station_key(station_id: Union[int, str]) -> int:
 
 def register_station(station_id: Union[int, str], consumer) -> None:
     key = _normalize_station_key(station_id)
-    station_runtime.set_online(key, consumer)
+    ACTIVE_STATIONS[key] = consumer
     ocpp_logger.info(f"Station {key} registered in station runtime service")
 
 
 def unregister_station(station_id: Union[int, str]) -> None:
     key = _normalize_station_key(station_id)
-    station_runtime.set_offline(key)
+    ACTIVE_STATIONS.pop(key, None)
     for d in (_last_heartbeat_log, _last_heartbeat_db_update, _rapid_heartbeat_count):
         d.pop(key, None)
     

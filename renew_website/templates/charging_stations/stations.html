@@ -76,7 +76,7 @@
 
 <div class="container-fluid">
   <div class="d-sm-flex align-items-center justify-content-between mb-4">
-    <h1 class="h3 mb-0 text-gray-800">Charging Stations Operations</h1>
+    <h1 class="h3 mb-0 text-gray-800">Charging Stations Management</h1>
     <a class="btn btn-primary shadow-sm" href="{% url 'admin:charging_stations_station_changelist' %}">
       <i class="fas fa-tools fa-sm text-white-50 mr-2"></i>Add/ Edit Station
     </a>
@@ -220,7 +220,6 @@
                 <th>ID</th>
                 <th>Model</th>
                 <th>Max Power</th>
-                <th>Vehicle SoC</th>
                 <th>Station Status</th>
                 <th>Connector Status</th>
                 <th>Address</th>
@@ -233,13 +232,6 @@
                 <td><strong>{{ station.id }}</strong></td>
                 <td>{{ station.model|default:"TACW22-G0135" }}</td>
                 <td><strong>{{ station.power_output }} kW</strong></td>
-                <td id="soc-{{ station.id }}">
-                  {% if station.vehicle_soc is not None %}
-                  <span>{{ station.vehicle_soc|floatformat:"-2" }} %</span>
-                  {% else %}
-                  <span>--</span>
-                  {% endif %}
-                </td>
                 <td id="status-{{ station.id }}">
                   {% if station.status == "active" %}
                   <span class="badge badge-success">Active</span>
