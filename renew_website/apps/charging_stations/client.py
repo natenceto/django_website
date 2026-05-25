@@ -44,7 +44,7 @@ async def run_client_for_station(station_id):
                 charge_point_vendor="AVT-Company",
                 charge_point_serial_number="avt.001.13.1",
                 charge_box_serial_number="avt.001.13.1.01",
-                firmware_version="0.9.87",
+                firmware_version="1.8.37",
                 iccid="",
                 imsi="",
                 meter_type="AVT NQC-ACDC",

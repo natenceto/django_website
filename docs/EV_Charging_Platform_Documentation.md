@@ -1,6 +1,6 @@
 # EV Charging Platform - Професионална документация
 
-## Версия 1.0 | Януари 2026
+## Версия 1.1 | Май 2026
 
 ---
 
@@ -25,7 +25,7 @@
 
 EV Charging Platform е интегрирана система за управление на мрежа от електрически зарядни станции, която съчетава:
 
-- **OCPP 1.6** протокол за комуникация със станции
+- **OCPP 1.6J** (JSON over WebSocket) протокол за комуникация със станции
 - **DeyeCloud API** интеграция за соларни инвертори
 - **Open-Meteo API** за прогнози и слънчева радиация
 - **Real-time monitoring** и управление
@@ -36,7 +36,7 @@ EV Charging Platform е интегрирана система за управл�
 
 | Характеристика | Описание |
 |----------------|---------|
-| **Протокол** | OCPP 1.6 (JSON over WebSocket) |
+| **Протокол** | OCPP 1.6J (JSON over WebSocket) |
 | **Енергия** | DeyeCloud инвертор интеграция |
 | **Време** | Open-Meteo прогнози и irradiance |
 | **База данни** | PostgreSQL + Redis |
@@ -46,14 +46,15 @@ EV Charging Platform е интегрирана система за управл�
 
 ### Технологичен стек
 
-```
-Backend:  Django 4.2 + Python 3.12
-Frontend: Bootstrap 5 + jQuery
-Database: PostgreSQL 14 + Redis 7
-API:     Django REST Framework
-WebSocket: Django Channels
-Queue:   Redis (Celery)
-```
+- Backend: Django `5.2` + Python `3.12`
+- OCPP: `ocpp 0.17.0` с OCPP `1.6J` (JSON over WebSocket)
+- Frontend: Bootstrap `4.6.0` + jQuery `3.6.0` + Chart.js `2.9.4`
+- Database/Cache: PostgreSQL `15` + Redis `7`
+- API: Django REST Framework `3.15.2`
+- WebSocket: Django Channels `4.3.1` + channels-redis `4.2.1`
+- Queue/Scheduler: Celery `>=5.3.6` + django-celery-beat `>=2.5.0` + django-celery-results `>=2.5.0`
+
+Пълен инвентар на всички използвани технологии и версии е наличен в README секцията "Stack and Versions".
 
 ---
 

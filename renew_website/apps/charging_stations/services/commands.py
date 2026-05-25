@@ -48,7 +48,7 @@ def execute_station_action(action: str, station_ids: list, power: str = None) ->
                     power_limit = None
                     power_mode = "auto"
                 elif power:
-                    power_limit = int(power)
+                    power_limit = float(power)
                     power_mode = "manual"
                 else:
                     station = Station.objects.get(id=station_id)
@@ -57,10 +57,9 @@ def execute_station_action(action: str, station_ids: list, power: str = None) ->
                 session_context = {
                     "command_source": "operator_ui",
                     "requested_power_mode": power_mode,
+                    "session_source": "platform",
+                    "runtime_type": "real",
                 }
-                if valid_rfid.tag == DEFAULT_TEST_RFID_TAG:
-                    session_context.setdefault("session_source", "simulated")
-                    session_context.setdefault("runtime_type", "simulated")
 
                 try:
                     command_bus.dispatch(

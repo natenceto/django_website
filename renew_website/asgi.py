@@ -31,7 +31,6 @@ startup_thread.join()
 # Now it's safe to import Django app modules (after Django is initialized)
 from channels.routing import ProtocolTypeRouter, URLRouter
 from channels.auth import AuthMiddlewareStack
-from channels.security.websocket import AllowedHostsOriginValidator
 import renew_website.apps.charging_stations.routing
 
 # Custom WebSocket middleware with keep-alive
@@ -45,15 +44,36 @@ class WebSocketKeepAliveMiddleware:
             scope['keep_alive'] = 60
         return await self.app(scope, receive, send)
 
+
+class OcppOriginBypassMiddleware:
+    """
+    Allow OCPP devices to connect without strict Origin headers while
+    preserving host-origin checks for browser websocket endpoints.
+    """
+
+    def __init__(self, device_app, browser_app):
+        self.device_app = device_app
+        self.browser_app = browser_app
+
+    async def __call__(self, scope, receive, send):
+        if scope.get('type') != 'websocket':
+            return await self.browser_app(scope, receive, send)
+
+        path = scope.get('path', '') or ''
+        if path.startswith('/ws/charging_stations/'):
+            return await self.device_app(scope, receive, send)
+
+        return await self.browser_app(scope, receive, send)
+
+
+ws_router = URLRouter(
+    renew_website.apps.charging_stations.routing.websocket_urlpatterns
+)
+ws_authed = AuthMiddlewareStack(ws_router)
+
 application = ProtocolTypeRouter({
     'http': django_asgi_app,  # Django ASGI application
     'websocket': WebSocketKeepAliveMiddleware(
-        AuthMiddlewareStack(
-            AllowedHostsOriginValidator(
-                URLRouter(
-                    renew_website.apps.charging_stations.routing.websocket_urlpatterns
-                )
-            )
-        )
+        ws_authed
     ),
 })

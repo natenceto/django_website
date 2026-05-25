@@ -12,6 +12,9 @@ x-django-common-env: &django-common-env
   CELERY_BROKER_URL: redis://redis:6379/0
   CELERY_RESULT_BACKEND: redis://redis:6379/0
   USE_REDIS_CHANNEL_LAYER: 1
+  DEYE_CONNECTION_MODE: ${DEYE_CONNECTION_MODE:-local}
+  DEYE_LOCAL_IP: ${DEYE_LOCAL_IP:-192.168.88.247}
+  DEYE_LOGGER_SN: ${DEYE_LOGGER_SN:-3117882047}
 
 services:
   # Base Database Service
@@ -68,7 +71,6 @@ services:
       RUN_DB_MIGRATIONS: 1
       RUN_COLLECTSTATIC: 1
       ENABLE_API_DOCS: 1
-      DEYE_CONNECTION_MODE: auto
     depends_on:
       db:
         condition: service_healthy

@@ -1,6 +1,6 @@
 # RENEW
 
-RENEW is a Django-based EV charging platform with OCPP 1.6 communication, PostgreSQL persistence, Redis-backed realtime delivery, Celery background tasks, charging analytics, and Deye energy integrations.
+RENEW is a Django-based EV charging platform with OCPP 1.6J communication, PostgreSQL persistence, Redis-backed realtime delivery, Celery background tasks, charging analytics, and Deye energy integrations.
 
 The project title is: Research and development of a smart energy system for eco-charging of electric vehicles, using renewable energy sources.
 
@@ -14,16 +14,81 @@ The project is intentionally restricted to these access hosts only:
 
 Do not add other public hosts unless you intentionally broaden the deployment model.
 
-## Stack
+## Stack and Versions
 
-- Python 3.12
-- Django 5.2
-- PostgreSQL 15
-- Redis 7
-- Django Channels
-- Celery + django-celery-beat + django-celery-results
-- Gunicorn/Uvicorn workers for container runtime
-- Docker Compose V2
+### Protocol and Runtime
+
+- OCPP profile: OCPP 1.6J (JSON over WebSocket; subprotocol `OCPP1.6`/`ocpp1.6`)
+- Python: `3.12` (container base image)
+- Django: `5.2`
+- Docker Compose: V2
+
+### Infrastructure Containers
+
+- PostgreSQL: `15-alpine`
+- Redis: `7-alpine`
+- Nginx (production compose): `1.25-alpine`
+
+### Production Python Dependencies
+
+- Django: `5.2`
+- psycopg: `3.2.10`
+- python-dotenv: `1.1.1`
+- channels: `4.3.1`
+- channels-redis: `4.2.1`
+- daphne: `>=4.1.0`
+- uvicorn: `0.37.0`
+- gunicorn: `>=21.2.0`
+- websockets: `13.1`
+- ocpp: `0.17.0`
+- whitenoise: `6.11.0`
+- django-environ: `0.12.0`
+- jsonschema: `4.4.0`
+- redis (Python client): `5.2.1`
+- djangorestframework: `3.15.2`
+- django-filter: `24.3`
+- drf-spectacular: `0.28.0`
+- djangorestframework-simplejwt: `5.4.0`
+- django-cors-headers: `4.6.0`
+- requests: `>=2.31.0`
+- user-agents: `>=2.2.0`
+- deye-controller: `0.2.3`
+- pyserial: `3.5`
+- pysolarmanv5: `3.0.6`
+- umodbus: `1.0.4`
+- celery: `>=5.3.6`
+- django-celery-beat: `>=2.5.0`
+- django-celery-results: `>=2.5.0`
+- flower: `2.0.1`
+- hiredis: `>=2.3.2`
+- pymodbus: `3.12.1`
+
+### Development Dependencies (additional)
+
+- mypy: `1.17.0`
+- black: `24.10.0`
+- isort: `5.13.2`
+- flake8: `7.1.1`
+- django-debug-toolbar: `4.4.6`
+- ipython: `8.29.0`
+
+### Testing Dependencies
+
+- pytest: `8.3.4`
+- pytest-django: `4.9.0`
+- pytest-asyncio: `0.24.0`
+- pytest-cov: `6.0.0`
+- factory-boy: `3.3.1`
+- faker: `33.1.0`
+- coverage: `7.6.9`
+
+### Frontend Vendor Libraries
+
+- jQuery: `3.6.0`
+- Bootstrap (JS bundle): `4.6.0`
+- Chart.js: `2.9.4`
+- Font Awesome Free: `5.15.3`
+- jQuery Easing: `1.4.1`
 
 ## First Start
 

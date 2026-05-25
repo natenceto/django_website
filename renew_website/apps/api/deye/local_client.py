@@ -43,7 +43,8 @@ class DeyeLocalClient:
 
             return results
         except Exception as e:
-            logger.error(f"Local read error (IP: {self.ip}): {e}")
+            err_text = str(e).strip() or repr(e)
+            logger.error(f"Local read error (IP: {self.ip}): {err_text}")
             return {}
         finally:
             # Attempt to close the socket via internal method if it exists

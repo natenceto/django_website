@@ -3,6 +3,7 @@ import asyncio
 import json
 import logging
 import datetime as py_datetime
+import math
 from datetime import timedelta
 from decimal import Decimal
 from enum import Enum
@@ -13,6 +14,7 @@ from django.utils import timezone
 from django.db import transaction as db_transaction
 from channels.generic.websocket import AsyncWebsocketConsumer
 from channels.db import database_sync_to_async
+from redis.exceptions import ConnectionError as RedisConnectionError
 
 from ocpp import exceptions as ocpp_exceptions
 from ocpp.routing import on
@@ -30,6 +32,23 @@ from .logging_config import get_ocpp_logger, get_station_logger
 from .models import Station, Connector, Transaction, UserRFID, MeterValue, CommandLog, Vehicle, StationStatusHistory
 from .registry import ACTIVE_STATIONS, station_runtime
 from .live_state import get_station_live_states, update_station_live_state_from_event
+
+
+def _parse_firmware_version(version: Optional[str]) -> tuple[int, int, int]:
+    if not version:
+        return (0, 0, 0)
+    parts = str(version).strip().split('.')
+    numbers = []
+    for part in parts[:3]:
+        numeric = ''.join(ch for ch in part if ch.isdigit())
+        numbers.append(int(numeric) if numeric else 0)
+    while len(numbers) < 3:
+        numbers.append(0)
+    return tuple(numbers[:3])
+
+
+def _is_firmware_compatible(current: Optional[str], minimum: str = "1.8.37") -> bool:
+    return _parse_firmware_version(current) >= _parse_firmware_version(minimum)
 
 
 def _snake_to_camel_case(value: str) -> str:
@@ -841,6 +860,8 @@ class ChargePoint(OCPPChargePoint):
         self.charge_point_vendor = charge_point_vendor
 
         firmware_version = kwargs.get("firmware_version") or kwargs.get("firmwareVersion")
+        firmware_minimum = "1.8.37"
+        firmware_ok = _is_firmware_compatible(firmware_version, firmware_minimum)
         self._log_ocpp_request(
             "BootNotification",
             {
@@ -897,8 +918,17 @@ class ChargePoint(OCPPChargePoint):
             vendor=charge_point_vendor,
             model=charge_point_model,
             firmware=firmware_version,
+            firmware_minimum=firmware_minimum,
+            firmware_compatible=firmware_ok,
             heartbeat_interval_seconds=self.heartbeat_interval,
         )
+
+        if not firmware_ok:
+            get_station_logger(self.station_id).warning(
+                "Station firmware %s is below recommended %s; connection accepted but compatibility is not guaranteed.",
+                firmware_version,
+                firmware_minimum,
+            )
 
         try:
             asyncio.create_task(self._update_station_status_async("active", "boot"))
@@ -1899,17 +1929,25 @@ class ChargePoint(OCPPChargePoint):
 
         charging_profile = None
         if requested_power_kw is not None:
+            requested_power_kw = float(requested_power_kw)
+            # Use current-based profiles for better interoperability with AC stations.
+            # 3-phase AC approximation: P = V_phase * I * 3, with V_phase ~= 230V.
+            amps_per_phase = requested_power_kw * 1000.0 / (230.0 * 3.0)
+            # Avoid rounding down near critical thresholds (e.g. 15.9A -> 16A).
+            amps_limit = max(6.0, math.ceil(amps_per_phase * 10.0) / 10.0)
             charging_profile = {
                 "chargingProfileId": 1,
                 "stackLevel": 1,
                 "chargingProfilePurpose": "TxProfile",
                 "chargingProfileKind": "Absolute",
                 "chargingSchedule": {
-                    "chargingRateUnit": "W",
-                    "chargingSchedulePeriod": [{"startPeriod": 0, "limit": round(float(requested_power_kw) * 1000.0, 1)}],
+                    "chargingRateUnit": "A",
+                    "chargingSchedulePeriod": [{"startPeriod": 0, "limit": amps_limit, "numberPhases": 3}],
                 },
             }
-            ocpp_logger.info(f"Created charging profile for {requested_power_kw}kW: {charging_profile}")
+            ocpp_logger.info(
+                f"Created charging profile for {requested_power_kw}kW (~{amps_limit}A/phase, 3-phase): {charging_profile}"
+            )
         else:
             ocpp_logger.info(f"No charging profile (Auto power - station will negotiate)")
 
@@ -2148,6 +2186,10 @@ class ChargePointConsumer(AsyncWebsocketConsumer):
             if any(signature in runtime_signature for signature in {"simulator", "simulation", "avt-express"}):
                 session_context.setdefault("runtime_type", "simulated")
                 session_context.setdefault("session_source", "simulated")
+            else:
+                # Real charging station: RemoteStart is platform-commanded but real charging
+                session_context.setdefault("session_source", "platform")
+                session_context.setdefault("runtime_type", "real")
             
             ocpp_logger.info(f"RemoteStartTransaction command received: station={self.station_id}, connector={connector_id}, id_tag={id_tag}, power={requested_power}")
             
@@ -2452,6 +2494,19 @@ class StationStatusConsumer(AsyncWebsocketConsumer):
         super().__init__(*args, **kwargs)
         self._is_closing = False
         self._connected = False
+
+    async def __call__(self, scope, receive, send):
+        try:
+            return await super().__call__(scope, receive, send)
+        except RedisConnectionError as exc:
+            logger.warning("StationStatusConsumer redis disconnect: %s", exc)
+            self._connected = False
+            self._is_closing = True
+            try:
+                await self.close(code=1013)
+            except Exception:
+                pass
+            return
 
     async def connect(self):
         user = self.scope.get("user")

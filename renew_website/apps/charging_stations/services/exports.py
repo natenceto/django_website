@@ -12,7 +12,7 @@ from ..models import Transaction
 SIMULATOR_MODEL_SIGNATURES = ("simulator", "simulation", "avt-express")
 MIN_REAL_CHARGE_KWH = Decimal("0.05")
 LONG_SESSION_NO_ENERGY_SECONDS = 300
-DEFAULT_TEST_RFID_TAG = "000000010160897"
+DEFAULT_TEST_RFID_TAG = None  # Disabled: was "000000010160897" but this is a real station RFID
 
 
 def _align_datetime_for_project_timezone(value: datetime) -> datetime:
@@ -123,6 +123,9 @@ def _is_simulated_station(tx: Transaction) -> bool:
         or session_context.get("source")
         or session_context.get("runtime_type")
     )
+    # Platform-commanded sessions (RemoteStart) are NOT simulated; they are real charging
+    if source == "platform":
+        return False
     if source in {"simulator", "simulation", "simulated"}:
         return True
 
@@ -184,6 +187,10 @@ def _get_data_quality(tx: Transaction, duration_seconds: int, has_meter_delta: b
 def _get_authenticity(is_simulated: bool, is_verified_physical: bool, status: str, duration_seconds: int, has_meter_delta: bool, has_any_power_measurements: bool, has_meter_telemetry: bool, requested_power: bool, data_quality: str) -> tuple[str, str]:
     if is_simulated:
         return "Simulated", "secondary"
+    # Treat completed/stopped sessions with telemetry as real even when
+    # runtime_environment metadata is missing on the station record.
+    if status in {"completed", "stopped"} and (has_meter_delta or has_any_power_measurements or has_meter_telemetry):
+        return "Real Charge", "success"
     if is_verified_physical and has_meter_delta:
         return "Real Charge", "success"
     if data_quality == "Inconsistent":
@@ -280,14 +287,21 @@ def classify_transaction(tx: Transaction) -> dict[str, str]:
             label = "Aborted"
             summary = "partial"
             badge = "warning"
+    elif status == "completed":
+        # For completed sessions, mark as successful if any telemetry exists
+        # Real physical charging stations should always report success if completed
+        if has_meter_delta or has_meter_telemetry or has_any_power_measurements:
+            label = "Completed"
+            summary = "successful"
+            badge = "success"
+        else:
+            label = "Aborted"
+            summary = "partial"
+            badge = "warning"
     elif has_meter_delta:
         label = "Completed"
         summary = "successful"
         badge = "success"
-    elif status == "completed":
-        label = "Aborted"
-        summary = "partial"
-        badge = "warning"
     else:
         label = "Unknown"
         summary = "failed"

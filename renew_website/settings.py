@@ -444,14 +444,22 @@ DEYE_COMPANY_ID = env('DEYE_COMPANY_ID', default='0')   # '0' for personal accou
 # Hardware Identifiers (From .env)
 DEYE_MASTER_SN = env('DEYE_MASTER_SN', default='2409109016')
 DEYE_SLAVE_SN = env('DEYE_SLAVE_SN', default='2409109073')
-DEYE_LOGGER_SN = env('DEYE_LOGGER_SN', default='3117079603')
+# Backward-compatible: prefer explicit DEYE_LOGGER_SN, fallback to DEYE_MASTER_LOGGER_SN.
+DEYE_LOGGER_SN = env(
+    'DEYE_LOGGER_SN',
+    default=env('DEYE_MASTER_LOGGER_SN', default='3117079603')
+)
 
 # Local Connection Settings
 # IP-то на Wi-Fi логъра на Master инвертора
-DEYE_LOCAL_IP = env('DEYE_LOCAL_IP', default='192.168.88.254') 
+# Prefer explicit DEYE_LOCAL_IP. Keep a safe local-network default.
+DEYE_LOCAL_IP = env(
+    'DEYE_LOCAL_IP',
+    default='192.168.88.247'
+)
 
 # Режим на свързване: 'cloud' (през интернет), 'local' (през мрежата) или 'auto'
-DEYE_CONNECTION_MODE = env('DEYE_CONNECTION_MODE', default='cloud')
+DEYE_CONNECTION_MODE = env('DEYE_CONNECTION_MODE', default='local')
 DEYE_INSTALLED_CAPACITY_KWP = env.float('DEYE_INSTALLED_CAPACITY_KWP', default=10.0)
 # =============================================================================
 # Celery Configuration
