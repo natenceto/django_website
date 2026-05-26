@@ -252,12 +252,14 @@ class DeyeManager:
             return True
             
         active = self.get_active_inverter()
-        if not active: return False
-            inverter = self._get_inverter_config(device_sn=active["device_sn"])
-            local_client = self._get_local_client(inverter)
-        
-            if active["source"] == "local" and local_client:
-                return local_client.write_multiple_registers(commands)
+        if not active:
+            return False
+
+        inverter = self._get_inverter_config(device_sn=active["device_sn"])
+        local_client = self._get_local_client(inverter)
+
+        if active["source"] == "local" and local_client:
+            return local_client.write_multiple_registers(commands)
         else:
             # TODO: Запис към Solarman Cloud за мнозинство регистри, ако е възможно през Cloud API.
             logger.warning(f"Apply modbus command {commands} not fully supported via Cloud yet.")

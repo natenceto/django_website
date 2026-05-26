@@ -3,7 +3,8 @@ import django.db.models.deletion
 
 
 def ensure_commandlog_table(apps, schema_editor):
-    CommandLog = apps.get_model('charging_stations', 'CommandLog')
+    from renew_website.apps.charging_stations.models import CommandLog
+
     existing_tables = set(schema_editor.connection.introspection.table_names())
     if CommandLog._meta.db_table in existing_tables:
         return
