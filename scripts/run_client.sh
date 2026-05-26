@@ -7,8 +7,8 @@ echo "Starting OCPP client for charging stations..."
 echo "Using server: $OCPP_SERVER_HOST"
 
 if [ -z "$OCPP_SERVER_HOST" ]; then
-    echo "Warning: OCPP_SERVER_HOST not set, using default (127.0.0.1)"
-    export OCPP_SERVER_HOST="127.0.0.1"
+    echo "Warning: OCPP_SERVER_HOST not set, using default (192.168.88.243)"
+    export OCPP_SERVER_HOST="192.168.88.243"
 fi
 
 # Set database connection for local client simulation against Docker DB

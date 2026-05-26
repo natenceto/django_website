@@ -17,7 +17,7 @@ import os
 import sys
 import warnings
 
-# Suppress "StreamingHttpResponse must consume synchronous iterators" warning 
+# Suppress "StreamingHttpResponse must consume synchronous iterators" warning
 # caused by WhiteNoise/FileResponse in ASGI mode.
 warnings.filterwarnings("ignore", message="StreamingHttpResponse must consume synchronous iterators")
 
@@ -45,7 +45,7 @@ SECRET_KEY = env('SECRET_KEY')
 DEBUG = env.bool('DEBUG', default=False)
 ENABLE_API_DOCS = env.bool('ENABLE_API_DOCS', default=DEBUG)
 
-DEFAULT_ALLOWED_HOSTS = ['localhost', '127.0.0.1', '192.168.88.247']
+DEFAULT_ALLOWED_HOSTS = ['localhost', '127.0.0.1', '192.168.88.243', '192.168.88.247']
 IS_TEST_ENV = os.path.basename(sys.argv[0]).startswith('pytest') or 'test' in sys.argv
 ALLOWED_HOSTS = env.list('ALLOWED_HOSTS', default=DEFAULT_ALLOWED_HOSTS)
 if IS_TEST_ENV and 'testserver' not in ALLOWED_HOSTS:
@@ -57,7 +57,7 @@ unexpected_hosts = [
 ]
 if unexpected_hosts:
     raise RuntimeError(
-        'ALLOWED_HOSTS may only contain localhost, 127.0.0.1, and 192.168.88.247 '
+        'ALLOWED_HOSTS may only contain localhost, 127.0.0.1, 192.168.88.243, and 192.168.88.247 '
         f'(unexpected: {unexpected_hosts})'
     )
 
@@ -65,12 +65,15 @@ if unexpected_hosts:
 DEFAULT_TRUSTED_ORIGINS = [
     'http://localhost',
     'http://127.0.0.1',
+    'http://192.168.88.243',
     'http://192.168.88.247',
     'http://localhost:8000',
     'http://127.0.0.1:8000',
+    'http://192.168.88.243:8000',
     'http://192.168.88.247:8000',
     'https://localhost',
     'https://127.0.0.1',
+    'https://192.168.88.243',
     'https://192.168.88.247',
 ]
 CSRF_TRUSTED_ORIGINS = env.list('CSRF_TRUSTED_ORIGINS', default=DEFAULT_TRUSTED_ORIGINS)
@@ -275,16 +278,16 @@ if not DEBUG:
     # HTTPS settings
     SECURE_SSL_REDIRECT = env.bool('SECURE_SSL_REDIRECT', default=True)
     SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
-    
+
     # Cookie security
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
-    
+
     # HSTS (HTTP Strict Transport Security)
     SECURE_HSTS_SECONDS = 31536000  # 1 year
     SECURE_HSTS_INCLUDE_SUBDOMAINS = True
     SECURE_HSTS_PRELOAD = True
-    
+
     # Content security
     SECURE_CONTENT_TYPE_NOSNIFF = True
     SECURE_BROWSER_XSS_FILTER = True
@@ -419,13 +422,16 @@ SPECTACULAR_SETTINGS = {
 CORS_ALLOWED_ORIGINS = env.list('CORS_ALLOWED_ORIGINS', default=[
     'http://localhost',
     'http://127.0.0.1',
+    'http://192.168.88.243',
     'http://192.168.88.247',
     'http://localhost:3000',
     'http://localhost:8000',
     'http://127.0.0.1:8000',
+    'http://192.168.88.243:8000',
     'http://192.168.88.247:8000',
     'https://localhost',
     'https://127.0.0.1',
+    'https://192.168.88.243',
     'https://192.168.88.247',
 ])
 CORS_ALLOW_CREDENTIALS = True
@@ -452,10 +458,9 @@ DEYE_LOGGER_SN = env(
 
 # Local Connection Settings
 # IP-то на Wi-Fi логъра на Master инвертора
-# Prefer explicit DEYE_LOCAL_IP. Keep a safe local-network default.
-DEYE_LOCAL_IP = env(
-    'DEYE_LOCAL_IP',
-    default='192.168.88.247'
+DEYE_MASTER_LOCAL_IP = env(
+    'DEYE_MASTER_LOCAL_IP',
+    default='192.168.88.253'
 )
 
 # Режим на свързване: 'cloud' (през интернет), 'local' (през мрежата) или 'auto'

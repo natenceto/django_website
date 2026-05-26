@@ -27,7 +27,7 @@ async def run_client_for_station(station_id):
         return
 
     # Fixed configuration: Always use ws:// for simplicity and reliability
-    server_host = os.getenv('OCPP_SERVER_HOST', '192.168.88.247')
+    server_host = os.getenv('OCPP_SERVER_HOST', '192.168.88.243')
     server_port = os.getenv('OCPP_SERVER_PORT', '8000')
     
     # Always use ws:// - works for both testing and production
