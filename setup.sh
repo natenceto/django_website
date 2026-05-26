@@ -134,19 +134,21 @@ run_docker_setup() {
     superuser_count="$(cd "$PROJECT_ROOT" && $COMPOSE_CMD exec -T web python manage.py shell -c "from django.contrib.auth import get_user_model; print(get_user_model().objects.filter(is_superuser=True).count())")"
     superuser_count="$(echo "$superuser_count" | tr -dc '0-9')"
 
+    echo ""
+    echo "=== Create Admin User ==="
     if [[ "${superuser_count:-0}" == "0" ]]; then
-        echo ""
-        echo "=== Create Admin User ==="
-        read -r -p "No superuser exists yet. Do you want to create one now? (y/n) " create_admin
-
-        if [[ "$create_admin" =~ ^[Yy]$ ]]; then
-            (cd "$PROJECT_ROOT" && $COMPOSE_CMD exec web python manage.py createsuperuser)
-        else
-            echo "Skipping superuser creation. You can run it later with:"
-            echo "$COMPOSE_CMD exec web python manage.py createsuperuser"
-        fi
+        echo "--> No superuser exists yet (first run scenario)."
     else
-        echo "--> Superuser already exists. Skipping superuser prompt."
+        echo "--> Existing superuser count: ${superuser_count}."
+    fi
+
+    read -r -p "Do you want to run createsuperuser now? (y/n) " create_admin
+
+    if [[ "$create_admin" =~ ^[Yy]$ ]]; then
+        (cd "$PROJECT_ROOT" && $COMPOSE_CMD exec web python manage.py createsuperuser)
+    else
+        echo "Skipping superuser creation. You can run it later with:"
+        echo "$COMPOSE_CMD exec web python manage.py createsuperuser"
     fi
 
     echo ""
