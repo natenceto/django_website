@@ -31,7 +31,6 @@ echo "PostgreSQL is up - continuing"
 
 RUN_DB_MIGRATIONS="${RUN_DB_MIGRATIONS:-0}"
 RUN_COLLECTSTATIC="${RUN_COLLECTSTATIC:-0}"
-DJANGO_SUPERUSER_CREATE="${DJANGO_SUPERUSER_CREATE:-0}"
 
 if [ "$RUN_DB_MIGRATIONS" = "1" ]; then
     echo "Applying database migrations..."
@@ -45,13 +44,6 @@ if [ "$RUN_COLLECTSTATIC" = "1" ]; then
     python manage.py collectstatic --noinput
 else
     echo "Skipping static collection (RUN_COLLECTSTATIC=$RUN_COLLECTSTATIC)"
-fi
-
-if [ "$DJANGO_SUPERUSER_CREATE" = "1" ]; then
-    echo "Running non-interactive superuser bootstrap..."
-    python setup_superuser.py
-else
-    echo "Skipping automatic superuser bootstrap (DJANGO_SUPERUSER_CREATE=$DJANGO_SUPERUSER_CREATE)"
 fi
 
 # Start the application

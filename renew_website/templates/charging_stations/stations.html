@@ -22,19 +22,27 @@
 
   .snapshot-grid {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 0.75rem;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0.5rem;
   }
 
   .snapshot-item {
     border: 1px solid rgba(0, 0, 0, 0.08);
-    border-radius: 0.5rem;
-    padding: 0.6rem 0.75rem;
+    border-radius: 0.45rem;
+    padding: 0.45rem 0.55rem;
     background: rgba(248, 249, 252, 0.85);
   }
 
+  .snapshot-item--eta {
+    grid-column: span 2;
+  }
+
+  .snapshot-item--hidden {
+    display: none;
+  }
+
   .snapshot-label {
-    font-size: 0.7rem;
+    font-size: 0.64rem;
     font-weight: 700;
     letter-spacing: 0.04em;
     text-transform: uppercase;
@@ -43,26 +51,90 @@
   }
 
   .snapshot-value {
-    font-size: 1rem;
+    font-size: 0.92rem;
     font-weight: 700;
     color: #2f3640;
     line-height: 1.2;
   }
 
   .snapshot-meta {
-    font-size: 0.8rem;
+    font-size: 0.72rem;
     color: #6c757d;
     margin-top: 0.2rem;
+  }
+
+  .eta-dual {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 0.25rem;
+  }
+
+  .eta-line {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.75rem;
+  }
+
+  .eta-name {
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: #6c757d;
+  }
+
+  .eta-value {
+    font-size: 0.9rem;
+    font-weight: 700;
+    color: #2f3640;
+    line-height: 1.2;
+  }
+
+  .eta-caption {
+    margin-top: -0.1rem;
+    margin-bottom: 0.15rem;
+    font-size: 0.7rem;
+    color: #7a8795;
+  }
+
+  @media (max-width: 1199.98px) {
+    .snapshot-grid {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .snapshot-item--eta {
+      grid-column: 1 / -1;
+    }
+  }
+
+  @media (max-width: 767.98px) {
+    .snapshot-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .snapshot-item--eta {
+      grid-column: 1 / -1;
+    }
   }
 
   @media (max-width: 575.98px) {
     .snapshot-grid {
       grid-template-columns: 1fr;
     }
+
+    .snapshot-item--eta {
+      grid-column: auto;
+    }
   }
 
   #dashboard-cards .card {
     transition: transform 0.2s ease, box-shadow 0.2s ease;
+  }
+
+  .kpi-row .card-body {
+    padding-top: 0.8rem;
+    padding-bottom: 0.8rem;
   }
 
   #dashboard-cards .card:hover {
@@ -82,12 +154,13 @@
     </a>
   </div>
 
-  <div class="row mb-4" id="dashboard-cards">
-    <div class="col-xl-3 col-md-6 mb-4">
-      <div class="card border-left-primary shadow h-100 py-2">
+  <div id="dashboard-cards">
+    <div class="row mb-3">
+      <div class="col-12">
+      <div class="card border-left-primary shadow py-1">
         <div class="card-body">
           <div class="row no-gutters align-items-center">
-            <div class="col mr-2">
+            <div class="col-12">
               <div class="d-flex align-items-center justify-content-between mb-2">
                 <div class="text-xs font-weight-bold text-primary text-uppercase">Latest Session Snapshot</div>
                 <span class="badge badge-light" id="metric-session-status">{{ stats.session_status_label }}</span>
@@ -106,29 +179,67 @@
                 <div class="snapshot-item">
                   <div class="snapshot-label">Requested Power</div>
                   <div class="snapshot-value" id="metric-requested-power">{{ stats.requested_power_display }}</div>
-                  <div class="snapshot-meta" id="metric-requested-power-mode">{{ stats.requested_power_mode_label }}</div>
+                  <div
+                    class="snapshot-meta{% if not stats.requested_power_mode_label or stats.requested_power_mode_label == '--' or stats.requested_power_mode_label|lower == stats.requested_power_display|lower %} snapshot-item--hidden{% endif %}"
+                    id="metric-requested-power-mode"
+                  >{{ stats.requested_power_mode_label }}</div>
                 </div>
                 <div class="snapshot-item">
                   <div class="snapshot-label">Actual Power</div>
                   <div class="snapshot-value" id="metric-actual-power">{{ stats.actual_power_display }}</div>
                 </div>
+                <div class="snapshot-item{% if stats.battery_capacity_display == '--' %} snapshot-item--hidden{% endif %}" id="metric-battery-capacity-item">
+                  <div class="snapshot-label">Battery Capacity</div>
+                  <div class="snapshot-value" id="metric-battery-capacity">{{ stats.battery_capacity_display }}</div>
+                </div>
+                <div class="snapshot-item{% if stats.ems_limit_display == '--' %} snapshot-item--hidden{% endif %}" id="metric-ems-limit-item">
+                  <div class="snapshot-label">EMS Limit</div>
+                  <div class="snapshot-value" id="metric-ems-limit">{{ stats.ems_limit_display }}</div>
+                </div>
+                <div class="snapshot-item{% if stats.energy_display == '--' %} snapshot-item--hidden{% endif %}" id="metric-session-energy-item">
+                  <div class="snapshot-label">Session Energy</div>
+                  <div class="snapshot-value" id="metric-session-energy">{{ stats.energy_display }}</div>
+                </div>
                 <div class="snapshot-item">
-                  <div class="snapshot-label">Energy</div>
-                  <div class="snapshot-value" id="metric-energy-session">{{ stats.energy_display }}</div>
-                  <div class="snapshot-meta">EMS <span id="metric-ems-limit">{{ stats.ems_limit_display }}</span></div>
+                  <div class="snapshot-label">Last Update</div>
+                  <div class="snapshot-value" id="metric-snapshot-updated">{{ stats.snapshot_updated_at_display }}</div>
+                </div>
+                <div
+                  class="snapshot-item snapshot-item--eta{% if not stats.battery_capacity_kwh %} snapshot-item--hidden{% endif %}"
+                  id="metric-eta-panel"
+                  data-battery-capacity-kwh="{% if stats.battery_capacity_kwh is not None %}{{ stats.battery_capacity_kwh }}{% endif %}"
+                >
+                  <div class="snapshot-label">Remaining charging time</div>
+                  <div class="eta-dual">
+                    <div class="eta-line">
+                      <span class="eta-name">To 80%</span>
+                      <span class="eta-value" id="metric-eta80-value">{{ stats.eta_display }}</span>
+                    </div>
+                    <div class="eta-caption" id="metric-eta80-caption">Useful charging window</div>
+                    <div class="eta-line">
+                      <span class="eta-name">To 100%</span>
+                      <span class="eta-value" id="metric-eta100-value">--</span>
+                    </div>
+                    <div class="eta-caption" id="metric-eta100-caption">Full charge with taper</div>
+                  </div>
+                  <div
+                    class="snapshot-meta"
+                    id="metric-eta-reason"
+                    title="{% if stats.eta_reason %}{{ stats.eta_reason }}{% endif %}"
+                    style="min-height: 16px; cursor: help;"
+                  >{% if stats.eta_reason %}ETA unavailable: {{ stats.eta_reason }}{% endif %}</div>
                 </div>
               </div>
-            </div>
-            <div class="col-auto">
-              <i class="fas fa-car-battery fa-2x text-gray-300"></i>
             </div>
           </div>
         </div>
       </div>
+      </div>
     </div>
 
-    <div class="col-xl-3 col-md-6 mb-4">
-      <div class="card border-left-success shadow h-100 py-2">
+    <div class="row mb-4 kpi-row">
+      <div class="col-xl-4 col-md-6 mb-3 mb-xl-0">
+      <div class="card border-left-success shadow">
         <div class="card-body">
           <div class="row no-gutters align-items-center">
             <div class="col mr-2">
@@ -144,10 +255,10 @@
           </div>
         </div>
       </div>
-    </div>
+      </div>
 
-    <div class="col-xl-3 col-md-6 mb-4">
-      <div class="card border-left-info shadow h-100 py-2">
+      <div class="col-xl-4 col-md-6 mb-3 mb-xl-0">
+      <div class="card border-left-info shadow">
         <div class="card-body">
           <div class="row no-gutters align-items-center">
             <div class="col mr-2">
@@ -160,10 +271,10 @@
           </div>
         </div>
       </div>
-    </div>
+      </div>
 
-    <div class="col-xl-3 col-md-6 mb-4">
-      <div class="card border-left-warning shadow h-100 py-2">
+      <div class="col-xl-4 col-md-12">
+      <div class="card border-left-warning shadow">
         <div class="card-body">
           <div class="row no-gutters align-items-center">
             <div class="col mr-2">
@@ -175,6 +286,7 @@
             </div>
           </div>
         </div>
+      </div>
       </div>
     </div>
   </div>
@@ -220,7 +332,6 @@
                 <th>ID</th>
                 <th>Model</th>
                 <th>Max Power</th>
-                <th>Vehicle SoC</th>
                 <th>Station Status</th>
                 <th>Connector Status</th>
                 <th>Address</th>
@@ -233,13 +344,6 @@
                 <td><strong>{{ station.id }}</strong></td>
                 <td>{{ station.model|default:"TACW22-G0135" }}</td>
                 <td><strong>{{ station.power_output }} kW</strong></td>
-                <td id="soc-{{ station.id }}">
-                  {% if station.vehicle_soc is not None %}
-                  <span>{{ station.vehicle_soc|floatformat:"-2" }} %</span>
-                  {% else %}
-                  <span>--</span>
-                  {% endif %}
-                </td>
                 <td id="status-{{ station.id }}">
                   {% if station.status == "active" %}
                   <span class="badge badge-success">Active</span>

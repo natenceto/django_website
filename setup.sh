@@ -84,7 +84,7 @@ print_local_next_steps() {
     echo "3. Update .env so POSTGRES_HOST/PORT/USER/PASSWORD match your machine."
     echo "4. Run: python manage.py migrate"
     echo "5. Run: python manage.py createsuperuser"
-    echo "6. Start the app: uvicorn renew_website.asgi:application --host 0.0.0.0 --port 8000 --reload"
+    echo "6. Start the app: uvicorn renew_website.asgi:application --host 0.0.0.0 --port 8000"
     echo ""
     echo "If you prefer the containerized setup later, install Docker and rerun ./setup.sh."
 }
@@ -142,7 +142,9 @@ run_docker_setup() {
         echo "--> Existing superuser count: ${superuser_count}."
     fi
 
-    read -r -p "Do you want to run createsuperuser now? (y/n) " create_admin
+    echo "--> This prompt appears on every setup run."
+    echo "--> Choose 'y' to start Django's interactive createsuperuser flow, or 'n' to skip."
+    read -r -p "Run createsuperuser now? (y/n) " create_admin
 
     if [[ "$create_admin" =~ ^[Yy]$ ]]; then
         (cd "$PROJECT_ROOT" && $COMPOSE_CMD exec web python manage.py createsuperuser)

@@ -211,13 +211,13 @@ TLS note:
 
 ## Superuser Creation
 
-Interactive superuser creation during `setup.sh` is the better default practice for this repository.
+Interactive superuser creation during `setup.sh` is the default practice for this repository.
 
 Why:
 
 - It avoids hardcoded credentials.
-- It avoids creating admin accounts during every container boot.
-- It only prompts when no superuser exists.
+- It avoids creating admin accounts during container boot.
+- It always prompts during setup so you can choose `y` or `n` each run.
 
 If you need a non-interactive bootstrap for automation, use environment variables and run:
 
@@ -229,7 +229,7 @@ DJANGO_SUPERUSER_PASSWORD=change-me \
 python setup_superuser.py
 ```
 
-The entrypoint does not auto-create a superuser unless that flag is explicitly enabled.
+The entrypoint does not auto-create superusers.
 
 ## Manual Local Workflow Without Docker
 
@@ -243,7 +243,7 @@ source .venv/bin/activate
 python manage.py migrate
 python manage.py createsuperuser
 python manage.py check
-uvicorn renew_website.asgi:application --host 0.0.0.0 --port 8000 --reload
+uvicorn renew_website.asgi:application --host 0.0.0.0 --port 8000
 ```
 
 For manual local runs you still need PostgreSQL and Redis running separately.

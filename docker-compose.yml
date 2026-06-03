@@ -21,6 +21,7 @@ services:
   db:
     image: postgres:15-alpine
     container_name: renew_db
+    restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-renew_db}
       POSTGRES_USER: ${POSTGRES_USER:-renew_user}
@@ -39,6 +40,7 @@ services:
   redis:
     image: redis:7-alpine
     container_name: renew_redis
+    restart: unless-stopped
     ports:
       - "127.0.0.1:6379:6379"
     volumes:
@@ -53,7 +55,8 @@ services:
   web:
     build: .
     container_name: renew_web
-    command: uvicorn renew_website.asgi:application --host 0.0.0.0 --port 8000 --reload
+    restart: unless-stopped
+    command: uvicorn renew_website.asgi:application --host 0.0.0.0 --port 8000
     volumes:
       - .:/app
       - static_volume:/app/staticfiles
@@ -81,6 +84,7 @@ services:
   celery:
     build: .
     container_name: renew_celery_worker
+    restart: unless-stopped
     command: celery -A renew_website worker --loglevel=info
     volumes:
       - .:/app
@@ -98,6 +102,7 @@ services:
   celery-beat:
     build: .
     container_name: renew_celery_beat
+    restart: unless-stopped
     command: celery -A renew_website beat --loglevel=info
     volumes:
       - .:/app
@@ -115,6 +120,7 @@ services:
   flower:
     build: .
     container_name: renew_flower
+    restart: unless-stopped
     command: celery -A renew_website flower --port=5555
     volumes:
       - .:/app

@@ -622,6 +622,21 @@ class ChargePoint(OCPPChargePoint):
             active_tx.save(update_fields=["vehicle"])
         return vehicle is not None
 
+    def _resolve_transaction_battery_capacity_kwh(self, tx: Transaction) -> Optional[float]:
+        if tx and tx.vehicle and tx.vehicle.battery_capacity_kwh is not None:
+            return float(tx.vehicle.battery_capacity_kwh)
+
+        fallback_vehicle = (
+            Vehicle.objects
+            .filter(vehicle_identifier=tx.id_tag, battery_capacity_kwh__isnull=False)
+            .order_by("-last_seen_at", "-id")
+            .first()
+        )
+        if fallback_vehicle and fallback_vehicle.battery_capacity_kwh is not None:
+            return float(fallback_vehicle.battery_capacity_kwh)
+
+        return None
+
     def _update_vehicle_soc(self, vehicle: Optional[Vehicle], soc_value: Optional[float], observed_at=None) -> None:
         if not vehicle or soc_value is None:
             return
@@ -1010,8 +1025,8 @@ class ChargePoint(OCPPChargePoint):
                 "available": "available",
                 "preparing": "preparing",
                 "charging": "charging",
-                "suspendedevse": "suspendedEVSE",
-                "suspendedev": "suspendedEV",
+                "suspendedevse": "suspendedevse",
+                "suspendedev": "suspendedev",
                 "finishing": "finishing",
                 "reserved": "reserved",
                 "faulted": "faulted",
@@ -1203,6 +1218,10 @@ class ChargePoint(OCPPChargePoint):
         soc_timestamp: Optional[str] = None
         soc_source: Optional[str] = None
 
+        def _sampled_values(entry: Dict[str, Any]) -> list:
+            # Be tolerant to both Pythonic and raw OCPP key styles.
+            return (entry.get("sampled_value") or entry.get("sampledValue") or [])
+
         # ---------------------------
         # Define vendor-specific measurands
         # ---------------------------
@@ -1215,7 +1234,7 @@ class ChargePoint(OCPPChargePoint):
             for mv in meter_value or []:
                 parent_ts = mv.get("timestamp")
 
-                for sv in (mv.get("sampled_value") or []):
+                for sv in _sampled_values(mv):
                     measurand = sv.get("measurand")
                     unit = sv.get("unit")
                     value = sv.get("value")
@@ -1301,7 +1320,7 @@ class ChargePoint(OCPPChargePoint):
                 
                 for mv in meter_value or []:
                     # Attempt to extract Energy.Active.Import.Register (Wh) and Power.Active.Import (W)
-                    for sv in (mv.get("sampled_value") or []):
+                    for sv in _sampled_values(mv):
                         measurand = sv.get("measurand", "Energy.Active.Import.Register")
                         val = sv.get("value")
                         if not val:
@@ -1348,6 +1367,7 @@ class ChargePoint(OCPPChargePoint):
                     "requested_power_kw": tx.requested_power_kw,
                     "requested_power_mode": tx.requested_power_mode,
                     "ems_limit_kw": float(tx.last_applied_ems_limit_kw) if tx.last_applied_ems_limit_kw is not None else None,
+                    "battery_capacity_kwh": self._resolve_transaction_battery_capacity_kwh(tx),
                     "soc_percentage": soc_percentage,
                     "power_w": power_w,
                     "energy_wh": energy_wh,
@@ -1364,7 +1384,7 @@ class ChargePoint(OCPPChargePoint):
             power_w=result.get("power_w") if result else None,
             energy_wh=result.get("energy_wh") if result else None,
             soc_percentage=round(soc_percentage, 2) if soc_percentage is not None else None,
-            sample_count=sum(len((mv.get("sampled_value") or [])) for mv in (meter_value or [])),
+            sample_count=sum(len(_sampled_values(mv)) for mv in (meter_value or [])),
         )
 
         # ---------------------------
@@ -1386,6 +1406,7 @@ class ChargePoint(OCPPChargePoint):
                     requested_power_mode=result.get("requested_power_mode"),
                     actual_power_kw=(float(result["power_w"]) / 1000.0) if result.get("power_w") is not None else None,
                     ems_limit_kw=result.get("ems_limit_kw"),
+                    battery_capacity_kwh=result.get("battery_capacity_kwh"),
                     energy_kwh=result.get("energy_kwh"),
                     source="meter_values",
                 )
@@ -1614,6 +1635,32 @@ class ChargePoint(OCPPChargePoint):
                         defaults={"status": "available"},
                     )
 
+                    # Close any stale active transactions on the same connector before creating a new one.
+                    # This prevents orphan active rows from being reconciled later on Available status.
+                    conn = Connector.objects.select_for_update().get(pk=conn.pk)
+                    stale_active_qs = (
+                        Transaction.objects
+                        .select_for_update()
+                        .filter(connector=conn, status="active")
+                        .order_by("-started_at", "-id")
+                    )
+                    auto_closed_transaction_ids = []
+                    for stale_tx in stale_active_qs:
+                        last_mv = (
+                            MeterValue.objects
+                            .filter(transaction=stale_tx)
+                            .order_by("-timestamp", "-id")
+                            .first()
+                        )
+                        update_fields = ["status", "stopped_at"]
+                        stale_tx.status = "completed"
+                        stale_tx.stopped_at = timezone.now()
+                        if last_mv and last_mv.value is not None:
+                            stale_tx.meter_stop = last_mv.value
+                            update_fields.append("meter_stop")
+                        stale_tx.save(update_fields=update_fields)
+                        auto_closed_transaction_ids.append(int(stale_tx.transaction_id or stale_tx.id))
+
                     vehicle = self._upsert_vehicle(id_tag, kwargs)
 
                     tx = Transaction.objects.create(
@@ -1653,10 +1700,20 @@ class ChargePoint(OCPPChargePoint):
                         "requested_power_kw": tx.requested_power_kw,
                         "requested_power_mode": tx.requested_power_mode,
                         "last_applied_ems_limit_kw": float(tx.last_applied_ems_limit_kw) if tx.last_applied_ems_limit_kw is not None else None,
+                        "battery_capacity_kwh": self._resolve_transaction_battery_capacity_kwh(tx),
                         "energy_kwh": 0.0,
+                        "auto_closed_transaction_ids": auto_closed_transaction_ids,
                     }
 
             tx_snapshot = await create_tx()
+
+        if tx_snapshot.get("auto_closed_transaction_ids"):
+            self._log_ocpp_event(
+                "StartTransactionGuard",
+                station_id=self.station_id,
+                connector_id=connector_id,
+                closed_transaction_ids=",".join(str(tid) for tid in tx_snapshot["auto_closed_transaction_ids"]),
+            )
 
         if pending_key is not None:
             self.pending_requested_power.pop(pending_key, None)
@@ -1676,6 +1733,7 @@ class ChargePoint(OCPPChargePoint):
                     requested_power_mode=tx_snapshot.get("requested_power_mode"),
                     actual_power_kw=None,
                     ems_limit_kw=tx_snapshot.get("last_applied_ems_limit_kw"),
+                    battery_capacity_kwh=tx_snapshot.get("battery_capacity_kwh"),
                     energy_kwh=tx_snapshot.get("energy_kwh"),
                     source="start_transaction",
                 )
@@ -1727,7 +1785,7 @@ class ChargePoint(OCPPChargePoint):
                     # transaction_id here is OCPP transactionId
                     tx = (
                         Transaction.objects
-                        .select_related("connector")
+                        .select_related("connector", "vehicle")
                         .select_for_update()
                         .filter(transaction_id=int(transaction_id))
                         .first()
@@ -1735,7 +1793,7 @@ class ChargePoint(OCPPChargePoint):
                     if not tx:
                         tx = (
                             Transaction.objects
-                            .select_related("connector")
+                            .select_related("connector", "vehicle")
                             .select_for_update()
                             .filter(id=int(transaction_id))
                             .first()
@@ -1787,6 +1845,7 @@ class ChargePoint(OCPPChargePoint):
                         "requested_power_kw": tx.requested_power_kw,
                         "requested_power_mode": tx.requested_power_mode,
                         "last_applied_ems_limit_kw": float(tx.last_applied_ems_limit_kw) if tx.last_applied_ems_limit_kw is not None else None,
+                        "battery_capacity_kwh": self._resolve_transaction_battery_capacity_kwh(tx),
                         "energy_kwh": float(tx.energy_consumed) if tx.energy_consumed is not None else None,
                     }
 
@@ -1801,6 +1860,7 @@ class ChargePoint(OCPPChargePoint):
                     requested_power_mode=tx_snapshot.get("requested_power_mode"),
                     actual_power_kw=0.0,
                     ems_limit_kw=tx_snapshot.get("last_applied_ems_limit_kw"),
+                    battery_capacity_kwh=tx_snapshot.get("battery_capacity_kwh"),
                     energy_kwh=tx_snapshot.get("energy_kwh"),
                     source="stop_transaction",
                 )
@@ -1930,23 +1990,21 @@ class ChargePoint(OCPPChargePoint):
         charging_profile = None
         if requested_power_kw is not None:
             requested_power_kw = float(requested_power_kw)
-            # Use current-based profiles for better interoperability with AC stations.
-            # 3-phase AC approximation: P = V_phase * I * 3, with V_phase ~= 230V.
-            amps_per_phase = requested_power_kw * 1000.0 / (230.0 * 3.0)
-            # Avoid rounding down near critical thresholds (e.g. 15.9A -> 16A).
-            amps_limit = max(6.0, math.ceil(amps_per_phase * 10.0) / 10.0)
+            # Use power-based profile to avoid phase assumptions (1-phase vs 3-phase).
+            # Some stations silently underdeliver when numberPhases is forced incorrectly.
+            watts_limit = max(100.0, round(requested_power_kw * 1000.0, 1))
             charging_profile = {
                 "chargingProfileId": 1,
                 "stackLevel": 1,
                 "chargingProfilePurpose": "TxProfile",
                 "chargingProfileKind": "Absolute",
                 "chargingSchedule": {
-                    "chargingRateUnit": "A",
-                    "chargingSchedulePeriod": [{"startPeriod": 0, "limit": amps_limit, "numberPhases": 3}],
+                    "chargingRateUnit": "W",
+                    "chargingSchedulePeriod": [{"startPeriod": 0, "limit": watts_limit}],
                 },
             }
             ocpp_logger.info(
-                f"Created charging profile for {requested_power_kw}kW (~{amps_limit}A/phase, 3-phase): {charging_profile}"
+                f"Created charging profile for {requested_power_kw}kW (~{watts_limit}W, phase-agnostic): {charging_profile}"
             )
         else:
             ocpp_logger.info(f"No charging profile (Auto power - station will negotiate)")
@@ -2387,6 +2445,7 @@ class ChargePointConsumer(AsyncWebsocketConsumer):
         requested_power_mode: Optional[str],
         actual_power_kw: Optional[float],
         ems_limit_kw: Optional[float],
+        battery_capacity_kwh: Optional[float] = None,
         energy_kwh: Optional[float] = None,
         source: str = "runtime",
     ):
@@ -2407,6 +2466,7 @@ class ChargePointConsumer(AsyncWebsocketConsumer):
                 "requested_power_display": requested_power_display,
                 "actual_power_kw": float(actual_power_kw) if actual_power_kw is not None else None,
                 "ems_limit_kw": float(ems_limit_kw) if ems_limit_kw is not None else None,
+                "battery_capacity_kwh": float(battery_capacity_kwh) if battery_capacity_kwh is not None else None,
                 "energy_kwh": float(energy_kwh) if energy_kwh is not None else None,
                 "source": source,
                 "timestamp": timezone.now().isoformat(),

@@ -37,6 +37,70 @@ def _format_energy_value(transaction):
     return f"{float(transaction.energy_consumed):.2f} kWh"
 
 
+def _format_eta_value(hours_remaining):
+    if hours_remaining is None:
+        return "--"
+
+    minutes_total = max(1, int(round(float(hours_remaining) * 60)))
+    hours, minutes = divmod(minutes_total, 60)
+
+    if hours and minutes:
+        return f"{hours}h {minutes}m"
+    if hours:
+        return f"{hours}h"
+    return f"{minutes}m"
+
+
+def _format_capacity_value(capacity_kwh):
+    if capacity_kwh is None:
+        return "--"
+    return f"{float(capacity_kwh):.1f} kWh"
+
+
+def _format_snapshot_updated_at(value):
+    if not value:
+        return "--"
+
+    dt_value = value
+    if isinstance(value, str):
+        try:
+            dt_value = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except Exception:
+            return "--"
+
+    if not isinstance(dt_value, datetime):
+        return "--"
+
+    if timezone.is_naive(dt_value):
+        dt_value = timezone.make_aware(dt_value, timezone.get_current_timezone())
+
+    return timezone.localtime(dt_value).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _build_eta_snapshot(vehicle_soc, actual_power_kw, battery_capacity_kwh):
+    if vehicle_soc is None:
+        return "ETA to 80%", "--", "Missing vehicle SoC"
+
+    target_soc = 100.0 if float(vehicle_soc) >= 80.0 else 80.0
+    eta_label = f"ETA to {int(target_soc)}%"
+
+    remaining_percent = max(0.0, float(target_soc) - float(vehicle_soc))
+    if remaining_percent <= 0.01:
+        return eta_label, "Ready", None
+
+    if battery_capacity_kwh is None or float(battery_capacity_kwh) <= 0:
+        return eta_label, "--", "Missing battery capacity"
+    if actual_power_kw is None or float(actual_power_kw) <= 0:
+        return eta_label, "--", "Charging power is 0 kW"
+
+    remaining_energy_kwh = float(battery_capacity_kwh) * (remaining_percent / 100.0)
+    if remaining_energy_kwh <= 0:
+        return eta_label, "Ready", None
+
+    hours_remaining = remaining_energy_kwh / float(actual_power_kw)
+    return eta_label, _format_eta_value(hours_remaining), None
+
+
 def _build_requested_power_label(transaction):
     if not transaction:
         return "--"
@@ -76,8 +140,15 @@ def _attach_station_live_power_state(stations_list):
         'requested_power_display': '--',
         'requested_power_mode_label': '--',
         'actual_power_display': '--',
+        'actual_power_kw': None,
+        'battery_capacity_kwh': None,
+        'battery_capacity_display': '--',
+        'eta_label': 'ETA to 80%',
+        'eta_display': '--',
+        'eta_reason': 'Missing vehicle SoC',
         'ems_limit_display': '--',
         'energy_display': '--',
+        'snapshot_updated_at_display': '--',
         'session_status_label': 'No recent session',
     }
 
@@ -94,13 +165,32 @@ def _attach_station_live_power_state(stations_list):
         if latest_meter and latest_meter.power_w is not None:
             latest_actual_power_kw = round(float(latest_meter.power_w) / 1000, 2)
 
+        latest_snapshot_updated_at = latest_meter.timestamp if latest_meter else latest_transaction.started_at
+
+        latest_battery_capacity_kwh = None
+        if latest_transaction.vehicle and latest_transaction.vehicle.battery_capacity_kwh is not None:
+            latest_battery_capacity_kwh = float(latest_transaction.vehicle.battery_capacity_kwh)
+
+        eta_label, eta_display, eta_reason = _build_eta_snapshot(
+            latest_soc,
+            latest_actual_power_kw,
+            latest_battery_capacity_kwh,
+        )
+
         latest_session_snapshot = {
             'vehicle_soc': latest_soc,
             'requested_power_display': _build_requested_power_label(latest_transaction),
             'requested_power_mode_label': latest_transaction.get_requested_power_mode_display(),
             'actual_power_display': _format_power_value(latest_actual_power_kw),
+            'actual_power_kw': latest_actual_power_kw,
+            'battery_capacity_kwh': latest_battery_capacity_kwh,
+            'battery_capacity_display': _format_capacity_value(latest_battery_capacity_kwh),
+            'eta_label': eta_label,
+            'eta_display': eta_display,
+            'eta_reason': eta_reason,
             'ems_limit_display': _format_power_value(latest_transaction.last_applied_ems_limit_kw),
             'energy_display': _format_energy_value(latest_transaction),
+            'snapshot_updated_at_display': _format_snapshot_updated_at(latest_snapshot_updated_at),
             'session_status_label': latest_transaction.get_status_display(),
         }
 
@@ -151,13 +241,29 @@ def _attach_station_live_power_state(stations_list):
 
     latest_live_snapshot = get_latest_live_snapshot(live_states)
     if latest_live_snapshot:
+        latest_battery_capacity_kwh = latest_live_snapshot.get('battery_capacity_kwh')
+        if latest_battery_capacity_kwh is None:
+            latest_battery_capacity_kwh = latest_session_snapshot.get('battery_capacity_kwh')
+
+        eta_label, eta_display, eta_reason = _build_eta_snapshot(
+            latest_live_snapshot.get('vehicle_soc'),
+            latest_live_snapshot.get('actual_power_kw'),
+            latest_battery_capacity_kwh,
+        )
         latest_session_snapshot = {
             'vehicle_soc': latest_live_snapshot.get('vehicle_soc'),
             'requested_power_display': latest_live_snapshot.get('requested_power_display') or latest_session_snapshot['requested_power_display'],
             'requested_power_mode_label': latest_live_snapshot.get('requested_power_mode_label') or latest_session_snapshot['requested_power_mode_label'],
             'actual_power_display': _format_power_value(latest_live_snapshot.get('actual_power_kw')),
+            'actual_power_kw': latest_live_snapshot.get('actual_power_kw'),
+            'battery_capacity_kwh': latest_battery_capacity_kwh,
+            'battery_capacity_display': _format_capacity_value(latest_battery_capacity_kwh),
+            'eta_label': eta_label,
+            'eta_display': eta_display,
+            'eta_reason': eta_reason,
             'ems_limit_display': _format_power_value(latest_live_snapshot.get('ems_limit_kw')),
             'energy_display': '--' if latest_live_snapshot.get('energy_kwh') is None else f"{float(latest_live_snapshot['energy_kwh']):.2f} kWh",
+            'snapshot_updated_at_display': _format_snapshot_updated_at(latest_live_snapshot.get('last_event_at')),
             'session_status_label': latest_live_snapshot.get('session_status_label') or latest_session_snapshot['session_status_label'],
         }
 
@@ -191,8 +297,15 @@ def _build_station_stats(stations_list, latest_session_snapshot, live_states):
         'requested_power_display': latest_session_snapshot['requested_power_display'],
         'requested_power_mode_label': latest_session_snapshot['requested_power_mode_label'],
         'actual_power_display': latest_session_snapshot['actual_power_display'],
+        'actual_power_kw': latest_session_snapshot['actual_power_kw'],
+        'battery_capacity_kwh': latest_session_snapshot['battery_capacity_kwh'],
+        'battery_capacity_display': latest_session_snapshot['battery_capacity_display'],
+        'eta_label': latest_session_snapshot['eta_label'],
+        'eta_display': latest_session_snapshot['eta_display'],
+        'eta_reason': latest_session_snapshot['eta_reason'],
         'ems_limit_display': latest_session_snapshot['ems_limit_display'],
         'energy_display': latest_session_snapshot['energy_display'],
+        'snapshot_updated_at_display': latest_session_snapshot['snapshot_updated_at_display'],
         'session_status_label': latest_session_snapshot['session_status_label'],
     }
 

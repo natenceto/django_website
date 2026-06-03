@@ -72,6 +72,7 @@ def _default_state(station_id: int | str) -> dict[str, Any]:
         "requested_power_mode_label": "--",
         "actual_power_kw": None,
         "ems_limit_kw": None,
+        "battery_capacity_kwh": None,
         "energy_kwh": None,
         "session_status_label": "No recent session",
         "last_event_ts": 0.0,
@@ -138,6 +139,8 @@ def update_station_live_state_from_event(data: dict[str, Any]) -> dict[str, Any]
                 current["session_status_label"] = "Preparing"
             elif connector_status == "finishing":
                 current["session_status_label"] = "Finishing"
+            elif connector_status in {"suspendedev", "suspendedevse"}:
+                current["session_status_label"] = "Suspended"
             elif connector_status == "available":
                 current["session_status_label"] = "Completed"
             elif connector_status == "offline":
@@ -153,6 +156,7 @@ def update_station_live_state_from_event(data: dict[str, Any]) -> dict[str, Any]
         current["requested_power_mode_label"] = _humanize_requested_mode(data.get("requested_power_mode"))
         current["actual_power_kw"] = data.get("actual_power_kw")
         current["ems_limit_kw"] = data.get("ems_limit_kw")
+        current["battery_capacity_kwh"] = data.get("battery_capacity_kwh")
         current["energy_kwh"] = data.get("energy_kwh")
         
         if data.get("source") == "start_transaction" or _has_active_session_signal(current):

@@ -130,6 +130,11 @@ document.addEventListener("DOMContentLoaded", function () {
 
   let statusSocket = null;
   const stationRuntime = new Map();
+  const summaryRuntime = {
+    vehicleSoc: null,
+    actualPowerKw: null,
+    batteryCapacityKwh: null,
+  };
   
   // Initialize dashboard metrics: count actual charging sessions from table
   function initializeDashboardMetrics() {
@@ -191,7 +196,7 @@ document.addEventListener("DOMContentLoaded", function () {
     }
 
     const normalizedStatus = String(connectorStatus).toLowerCase();
-    if (normalizedStatus === 'preparing' && hasActiveSessionSignal(stationId)) {
+    if ((normalizedStatus === 'preparing' || normalizedStatus === 'finishing') && hasActiveSessionSignal(stationId)) {
       return 'charging';
     }
 
@@ -254,6 +259,8 @@ document.addEventListener("DOMContentLoaded", function () {
       badgeClass = 'badge badge-success';
     } else if (normalized.includes('preparing') || normalized.includes('finishing')) {
       badgeClass = 'badge badge-info';
+    } else if (normalized.includes('suspended')) {
+      badgeClass = 'badge badge-warning';
     } else if (normalized.includes('completed') || normalized.includes('available')) {
       badgeClass = 'badge badge-secondary';
     } else if (normalized.includes('offline') || normalized.includes('inactive')) {
@@ -287,6 +294,30 @@ document.addEventListener("DOMContentLoaded", function () {
     }
   }
 
+  function syncOnlineStations() {
+    let onlineStations = 0;
+    const tableBody = document.getElementById('stations-table');
+    if (tableBody) {
+      const rows = tableBody.querySelectorAll('tr');
+      rows.forEach(row => {
+        const statusCell = row.querySelector('[id^="status-"]');
+        if (statusCell && statusCell.textContent.includes('Active')) {
+          onlineStations++;
+        }
+      });
+    }
+
+    const totalStations = Number(dashboardMetrics.totalStations) || 0;
+    if (totalStations > 0) {
+      onlineStations = Math.min(onlineStations, totalStations);
+    }
+
+    if (dashboardMetrics.onlineStations !== onlineStations) {
+      dashboardMetrics.onlineStations = onlineStations;
+      updateDashboardCard('metric-online', onlineStations);
+    }
+  }
+
   function updateDashboardCard(elementId, value, animate = true) {
     const element = document.getElementById(elementId);
     if (!element) {
@@ -312,7 +343,176 @@ document.addEventListener("DOMContentLoaded", function () {
       return '--';
     }
 
-    return `${numericSoc.toFixed(2).replace(/\.0+$/, '').replace(/(\.\d*[1-9])0+$/, '$1')} %`;
+    if (Number.isInteger(numericSoc)) {
+      return `${numericSoc.toFixed(0)} %`;
+    }
+
+    return `${numericSoc.toFixed(2)} %`;
+  }
+
+  function formatEtaDuration(hoursRemaining) {
+    if (!Number.isFinite(hoursRemaining) || hoursRemaining < 0) {
+      return '--';
+    }
+
+    const minutesTotal = Math.max(1, Math.round(hoursRemaining * 60));
+    const hours = Math.floor(minutesTotal / 60);
+    const minutes = minutesTotal % 60;
+
+    if (hours > 0 && minutes > 0) {
+      return `${hours}h ${minutes}m`;
+    }
+    if (hours > 0) {
+      return `${hours}h`;
+    }
+    return `${minutes}m`;
+  }
+
+  function updateEtaReason(reasonText) {
+    const etaReasonElement = document.getElementById('metric-eta-reason');
+    if (!etaReasonElement) {
+      return;
+    }
+
+    if (reasonText) {
+      etaReasonElement.textContent = `ETA unavailable: ${reasonText}`;
+      etaReasonElement.title = reasonText;
+      etaReasonElement.style.visibility = 'visible';
+      return;
+    }
+
+    etaReasonElement.textContent = '';
+    etaReasonElement.removeAttribute('title');
+    etaReasonElement.style.visibility = 'hidden';
+  }
+
+  function toggleEtaPanelVisibility(visible) {
+    const etaPanel = document.getElementById('metric-eta-panel');
+    if (!etaPanel) {
+      return;
+    }
+
+    if (visible) {
+      etaPanel.classList.remove('snapshot-item--hidden');
+      return;
+    }
+
+    etaPanel.classList.add('snapshot-item--hidden');
+  }
+
+  function formatPowerKw(value) {
+    if (value === null || value === undefined || Number.isNaN(Number(value))) {
+      return '--';
+    }
+    return `${Number(value).toFixed(2)} kW`;
+  }
+
+  function formatEnergyKwh(value) {
+    if (value === null || value === undefined || Number.isNaN(Number(value))) {
+      return '--';
+    }
+    return `${Number(value).toFixed(2)} kWh`;
+  }
+
+  function formatCapacityKwh(value) {
+    if (value === null || value === undefined || Number.isNaN(Number(value))) {
+      return '--';
+    }
+    return `${Number(value).toFixed(1)} kWh`;
+  }
+
+  function formatSnapshotTimestamp(value) {
+    if (!value) {
+      return '--';
+    }
+
+    const parsedDate = new Date(value);
+    if (Number.isNaN(parsedDate.getTime())) {
+      return '--';
+    }
+
+    return parsedDate.toLocaleString();
+  }
+
+  function hasMeaningfulMetric(value) {
+    if (value === null || value === undefined) {
+      return false;
+    }
+    const text = String(value).trim();
+    return text !== '' && text !== '--';
+  }
+
+  function toggleElementVisibility(elementId, visible) {
+    const element = document.getElementById(elementId);
+    if (!element) {
+      return;
+    }
+
+    if (visible) {
+      element.classList.remove('snapshot-item--hidden');
+    } else {
+      element.classList.add('snapshot-item--hidden');
+    }
+  }
+
+  function updateSnapshotOptionalVisibility() {
+    const batteryText = document.getElementById('metric-battery-capacity')?.textContent || '';
+    const emsText = document.getElementById('metric-ems-limit')?.textContent || '';
+    const energyText = document.getElementById('metric-session-energy')?.textContent || '';
+    const requestedPowerText = document.getElementById('metric-requested-power')?.textContent || '';
+    const requestedModeText = document.getElementById('metric-requested-power-mode')?.textContent || '';
+
+    toggleElementVisibility('metric-battery-capacity-item', hasMeaningfulMetric(batteryText));
+    toggleElementVisibility('metric-ems-limit-item', hasMeaningfulMetric(emsText));
+    toggleElementVisibility('metric-session-energy-item', hasMeaningfulMetric(energyText));
+
+    const showRequestedMode = hasMeaningfulMetric(requestedModeText)
+      && requestedModeText.trim().toLowerCase() !== requestedPowerText.trim().toLowerCase();
+    toggleElementVisibility('metric-requested-power-mode', showRequestedMode);
+  }
+
+  function computeEtaToTarget(targetSoc) {
+    const socValue = summaryRuntime.vehicleSoc;
+    if (!Number.isFinite(socValue)) {
+      return { value: '--', reason: 'Missing vehicle SoC' };
+    }
+
+    const remainingPercent = Math.max(0, targetSoc - socValue);
+    if (remainingPercent <= 0.01) {
+      return { value: 'Ready', reason: null };
+    }
+
+    if (!Number.isFinite(summaryRuntime.batteryCapacityKwh) || summaryRuntime.batteryCapacityKwh <= 0) {
+      return { value: '--', reason: 'Missing battery capacity' };
+    }
+
+    if (!Number.isFinite(summaryRuntime.actualPowerKw) || summaryRuntime.actualPowerKw <= 0) {
+      return { value: '--', reason: 'Charging power is 0 kW' };
+    }
+
+    const remainingEnergyKwh = summaryRuntime.batteryCapacityKwh * (remainingPercent / 100);
+    const etaHours = remainingEnergyKwh / summaryRuntime.actualPowerKw;
+    return { value: formatEtaDuration(etaHours), reason: null };
+  }
+
+  function updateEtaSummary() {
+    const eta80Element = document.getElementById('metric-eta80-value');
+    const eta100Element = document.getElementById('metric-eta100-value');
+
+    if (!eta80Element || !eta100Element) {
+      return;
+    }
+
+    const eta80 = computeEtaToTarget(80);
+    const eta100 = computeEtaToTarget(100);
+    const hasCapacity = Number.isFinite(summaryRuntime.batteryCapacityKwh) && summaryRuntime.batteryCapacityKwh > 0;
+    const hasSoc = Number.isFinite(summaryRuntime.vehicleSoc);
+    const hasPower = Number.isFinite(summaryRuntime.actualPowerKw) && summaryRuntime.actualPowerKw > 0;
+    toggleEtaPanelVisibility(hasCapacity && hasSoc && hasPower);
+
+    eta80Element.textContent = eta80.value;
+    eta100Element.textContent = eta100.value;
+    updateEtaReason(eta80.reason || eta100.reason);
   }
 
   function updateVehicleSoc(stationId, socPercentage, updateSummary = true) {
@@ -324,6 +524,8 @@ document.addEventListener("DOMContentLoaded", function () {
       }
       if (updateSummary) {
         updateDashboardCard('metric-vehicle-soc', '--', false);
+        summaryRuntime.vehicleSoc = null;
+        updateEtaSummary();
       }
       return;
     }
@@ -335,6 +537,8 @@ document.addEventListener("DOMContentLoaded", function () {
       }
       if (updateSummary) {
         updateDashboardCard('metric-vehicle-soc', '--', false);
+        summaryRuntime.vehicleSoc = null;
+        updateEtaSummary();
       }
       return;
     }
@@ -345,23 +549,40 @@ document.addEventListener("DOMContentLoaded", function () {
     }
     if (updateSummary) {
       updateDashboardCard('metric-vehicle-soc', formattedSoc, false);
+      summaryRuntime.vehicleSoc = numericSoc;
+      updateEtaSummary();
     }
   }
 
   function humanizeRequestedMode(requestedMode) {
-    if (requestedMode === 'station-default') {
+    const normalizedMode = String(requestedMode || '').toLowerCase();
+    if (normalizedMode === 'station-default') {
       return 'Station Default';
     }
-    return String(requestedMode || '--').replace(/-/g, ' ');
+    if (normalizedMode === 'auto') {
+      return 'Auto';
+    }
+    if (normalizedMode === 'manual') {
+      return 'Manual';
+    }
+
+    const rendered = String(requestedMode || '--').replace(/-/g, ' ');
+    return rendered.charAt(0).toUpperCase() + rendered.slice(1);
   }
 
   function updatePowerState(stationId, powerState = {}, updateSummary = true) {
     const runtime = getStationRuntime(stationId);
 
+    // New session has started; avoid showing stale SoC from previous session
+    // until fresh telemetry arrives from MeterValues/DataTransfer.
+    if (powerState.source === 'start_transaction') {
+      updateVehicleSoc(stationId, null, updateSummary);
+    }
+
     const requestedDisplay = powerState.requested_power_display || '--';
     const requestedMode = powerState.requested_power_mode || '--';
     const actualPowerKw = powerState.actual_power_kw;
-    const emsLimitKw = powerState.ems_limit_kw;
+    const batteryCapacityKwh = powerState.battery_capacity_kwh;
     const energyKwh = powerState.energy_kwh;
 
     runtime.actualPowerKw = parseNumericValue(actualPowerKw);
@@ -375,25 +596,25 @@ document.addEventListener("DOMContentLoaded", function () {
       }
       updateDashboardCard(
         'metric-actual-power',
-        actualPowerKw === null || actualPowerKw === undefined || Number.isNaN(Number(actualPowerKw))
-          ? '--'
-          : `${Number(actualPowerKw).toFixed(2)} kW`,
+        formatPowerKw(actualPowerKw),
         false,
       );
-      updateDashboardCard(
-        'metric-ems-limit',
-        emsLimitKw === null || emsLimitKw === undefined || Number.isNaN(Number(emsLimitKw))
-          ? '--'
-          : `${Number(emsLimitKw).toFixed(2)} kW`,
-        false,
-      );
-      updateDashboardCard(
-        'metric-energy-session',
-        energyKwh === null || energyKwh === undefined || Number.isNaN(Number(energyKwh))
-          ? '--'
-          : `${Number(energyKwh).toFixed(2)} kWh`,
-        false,
-      );
+
+      updateDashboardCard('metric-ems-limit', formatPowerKw(powerState.ems_limit_kw), false);
+      updateDashboardCard('metric-session-energy', formatEnergyKwh(energyKwh), false);
+      updateDashboardCard('metric-battery-capacity', formatCapacityKwh(batteryCapacityKwh), false);
+
+      summaryRuntime.actualPowerKw = parseNumericValue(actualPowerKw);
+      if (batteryCapacityKwh !== null && batteryCapacityKwh !== undefined && Number.isFinite(Number(batteryCapacityKwh))) {
+        summaryRuntime.batteryCapacityKwh = Number(batteryCapacityKwh);
+        const etaPanel = document.getElementById('metric-eta-panel');
+        if (etaPanel) {
+          etaPanel.dataset.batteryCapacityKwh = String(summaryRuntime.batteryCapacityKwh);
+        }
+      }
+      updateDashboardCard('metric-snapshot-updated', formatSnapshotTimestamp(powerState.timestamp), false);
+      updateSnapshotOptionalVisibility();
+      updateEtaSummary();
     }
 
     if (hasActiveSessionSignal(stationId)) {
@@ -457,6 +678,12 @@ document.addEventListener("DOMContentLoaded", function () {
       statusText = 'Finishing';
       if (updateSummary) {
         updateSessionStatusBadge('Finishing');
+      }
+    } else if (displayStatus === 'suspendedev' || displayStatus === 'suspendedevse') {
+      statusClass = 'badge-warning';
+      statusText = 'Suspended';
+      if (updateSummary) {
+        updateSessionStatusBadge('Suspended');
       }
     } else if (displayStatus === 'faulted') {
       statusClass = 'badge-danger';
@@ -539,21 +766,12 @@ document.addEventListener("DOMContentLoaded", function () {
 
           const statusCell = document.getElementById(`status-${stationId}`);
           if (statusCell) {
-            const wasActive = statusCell.innerHTML.includes('Active');
-
             if (stationStatus === 'active') {
               statusCell.innerHTML = '<span class="badge badge-success">Active</span>';
-              if (!wasActive) {
-                dashboardMetrics.onlineStations++;
-                updateDashboardCard('metric-online', dashboardMetrics.onlineStations);
-              }
             } else if (stationStatus === 'inactive') {
               statusCell.innerHTML = '<span class="badge badge-secondary">Inactive</span>';
-              if (wasActive) {
-                dashboardMetrics.onlineStations = Math.max(0, dashboardMetrics.onlineStations - 1);
-                updateDashboardCard('metric-online', dashboardMetrics.onlineStations);
-              }
             }
+            syncOnlineStations();
           }
 
           const connectorCell = document.getElementById(`connector-status-${stationId}`);
@@ -581,24 +799,15 @@ document.addEventListener("DOMContentLoaded", function () {
         if (messageType === 'station_status_update' || messageType === 'status_update' || messageType === 'station_status') {
           const statusCell = document.getElementById(`status-${data.station_id}`);
           if (statusCell) {
-            const wasActive = statusCell.innerHTML.includes('Active');
             let statusClass = 'badge-secondary';
             let statusText = data.status;
 
             if (data.status === 'active') {
               statusClass = 'badge-success';
               statusText = 'Active';
-              if (!wasActive) {
-                dashboardMetrics.onlineStations++;
-                updateDashboardCard('metric-online', dashboardMetrics.onlineStations);
-              }
             } else if (data.status === 'inactive') {
               statusClass = 'badge-secondary';
               statusText = 'Inactive';
-              if (wasActive) {
-                dashboardMetrics.onlineStations = Math.max(0, dashboardMetrics.onlineStations - 1);
-                updateDashboardCard('metric-online', dashboardMetrics.onlineStations);
-              }
               const connectorCell = document.getElementById(`connector-status-${data.station_id}`);
               if (connectorCell) {
                 const wasCharging = connectorCell.innerHTML.includes('Charging');
@@ -613,6 +822,7 @@ document.addEventListener("DOMContentLoaded", function () {
             }
 
             statusCell.innerHTML = `<span class="badge ${statusClass}">${statusText}</span>`;
+            syncOnlineStations();
           }
         }
 
@@ -638,5 +848,41 @@ document.addEventListener("DOMContentLoaded", function () {
   }
 
   connectStatusWebSocket();
+
+  // Normalize initial server-rendered value with the same runtime formatter.
+  const initialSoc = document.getElementById('metric-vehicle-soc');
+  if (initialSoc) {
+    const raw = Number((initialSoc.textContent || '').replace('%', '').trim());
+    if (Number.isFinite(raw)) {
+      initialSoc.textContent = formatSocValue(raw);
+      summaryRuntime.vehicleSoc = raw;
+    }
+  }
+
+  const initialActualPower = document.getElementById('metric-actual-power');
+  if (initialActualPower) {
+    const rawActualPower = Number((initialActualPower.textContent || '').replace('kW', '').trim());
+    if (Number.isFinite(rawActualPower)) {
+      summaryRuntime.actualPowerKw = rawActualPower;
+    }
+  }
+
+  const etaPanel = document.getElementById('metric-eta-panel');
+  if (etaPanel) {
+    const capacityRaw = Number(etaPanel.dataset.batteryCapacityKwh);
+    if (Number.isFinite(capacityRaw)) {
+      summaryRuntime.batteryCapacityKwh = capacityRaw;
+    }
+  }
+
+  const etaReasonElement = document.getElementById('metric-eta-reason');
+  if (etaReasonElement && !etaReasonElement.textContent.trim()) {
+    etaReasonElement.style.visibility = 'hidden';
+  }
+
+  updateEtaSummary();
+  updateSnapshotOptionalVisibility();
+  syncOnlineStations();
+
   updateActionButtons();
 });

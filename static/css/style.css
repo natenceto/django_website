@@ -37,5 +37,5 @@ body.sidebar-toggled .nav-about-contacts {
   align-items: flex-start;
   gap: 3px;
   padding: 0;
-  margin-bottom: 0.5rem; /* ➜ разстояние преди бутона за свиване */
+  margin-bottom: 0.5rem; /* spacing before the collapse button */
 }
