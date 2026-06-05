@@ -50,6 +50,15 @@ STRATEGY_LABELS_EN = {
 }
 
 
+def _to_float_or_zero(value):
+    try:
+        if value is None:
+            return 0.0
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def _integrate_energy_kwh(readings):
     total_energy = 0.0
     if len(readings) <= 1:
@@ -58,8 +67,12 @@ def _integrate_energy_kwh(readings):
     for index in range(1, len(readings)):
         previous_reading = readings[index - 1]
         current_reading = readings[index]
-        previous_power = previous_reading.station_data.get('generationPower', 0) if previous_reading.station_data else 0
-        current_power = current_reading.station_data.get('generationPower', 0) if current_reading.station_data else 0
+        previous_power = _to_float_or_zero(
+            previous_reading.station_data.get('generationPower', 0) if previous_reading.station_data else 0
+        )
+        current_power = _to_float_or_zero(
+            current_reading.station_data.get('generationPower', 0) if current_reading.station_data else 0
+        )
         average_power = (previous_power + current_power) / 2
         time_diff_hours = (current_reading.timestamp - previous_reading.timestamp).total_seconds() / 3600
         total_energy += (average_power / 1000) * time_diff_hours
@@ -435,10 +448,11 @@ def dashboard_data(request):
             'daily_stats': {
                 'total_energy_kwh': round(total_energy_today, 2),
                 'peak_generation_watts': max(
-                    (r.station_data.get('generationPower', 0) if r.station_data else 0) for r in today_readings
+                    _to_float_or_zero(r.station_data.get('generationPower', 0) if r.station_data else 0)
+                    for r in today_readings
                 ) if today_readings else 0,
                 'average_battery_soc': sum(
-                    r.battery_soc or 0 for r in recent_readings
+                    _to_float_or_zero(r.battery_soc) for r in recent_readings
                 ) / len(recent_readings) if recent_readings else 0
             },
             'recent_readings': [
