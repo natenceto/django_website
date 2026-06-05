@@ -81,12 +81,6 @@ def execute_station_action(action: str, station_ids: list, power: str = None) ->
                         "ems_limit_kw": None,
                         "energy_kwh": 0.0,
                     })
-                    send_to_ui({
-                        "type": "connector_status_update",
-                        "station_id": station_id,
-                        "status": "active",
-                        "connector_status": "preparing",
-                    })
                     results.append(f"Station {station_id}: RemoteStartTransaction queued for station dispatch")
                     success_count += 1
                 except CommandDispatchError as exc:
@@ -106,6 +100,7 @@ def execute_station_action(action: str, station_ids: list, power: str = None) ->
                             StopChargingCommand(
                                 station_id=station_id,
                                 transaction_id=ocpp_transaction_id,
+                                connector_id=active_transaction.connector.connector_id if active_transaction.connector else 1,
                             )
                         )
                         send_to_ui({
@@ -120,8 +115,31 @@ def execute_station_action(action: str, station_ids: list, power: str = None) ->
                         results.append(f"Station {station_id}: Failed to stop charging - {str(exc)}")
                         error_count += 1
                 else:
-                    results.append(f"Station {station_id}: No active charging session")
-                    error_count += 1
+                    connector = Connector.objects.filter(station_id=station_id, connector_id=1).first()
+                    connector_status = (connector.status if connector else "") or ""
+                    preparing_like_statuses = {"preparing", "suspendedEV", "suspendedEVSE", "finishing"}
+
+                    if connector_status in preparing_like_statuses:
+                        try:
+                            # Some chargers keep "Preparing" before StartTransaction is created.
+                            # Send best-effort stop with transaction_id=0 to abort pending handshake.
+                            command_bus.dispatch(
+                                StopChargingCommand(
+                                    station_id=station_id,
+                                    transaction_id=0,
+                                    connector_id=connector.connector_id if connector else 1,
+                                )
+                            )
+                            results.append(
+                                f"Station {station_id}: Abort requested for connector state '{connector_status}' (pending session without active transaction)."
+                            )
+                            success_count += 1
+                        except CommandDispatchError as exc:
+                            results.append(f"Station {station_id}: Failed to abort pending session - {str(exc)}")
+                            error_count += 1
+                    else:
+                        results.append(f"Station {station_id}: No active charging session")
+                        error_count += 1
             
             elif action == "apply_power":
                 power_val = power or "11"

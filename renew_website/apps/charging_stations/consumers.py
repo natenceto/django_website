@@ -12,6 +12,7 @@ from typing import Dict, Any, Union, Optional, Tuple
 from django.conf import settings
 from django.utils import timezone
 from django.db import transaction as db_transaction
+from django.db.utils import OperationalError, InterfaceError
 from channels.generic.websocket import AsyncWebsocketConsumer
 from channels.db import database_sync_to_async
 from redis.exceptions import ConnectionError as RedisConnectionError
@@ -1053,15 +1054,6 @@ class ChargePoint(OCPPChargePoint):
                     asyncio.create_task(self._update_station_status_async("active", "status0"))
                 elif s in {"faulted", "unavailable"}:
                     asyncio.create_task(self._update_station_status_async("inactive", "status0"))
-                    
-                # Update last status on Station model
-                @database_sync_to_async
-                def update_station_last_status():
-                    st = Station.objects.filter(id=station_id).first()
-                    if st:
-                        st.last_status = s
-                        st.save(update_fields=['last_status'])
-                asyncio.create_task(update_station_last_status())
             except Exception:
                 ocpp_logger.exception("Failed scheduling station status update for connectorId=0")
             response = call_result.StatusNotificationPayload()
@@ -1785,7 +1777,6 @@ class ChargePoint(OCPPChargePoint):
                     # transaction_id here is OCPP transactionId
                     tx = (
                         Transaction.objects
-                        .select_related("connector", "vehicle")
                         .select_for_update()
                         .filter(transaction_id=int(transaction_id))
                         .first()
@@ -1793,7 +1784,6 @@ class ChargePoint(OCPPChargePoint):
                     if not tx:
                         tx = (
                             Transaction.objects
-                            .select_related("connector", "vehicle")
                             .select_for_update()
                             .filter(id=int(transaction_id))
                             .first()
@@ -2181,6 +2171,12 @@ class ChargePointConsumer(AsyncWebsocketConsumer):
 
         try:
             await self.update_station_status(self.station_id, "inactive", "disconnect")
+        except (OperationalError, InterfaceError) as exc:
+            ocpp_logger.warning(
+                "Skipping station status update on disconnect (DB unavailable during shutdown): station=%s error=%s",
+                getattr(self, "station_id", None),
+                exc,
+            )
         except Exception:
             ocpp_logger.exception("Error updating station status on disconnect")
         
@@ -2188,6 +2184,12 @@ class ChargePointConsumer(AsyncWebsocketConsumer):
             await database_sync_to_async(
                 lambda: Connector.objects.filter(station_id=self.station_id).update(status="offline")
             )()
+        except (OperationalError, InterfaceError) as exc:
+            ocpp_logger.warning(
+                "Skipping connector offline update on disconnect (DB unavailable during shutdown): station=%s error=%s",
+                getattr(self, "station_id", None),
+                exc,
+            )
         except Exception:
             ocpp_logger.exception("Error updating connector status on disconnect")
         
@@ -2228,7 +2230,7 @@ class ChargePointConsumer(AsyncWebsocketConsumer):
     async def remote_start_transaction(self, event):
         """Handle remote start transaction command from channel layer."""
         try:
-            connector_id = event.get("connector_id")
+            connector_id = int(event.get("connector_id") or 1)
             id_tag = event.get("id_tag")
             requested_power = event.get("requested_power")
             session_context = dict(event.get("session_context") or {})
@@ -2267,6 +2269,14 @@ class ChargePointConsumer(AsyncWebsocketConsumer):
                     try:
                         res = t.result()
                         ocpp_logger.info(f"RemoteStartTransaction response for station={self.station_id}: {res}")
+                        status_value = str(getattr(res, "status", "")).strip().lower()
+                        if status_value == "accepted":
+                            asyncio.create_task(
+                                self._post_remote_start_accepted(
+                                    connector_id=connector_id,
+                                    id_tag=str(id_tag or ""),
+                                )
+                            )
                     except Exception as e:
                         ocpp_logger.warning(f"RemoteStartTransaction task error: {e}")
                 task.add_done_callback(on_start_done)
@@ -2277,6 +2287,54 @@ class ChargePointConsumer(AsyncWebsocketConsumer):
             
         except Exception as e:
             ocpp_logger.exception(f"RemoteStartTransaction handling failed: {e}")
+
+    async def _post_remote_start_accepted(self, connector_id: int, id_tag: str) -> None:
+        try:
+            changed = await self._set_connector_preparing_if_idle(connector_id, id_tag)
+            if changed:
+                await self.broadcast_connector_status(self.station_id, "preparing", int(connector_id))
+                await self.update_station_status(self.station_id, "active", "remote-start-accepted")
+                ocpp_logger.info(
+                    "Marked connector as preparing after accepted remote start: station=%s connector=%s",
+                    self.station_id,
+                    connector_id,
+                )
+
+            try:
+                await self.cp.call_trigger_message("StatusNotification", connector_id=int(connector_id))
+            except Exception as exc:
+                ocpp_logger.warning(
+                    "TriggerMessage(StatusNotification) failed after remote start accepted: station=%s connector=%s error=%s",
+                    self.station_id,
+                    connector_id,
+                    exc,
+                )
+        except Exception:
+            ocpp_logger.exception(
+                "Failed post-accepted remote start recovery: station=%s connector=%s",
+                self.station_id,
+                connector_id,
+            )
+
+    @database_sync_to_async
+    def _set_connector_preparing_if_idle(self, connector_id: int, id_tag: str) -> bool:
+        conn, _ = Connector.objects.get_or_create(
+            station_id=self.station_id,
+            connector_id=int(connector_id),
+            defaults={"status": "available"},
+        )
+
+        has_active_tx = Transaction.objects.filter(connector=conn, status="active").exists()
+        if has_active_tx:
+            return False
+
+        current = str(conn.status or "").strip().lower()
+        if current not in {"available", "preparing", "suspendedev", "suspendedevse", "finishing"}:
+            return False
+
+        conn.status = "preparing"
+        conn.save(update_fields=["status"])
+        return True
 
     async def receive(self, text_data=None, bytes_data=None):
         if not text_data or not hasattr(self, "ws_wrapper"):
@@ -2303,6 +2361,7 @@ class ChargePointConsumer(AsyncWebsocketConsumer):
         """Handle remote stop transaction command from channel layer."""
         try:
             transaction_id = event.get("transaction_id")
+            connector_id = int(event.get("connector_id") or 1)
             
             ocpp_logger.info(f"RemoteStopTransaction command received: station={self.station_id}, transaction_id={transaction_id}")
             
@@ -2318,6 +2377,10 @@ class ChargePointConsumer(AsyncWebsocketConsumer):
                     try:
                         res = t.result()
                         ocpp_logger.info(f"RemoteStopTransaction response for station={self.station_id}: {res}")
+                        status_value = str(getattr(res, "status", "")).strip().lower()
+                        is_pending_stop = str(transaction_id).strip() in {"0", "0.0"}
+                        if is_pending_stop and status_value == "rejected":
+                            asyncio.create_task(self._recover_pending_preparing_after_rejected_stop(connector_id))
                     except Exception as e:
                         ocpp_logger.warning(f"RemoteStopTransaction task error: {e}")
                 task.add_done_callback(on_stop_done)
@@ -2328,6 +2391,45 @@ class ChargePointConsumer(AsyncWebsocketConsumer):
             
         except Exception as e:
             ocpp_logger.exception(f"RemoteStopTransaction failed: {e}")
+
+    async def _recover_pending_preparing_after_rejected_stop(self, connector_id: int) -> None:
+        @database_sync_to_async
+        def recover_status() -> bool:
+            conn = Connector.objects.filter(station_id=self.station_id, connector_id=int(connector_id)).first()
+            if not conn:
+                return False
+
+            has_active_tx = Transaction.objects.filter(connector=conn, status="active").exists()
+            if has_active_tx:
+                return False
+
+            preparing_like = {"preparing", "suspendedev", "suspendedevse", "finishing"}
+            current_status = str(conn.status or "").strip().lower()
+            if current_status not in preparing_like:
+                return False
+
+            conn.status = "available"
+            conn.save(update_fields=["status"])
+            return True
+
+        try:
+            changed = await recover_status()
+            if not changed:
+                return
+
+            await self.broadcast_connector_status(self.station_id, "available", int(connector_id))
+            await self.update_station_status(self.station_id, "active", "pending-stop-rejected-recovered")
+            ocpp_logger.warning(
+                "Recovered connector to available after pending stop rejected: station=%s connector=%s",
+                self.station_id,
+                connector_id,
+            )
+        except Exception:
+            ocpp_logger.exception(
+                "Failed recovering preparing connector after pending stop rejection: station=%s connector=%s",
+                self.station_id,
+                connector_id,
+            )
 
     async def remote_stop_transaction_event(self, event):
         """Handle remote stop transaction command from channel layer (Channels naming convention)."""
@@ -2498,6 +2600,15 @@ class ChargePointConsumer(AsyncWebsocketConsumer):
 
             await self.broadcast_station_status(int(station_id), status=status, reason=reason)
             return True
+        except (OperationalError, InterfaceError) as exc:
+            ocpp_logger.warning(
+                "update_station_status skipped (DB unavailable): station=%s status=%s reason=%s error=%s",
+                station_id,
+                status,
+                reason,
+                exc,
+            )
+            return False
         except Exception:
             ocpp_logger.exception("update_station_status failed")
             return False

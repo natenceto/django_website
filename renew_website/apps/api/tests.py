@@ -1,5 +1,6 @@
 from django.contrib.auth import get_user_model
 from django.test import TestCase
+from renew_website.apps.api.energy.views import _normalize_energy_source
 
 
 User = get_user_model()
@@ -48,3 +49,17 @@ class ApiAccessPolicyTests(TestCase):
         response = self.client.get('/api/energy/')
 
         self.assertEqual(response.status_code, 200)
+
+
+class EnergySourceNormalizationTests(TestCase):
+    def test_modbus_alias_is_normalized_to_local(self):
+        result = _normalize_energy_source('modbus', {'source': 'cloud'})
+        self.assertEqual(result, 'local')
+
+    def test_mixed_source_is_preserved(self):
+        result = _normalize_energy_source('mixed', {'source': 'local'})
+        self.assertEqual(result, 'mixed')
+
+    def test_unknown_uses_active_inverter_source(self):
+        result = _normalize_energy_source('unknown', {'source': 'local'})
+        self.assertEqual(result, 'local')

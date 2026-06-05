@@ -79,6 +79,21 @@ def _integrate_energy_kwh(readings):
 
     return round(total_energy, 2)
 
+
+def _normalize_energy_source(raw_source: str, active_inverter: dict | None = None) -> str:
+    source = str(raw_source or "").strip().lower()
+    if source in {"local", "cloud", "database", "mixed"}:
+        return source
+    if source in {"modbus", "local_modbus", "lan"}:
+        return "local"
+
+    # If manager payload does not carry source consistently, prefer active inverter context.
+    active_source = str((active_inverter or {}).get("source") or "").strip().lower()
+    if active_source in {"local", "cloud"}:
+        return active_source
+
+    return "unknown"
+
 # Global cache for websocket performance
 _ws_performance_stats = {}
 
@@ -332,7 +347,10 @@ def dashboard_data(request):
             monthly_energy = normalized_data.get('monthly_energy', 0.0)
             total_energy = normalized_data.get('total_energy', 0.0)
             installed_capacity = float(normalized_data.get('capacity') or installed_capacity)
-            data_source = normalized_data.get('source', 'unknown')
+            data_source = _normalize_energy_source(
+                normalized_data.get('source', 'unknown'),
+                active_inverter,
+            )
             
             logger.debug(
                 f"Energy stats from Manager ({data_source}): Daily={daily_energy}, Monthly={monthly_energy}, Total={total_energy}"

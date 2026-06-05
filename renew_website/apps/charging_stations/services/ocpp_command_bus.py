@@ -27,6 +27,7 @@ class StartChargingCommand:
 class StopChargingCommand:
     station_id: int
     transaction_id: int | str
+    connector_id: int | None = None
 
 
 @dataclass(slots=True)
@@ -70,6 +71,7 @@ class CommandBus:
                 'command_id': str(command_id),
                 'station_id': station_id,
                 'transaction_id': command.transaction_id,
+                'connector_id': command.connector_id,
             }
         else:
             raise CommandDispatchError(f'Unsupported command type: {type(command).__name__}')

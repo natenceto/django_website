@@ -1,4 +1,5 @@
 import os
+import sys
 
 # Set Django settings module FIRST, before any Django imports
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'renew_website.settings')
@@ -24,9 +25,30 @@ def reset_station_statuses():
         print(f"Warning: Could not reset station statuses on startup: {e}")
 
 # Run in a separate thread to avoid "SynchronousOnlyOperation" when running under ASGI
-startup_thread = threading.Thread(target=reset_station_statuses)
-startup_thread.start()
-startup_thread.join()
+def _should_reset_station_statuses() -> bool:
+    if os.environ.get('DISABLE_STARTUP_STATUS_RESET', '').strip().lower() in {'1', 'true', 'yes'}:
+        return False
+
+    management_commands = {
+        'test',
+        'check',
+        'shell',
+        'makemigrations',
+        'migrate',
+        'collectstatic',
+        'createsuperuser',
+    }
+    argv_commands = set(arg.strip().lower() for arg in sys.argv[1:])
+    if argv_commands.intersection(management_commands):
+        return False
+
+    return True
+
+
+if _should_reset_station_statuses():
+    startup_thread = threading.Thread(target=reset_station_statuses)
+    startup_thread.start()
+    startup_thread.join()
 
 # Now it's safe to import Django app modules (after Django is initialized)
 from channels.routing import ProtocolTypeRouter, URLRouter
