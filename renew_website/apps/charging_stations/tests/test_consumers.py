@@ -276,3 +276,30 @@ class StationLiveStateTests(SimpleTestCase):
         self.assertEqual(state["connector_status"], "charging")
         self.assertEqual(state["session_status_label"], "Active")
         self.assertEqual(get_station_live_state(19)["connector_status"], "charging")
+
+    def test_stop_transaction_power_update_marks_session_completed(self):
+        update_station_live_state_from_event(
+            {
+                "type": "station_power_update",
+                "station_id": 20,
+                "actual_power_kw": None,
+                "energy_kwh": 0.0,
+                "source": "start_transaction",
+                "timestamp": "2026-05-15T10:03:00Z",
+            }
+        )
+
+        state = update_station_live_state_from_event(
+            {
+                "type": "station_power_update",
+                "station_id": 20,
+                "actual_power_kw": 0.0,
+                "energy_kwh": 19.29,
+                "source": "stop_transaction",
+                "timestamp": "2026-05-15T10:15:00Z",
+            }
+        )
+
+        self.assertEqual(state["connector_status"], "available")
+        self.assertEqual(state["session_status_label"], "Completed")
+        self.assertEqual(state["status"], "active")

@@ -42,11 +42,9 @@ def _as_float(value: Any) -> float | None:
 
 def _has_active_session_signal(state: dict[str, Any]) -> bool:
     actual_power_kw = _as_float(state.get("actual_power_kw"))
-    energy_kwh = _as_float(state.get("energy_kwh"))
 
     return (
         (actual_power_kw is not None and actual_power_kw > 0)
-        or (energy_kwh is not None and energy_kwh > 0)
         or str(state.get("connector_status") or "").strip().lower() == "charging"
         or str(state.get("session_status_label") or "").strip().lower() == "active"
     )
@@ -150,6 +148,7 @@ def update_station_live_state_from_event(data: dict[str, Any]) -> dict[str, Any]
         current["vehicle_soc"] = float(data["soc_percentage"])
 
     if event_type == "station_power_update":
+        source = str(data.get("source") or "").strip().lower()
         current["requested_power_kw"] = data.get("requested_power_kw")
         current["requested_power_mode"] = data.get("requested_power_mode")
         current["requested_power_display"] = data.get("requested_power_display") or current.get("requested_power_display") or "--"
@@ -158,8 +157,14 @@ def update_station_live_state_from_event(data: dict[str, Any]) -> dict[str, Any]
         current["ems_limit_kw"] = data.get("ems_limit_kw")
         current["battery_capacity_kwh"] = data.get("battery_capacity_kwh")
         current["energy_kwh"] = data.get("energy_kwh")
-        
-        if data.get("source") == "start_transaction" or _has_active_session_signal(current):
+
+        if source == "stop_transaction":
+            current["status"] = "active"
+            current["online"] = True
+            if current.get("connector_status") != "offline":
+                current["connector_status"] = "available"
+            current["session_status_label"] = "Completed"
+        elif source == "start_transaction" or _has_active_session_signal(current):
             _mark_active_session(current)
         
         # Independent check: if power data arrives and connector is "preparing"/"finishing", upgrade to "charging"
