@@ -46,3 +46,4 @@ dmypy.json
 
 # pytest
 .pytest_cache/celerybeat-schedule
+celerybeat-schedule
