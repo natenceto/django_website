@@ -1,6 +1,7 @@
 # RENEW
 
-[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE) [Project site](https://www.iict.bas.bg/projects/2025/RENEW/index.html)  
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE) 
+[Project site](https://www.iict.bas.bg/projects/2025/RENEW/index.html)  
 **Funded by:** European Union — Project number: **BG-RRP-2.017-0031-C01**
 
 RENEW is a Django-based EV charging platform with OCPP 1.6J communication, PostgreSQL persistence, Redis-backed realtime delivery, Celery background tasks, charging analytics, and Deye energy integrations.
@@ -224,10 +225,17 @@ Typical manual sequence:
 ```bash
 ./setup.sh local
 source .venv/bin/activate
+# Option A: run against local Postgres/Redis (update .env accordingly)
 python manage.py migrate
 python manage.py createsuperuser
 python manage.py check
 uvicorn renew_website.asgi:application --host 0.0.0.0 --port 8000
+
+# Option B: quick local run for screenshots without Postgres/Redis
+# (uses `renew_website.settings_local`, sqlite + in-memory channels)
+python manage.py migrate --settings=renew_website.settings_local
+python manage.py createsuperuser --settings=renew_website.settings_local
+python manage.py runserver 0.0.0.0:8000 --settings=renew_website.settings_local
 ```
 
 For manual local runs you still need PostgreSQL and Redis running separately.
