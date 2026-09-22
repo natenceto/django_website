@@ -9,13 +9,9 @@ RENEW is a Django-based EV charging platform with OCPP 1.6J communication, Postg
 
 ## Screenshots
 
-Preview screenshots of the application (click to view full size):
+Preview screenshots of the application (slideshow):
 
-![Home screenshot](docs/screenshots/1_home.png)
-![About screenshot](docs/screenshots/2_about.png)
-![Contacts screenshot](docs/screenshots/3_contacts.png)
-![Charging station screenshot](docs/screenshots/4_CS.png)
-![Data/Flows screenshot](docs/screenshots/5_DF.png)
+![Slideshow](docs/screenshots/slideshow.gif)
 
 The project title is: Research and development of a smart energy system for eco-charging of electric vehicles, using renewable energy sources.
 
