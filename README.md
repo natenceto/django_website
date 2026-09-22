@@ -25,7 +25,7 @@ The project is intentionally restricted to these access hosts only:
 - `127.0.0.1`
 - `192.168.88.247`
 
-Do not add other public hosts unless you intentionally broaden the deployment model.
+Do not add other public hosts unless you intentionally broaden the deployment model. For public or institutional deployments, configure `ALLOWED_HOSTS`, `CSRF_TRUSTED_ORIGINS` and `CORS_ALLOWED_ORIGINS` via environment variables, and avoid committing network-specific IPs to the repository.
 
 ## Stack and Versions
 
@@ -166,11 +166,8 @@ docker compose down
 
 The development stack behavior is:
 
-- Django app on `http://localhost:8000`
-- Django app also reachable on `http://192.168.88.247:8000`
-- PostgreSQL published only to `127.0.0.1:5432`
-- Redis published only to `127.0.0.1:6379`
-- Flower published only to `127.0.0.1:5555`
+- Django app on `http://localhost:8000` (may also be reachable on a local network address if you configure `ALLOWED_HOSTS` accordingly)
+- PostgreSQL and Redis are typically published on localhost for local development; bind addresses and ports are configurable via the Compose file or environment variables.
 
 ## Production-Style Docker Workflow
 
@@ -185,9 +182,9 @@ docker compose -f docker-compose.prod.yml down
 Current production-style behavior:
 
 - Gunicorn runs the ASGI app with Uvicorn workers.
-- Nginx listens only on `localhost:80` and `192.168.88.247:80`.
+- Nginx listens on the configured production addresses (see `docker-compose.prod.yml` and your reverse proxy configuration).
 - Nginx rejects host headers outside the allowed host set.
-- WebSocket traffic is rate-limited in the reverse proxy.
+- WebSocket traffic may be rate-limited in the reverse proxy.
 - API docs are disabled by default.
 
 TLS note:
@@ -250,7 +247,8 @@ For manual local runs you still need PostgreSQL and Redis running separately.
 Charging station connections:
 
 - `ws://localhost:8000/ws/charging_stations/{station_id}/`
-- `ws://192.168.88.247:8000/ws/charging_stations/{station_id}/`
+
+For deployments on a local network or public host, replace `localhost` with the appropriate hostname or origin configured in your environment variables; do not embed institution-specific IPs in the repository documentation.
 
 Browser status socket:
 
@@ -293,14 +291,14 @@ pytest renew_website/apps/api/tests.py -q
 
 WebSocket issues:
 
-- Ensure Redis is running.
+- Ensure Redis is running (if you use Channels with Redis).
 - Ensure the browser user is authenticated for `/ws/stations/status/`.
-- Ensure the host is `localhost` or `192.168.88.247`.
+- Ensure your `ALLOWED_HOSTS` and origin settings match the hostname you use to access the site.
 
 Database issues:
 
-- Verify PostgreSQL credentials in `.env`.
-- Verify the database container is healthy.
+- Verify database credentials and host in your local `.env` (do not commit production credentials).
+- Verify the database container or service is healthy.
 - Run `python manage.py migrate`.
 
 Celery issues:
