@@ -1,6 +1,19 @@
 # RENEW
 
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE) [Project site](https://www.iict.bas.bg/projects/2025/RENEW/index.html)  
+**Funded by:** European Union — Project number: **BG-RRP-2.017-0031-C01**
+
 RENEW is a Django-based EV charging platform with OCPP 1.6J communication, PostgreSQL persistence, Redis-backed realtime delivery, Celery background tasks, charging analytics, and Deye energy integrations.
+
+## Screenshots
+
+Preview screenshots of the application (click to view full size):
+
+![Home screenshot](docs/screenshots/1_home.png)
+![About screenshot](docs/screenshots/2_about.png)
+![Contacts screenshot](docs/screenshots/3_contacts.png)
+![Charging station screenshot](docs/screenshots/4_CS.png)
+![Data/Flows screenshot](docs/screenshots/5_DF.png)
 
 The project title is: Research and development of a smart energy system for eco-charging of electric vehicles, using renewable energy sources.
 
@@ -117,47 +130,21 @@ If you want the virtual environment active in your current shell after the scrip
 source .venv/bin/activate
 ```
 
+
 ## Environment Configuration
 
-The project reads configuration from `.env`. Start from `.env.example` and review at least these keys:
-
-```env
-SECRET_KEY=change-this-secret-key-in-production-keep-it-secure
-DEBUG=True
-ENABLE_API_DOCS=True
-ALLOWED_HOSTS=localhost,127.0.0.1,192.168.88.247
-CSRF_TRUSTED_ORIGINS=http://localhost,http://127.0.0.1,http://192.168.88.247,http://localhost:8000,http://127.0.0.1:8000,http://192.168.88.247:8000
-CORS_ALLOWED_ORIGINS=http://localhost,http://127.0.0.1,http://192.168.88.247,http://localhost:8000,http://127.0.0.1:8000,http://192.168.88.247:8000
-POSTGRES_DB=renew_db
-POSTGRES_USER=renew_user
-POSTGRES_PASSWORD=your-secure-password
-POSTGRES_HOST=localhost
-POSTGRES_PORT=5432
-REDIS_URL=redis://localhost:6379/0
-USE_REDIS_CHANNEL_LAYER=True
-POSTGRES_CONN_MAX_AGE=60
-SECURE_SSL_REDIRECT=False
-DJANGO_LOG_LEVEL=INFO
-DEYE_APP_ID=your-deye-app-id
-DEYE_APP_SECRET=your-deye-app-secret
-DEYE_EMAIL=your-deye-account-email
-DEYE_PASSWORD=your-deye-account-password
-DEYE_DATACENTER=eu
-DEYE_COMPANY_ID=0
-OCPP_SERVER_HOST=192.168.88.243
-OCPP_SERVER_PORT=8000
-```
+The project reads configuration from `.env`. Do NOT commit secrets (API keys, passwords, or private tokens) into the repository. Use the provided `.env.example` as a starting point and create a local `.env` file with production secrets kept out of version control.
 
 Important notes:
 
-- `POSTGRES_PASSWORD` must be set explicitly. There is no weak fallback in Compose anymore.
+- `POSTGRES_PASSWORD` must be set explicitly for production.
 - Redis is the expected backend for Channels, Celery, and cache in containerized runs.
 - `REDIS_URL` is mandatory when `DEBUG=False`.
 - API docs are enabled only when `ENABLE_API_DOCS=True`.
-- `SECURE_SSL_REDIRECT` should stay `False` until you actually terminate TLS in front of Django.
-- For browser/frontend integrations, include both HTTP and HTTPS origins where needed. The default CORS list also includes `http://localhost:3000`.
+- `SECURE_SSL_REDIRECT` should remain `False` until TLS is terminated at a proxy.
+- For browser/frontend integrations, include both HTTP and HTTPS origins where needed.
 - In production-style setups, include HTTPS hosts in both `CSRF_TRUSTED_ORIGINS` and `CORS_ALLOWED_ORIGINS`.
-- `DEYE_*` variables are required for DeyeCloud integrations.
+- `DEYE_*` variables are required for DeyeCloud integrations (keep credentials secret).
 
 ## API Documentation Endpoints
 
@@ -342,6 +329,14 @@ Static file issues:
 4. Add tests if applicable
 5. Submit a pull request
 
+## Acknowledgements and Funding
+
+This project has received funding from the European Union. Project number: **BG-RRP-2.017-0031-C01**.
+
+The content of this repository reflects the views of the authors and is their sole responsibility; it can under no circumstances be regarded as reflecting the position of the European Union.
+
 ## License
 
-This project is part of the RENEW research initiative.
+This project is licensed under the Apache License, Version 2.0. See the `LICENSE` file for details.
+
+Copyright 2026 The RENEW Project contributors
