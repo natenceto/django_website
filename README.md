@@ -1,7 +1,8 @@
 # RENEW
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE) 
-[Project site](https://www.iict.bas.bg/projects/2025/RENEW/index.html)  
+[Project site](https://www.iict.bas.bg/projects/2025/RENEW/index.html)
+
 **Funded by:** European Union — Project number: **BG-RRP-2.017-0031-C01**
 
 RENEW is a Django-based EV charging platform with OCPP 1.6J communication, PostgreSQL persistence, Redis-backed realtime delivery, Celery background tasks, charging analytics, and Deye energy integrations.
