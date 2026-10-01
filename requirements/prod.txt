@@ -19,6 +19,8 @@ whitenoise==6.11.0
 
 # Configuration
 django-environ==0.12.0
+python-json-logger==3.3.0
+concurrent-log-handler>=0.9.28,<1.0
 
 # Validation
 jsonschema==4.4.0

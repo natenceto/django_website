@@ -307,47 +307,113 @@ LOGGING = {
     'version': 1,
     'disable_existing_loggers': False,
     'formatters': {
-        'verbose': {
-            'format': '{levelname} {asctime} {module} {process:d} {thread:d} {message}',
-            'style': '{',
-        },
-        'simple': {
-            'format': '{levelname} {asctime} {module} {message}',
-            'style': '{',
+        'json': {
+            '()': 'pythonjsonlogger.json.JsonFormatter',
+            'fmt': '%(asctime)s %(levelname)s %(name)s %(message)s %(process)d %(thread)d',
         },
     },
     'handlers': {
         'console': {
             'class': 'logging.StreamHandler',
-            'formatter': 'simple',
+            'formatter': 'json',
         },
-        'file': {
-            'class': 'logging.handlers.RotatingFileHandler',
-            'filename': os.path.join(BASE_DIR, 'logs', 'django.log'),
-            'maxBytes': 10485760,  # 10 MB
-            'backupCount': 5,
-            'formatter': 'verbose',
+        'service_file': {
+            'class': 'concurrent_log_handler.ConcurrentRotatingFileHandler',
+            'filename': env('LOG_FILE', default=os.path.join(BASE_DIR, 'logs', 'django.jsonl')),
+            'maxBytes': env.int('LOG_MAX_BYTES', default=10485760),
+            'backupCount': env.int('LOG_BACKUP_COUNT', default=10),
+            'encoding': 'utf-8',
+            'formatter': 'json',
+        },
+        'charging_file': {
+            'class': 'concurrent_log_handler.ConcurrentRotatingFileHandler',
+            'filename': env('CHARGING_LOG_FILE', default=os.path.join(BASE_DIR, 'logs', 'charging-stations.jsonl')),
+            'maxBytes': env.int('LOG_MAX_BYTES', default=10485760),
+            'backupCount': env.int('LOG_BACKUP_COUNT', default=10),
+            'encoding': 'utf-8',
+            'formatter': 'json',
+        },
+        'inverter_file': {
+            'class': 'concurrent_log_handler.ConcurrentRotatingFileHandler',
+            'filename': env('INVERTER_LOG_FILE', default=os.path.join(BASE_DIR, 'logs', 'inverters.jsonl')),
+            'maxBytes': env.int('LOG_MAX_BYTES', default=10485760),
+            'backupCount': env.int('LOG_BACKUP_COUNT', default=10),
+            'encoding': 'utf-8',
+            'formatter': 'json',
         },
     },
     'root': {
-        'handlers': ['console'],
+        'handlers': ['console', 'service_file'],
         'level': 'INFO',
     },
     'loggers': {
         'django': {
-            'handlers': ['console'],
             'level': env('DJANGO_LOG_LEVEL', default='INFO'),
+            'propagate': True,
+        },
+        'celery': {
+            'handlers': ['console', 'service_file'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+        'celery.task': {
+            'handlers': ['console', 'service_file'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+        'celery.beat': {
+            'handlers': ['console', 'service_file'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+        'celery.app.trace': {
+            'handlers': ['console', 'service_file'],
+            'level': 'WARNING',
+            'propagate': False,
+        },
+        'uvicorn': {
+            'handlers': ['console', 'service_file'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+        'uvicorn.error': {
+            'handlers': ['console', 'service_file'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+        'uvicorn.access': {
+            'handlers': ['console', 'service_file'],
+            'level': 'INFO',
             'propagate': False,
         },
         'charging_stations': {
-            'handlers': ['console'],
+            'handlers': ['charging_file'],
             'level': 'DEBUG' if DEBUG else 'INFO',
-            'propagate': False,
+            'propagate': True,
+        },
+        'renew.station': {
+            'handlers': ['charging_file'],
+            'level': 'DEBUG' if DEBUG else 'INFO',
+            'propagate': True,
+        },
+        'renew.ocpp': {
+            'handlers': ['charging_file'],
+            'level': 'DEBUG' if DEBUG else 'INFO',
+            'propagate': True,
+        },
+        'renew_website.apps.charging_stations': {
+            'handlers': ['charging_file'],
+            'level': 'DEBUG' if DEBUG else 'INFO',
+            'propagate': True,
+        },
+        'renew_website.apps.api.deye': {
+            'handlers': ['inverter_file'],
+            'level': 'DEBUG' if DEBUG else 'INFO',
+            'propagate': True,
         },
         'ocpp': {
-            'handlers': ['console'],
             'level': 'WARNING',  # Reduce OCPP library logging (heartbeats, etc.)
-            'propagate': False,
+            'propagate': True,
         },
     },
 }
