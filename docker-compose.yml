@@ -137,7 +137,7 @@ services:
 
   # Centralized application log storage and dashboards
   loki:
-    image: grafana/loki:3.5.0
+    image: grafana/loki:3.5.5
     container_name: renew_loki
     command: -config.file=/etc/loki/loki-config.yml
     volumes:
