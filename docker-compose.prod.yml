@@ -114,7 +114,7 @@ services:
 
   # Persistent log collection and dashboards (Grafana UI defaults to localhost only)
   loki:
-    image: grafana/loki:3.5.0
+    image: grafana/loki:3.5.5
     container_name: renew_loki_prod
     command: -config.file=/etc/loki/loki-config.yml
     volumes:
