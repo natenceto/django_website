@@ -1,0 +1,204 @@
+{
+  "annotations": {"list": []},
+  "editable": true,
+  "graphTooltip": 1,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "datasource": {"type": "loki", "uid": "loki"},
+      "description": "Log lines per second, grouped by service.",
+      "fieldConfig": {"defaults": {"unit": "logs/sec", "color": {"mode": "palette-classic"}}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "id": 1,
+      "options": {"legend": {"displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}},
+      "targets": [{"datasource": {"type": "loki", "uid": "loki"}, "editorMode": "code", "expr": "sum by (service) (rate({job=\"renew-platform\", service=~\"$service\"}[$__interval]))", "queryType": "range", "refId": "A"}],
+      "title": "Log activity by service",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "loki", "uid": "loki"},
+      "description": "Completed Celery task executions by task and status, over the selected time range.",
+      "fieldConfig": {"defaults": {"unit": "short", "color": {"mode": "palette-classic"}}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "id": 2,
+      "options": {"legend": {"displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}},
+      "targets": [{"datasource": {"type": "loki", "uid": "loki"}, "editorMode": "code", "expr": "sum by (task_name, task_state) (count_over_time({job=\"renew-platform\", service=\"celery-worker\", task_name=~\"$task_name\", event_type=\"celery_task_finished\"}[$__interval]))", "queryType": "range", "refId": "A"}],
+      "title": "Task completions by state",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "loki", "uid": "loki"},
+      "description": "95th percentile task runtime, in seconds, over the selected time range.",
+      "fieldConfig": {"defaults": {"unit": "s", "decimals": 3, "color": {"mode": "palette-classic"}}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+      "id": 3,
+      "options": {"legend": {"displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}},
+      "targets": [{"datasource": {"type": "loki", "uid": "loki"}, "editorMode": "code", "expr": "quantile_over_time(0.95, {job=\"renew-platform\", service=\"celery-worker\", task_name=~\"$task_name\", event_type=\"celery_task_finished\"} | json runtime_seconds=\"runtime_seconds\" | unwrap runtime_seconds | __error__=\"\" [$__interval])", "queryType": "range", "refId": "A"}],
+      "title": "Celery task runtime — p95",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "loki", "uid": "loki"},
+      "description": "Failed task events, grouped by task name.",
+      "fieldConfig": {"defaults": {"unit": "short", "color": {"mode": "palette-classic"}}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+      "id": 4,
+      "options": {"legend": {"displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}},
+      "targets": [{"datasource": {"type": "loki", "uid": "loki"}, "editorMode": "code", "expr": "sum by (task_name) (count_over_time({job=\"renew-platform\", service=\"celery-worker\", task_name=~\"$task_name\", event_type=\"celery_task_failed\"}[$__interval]))", "queryType": "range", "refId": "A"}],
+      "title": "Failed Celery tasks",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "loki", "uid": "loki"},
+      "description": "Error and critical log volume across the selected services.",
+      "fieldConfig": {"defaults": {"unit": "short", "color": {"mode": "palette-classic"}}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16},
+      "id": 6,
+      "options": {"legend": {"displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}},
+      "targets": [{"datasource": {"type": "loki", "uid": "loki"}, "editorMode": "code", "expr": "sum by (service, level) (count_over_time({job=\"renew-platform\", service=~\"$service\", level=~\"ERROR|CRITICAL\"}[$__interval]))", "queryType": "range", "refId": "A"}],
+      "title": "Errors and critical events",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "loki", "uid": "loki"},
+      "description": "OCPP log volume grouped by station logger. Filter by station ID using the Station filter above.",
+      "fieldConfig": {"defaults": {"unit": "logs/sec", "color": {"mode": "palette-classic"}}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16},
+      "id": 7,
+      "options": {"legend": {"displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}},
+      "targets": [{"datasource": {"type": "loki", "uid": "loki"}, "editorMode": "code", "expr": "sum by (logger) (rate({job=\"renew-platform\", service=\"charging-stations\"} | json logger=\"name\" | logger=~\"renew\\.station\\.${station_id}\" [$__interval]))", "queryType": "range", "refId": "A"}],
+      "title": "Charging station / OCPP activity",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "loki", "uid": "loki"},
+      "description": "Deye telemetry task runtime. This is distinct from inverter log details shown below.",
+      "fieldConfig": {"defaults": {"unit": "s", "decimals": 3, "color": {"mode": "palette-classic"}}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 24},
+      "id": 8,
+      "options": {"legend": {"displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}},
+      "targets": [{"datasource": {"type": "loki", "uid": "loki"}, "editorMode": "code", "expr": "quantile_over_time(0.95, {job=\"renew-platform\", service=\"celery-worker\", task_name=\"renew_website.apps.api.deye.tasks.fetch_inverter_telemetry\", event_type=\"celery_task_finished\"} | json runtime_seconds=\"runtime_seconds\" | unwrap runtime_seconds | __error__=\"\" [$__interval])", "queryType": "range", "refId": "A"}],
+      "title": "Inverter telemetry task runtime — p95",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "loki", "uid": "loki"},
+      "description": "Actual charging power reported in meter values, grouped by station ID.",
+      "fieldConfig": {"defaults": {"unit": "kw", "decimals": 2, "color": {"mode": "palette-classic"}}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 32},
+      "id": 10,
+      "options": {"legend": {"displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}},
+      "targets": [{"datasource": {"type": "loki", "uid": "loki"}, "editorMode": "code", "expr": "avg_over_time({job=\"renew-platform\", service=\"charging-stations\", event_type=\"charging_meter_value_processed\"} | json station_id=\"station_id\", power_kw=\"power_kw\" | station_id=~\"${station_id}\" | unwrap power_kw | __error__=\"\" [$__interval])", "queryType": "range", "refId": "A"}],
+      "title": "Charging power by station",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "loki", "uid": "loki"},
+      "gridPos": {"h": 12, "w": 12, "x": 12, "y": 24},
+      "id": 5,
+      "options": {"dedupStrategy": "none", "enableInfiniteScrolling": false, "showCommonLabels": false, "showLabels": true, "showTime": true, "sortOrder": "Descending", "wrapLogMessage": true},
+      "targets": [{"datasource": {"type": "loki", "uid": "loki"}, "editorMode": "code", "expr": "{job=\"renew-platform\", service=~\"$service\", level=~\"$level\"} | json | line_format \"{{.levelname}} {{.name}} {{.message}} task={{.task_name}} state={{.task_state}} runtime={{.runtime_seconds}}s\"", "queryType": "range", "refId": "A"}],
+      "title": "Recent application logs",
+      "type": "logs"
+    },
+    {
+      "datasource": {"type": "loki", "uid": "loki"},
+      "gridPos": {"h": 12, "w": 12, "x": 12, "y": 32},
+      "id": 9,
+      "options": {"dedupStrategy": "none", "enableInfiniteScrolling": false, "showCommonLabels": false, "showLabels": true, "showTime": true, "sortOrder": "Descending", "wrapLogMessage": true},
+      "targets": [{"datasource": {"type": "loki", "uid": "loki"}, "editorMode": "code", "expr": "{job=\"renew-platform\", service=\"inverters\"} | json | line_format \"{{.levelname}} {{.name}} {{.message}}\"", "queryType": "range", "refId": "A"}],
+      "title": "Deye / inverter logs",
+      "type": "logs"
+    },
+    {
+      "datasource": {"type": "loki", "uid": "loki"},
+      "description": "PV generation reported by inverter telemetry.",
+      "fieldConfig": {"defaults": {"unit": "kw", "decimals": 2, "color": {"mode": "palette-classic"}}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 40},
+      "id": 11,
+      "options": {"legend": {"displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}},
+      "targets": [{"datasource": {"type": "loki", "uid": "loki"}, "editorMode": "code", "expr": "avg_over_time({job=\"renew-platform\", service=\"inverters\", event_type=\"inverter_telemetry_received\"} | json pv_power_kw=\"pv_power_kw\" | unwrap pv_power_kw | __error__=\"\" [$__interval])", "queryType": "range", "refId": "A"}],
+      "title": "PV generation",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "loki", "uid": "loki"},
+      "description": "Battery state of charge reported by inverter telemetry.",
+      "fieldConfig": {"defaults": {"unit": "percent", "min": 0, "max": 100, "decimals": 1, "color": {"mode": "palette-classic"}}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 40},
+      "id": 12,
+      "options": {"legend": {"displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}},
+      "targets": [{"datasource": {"type": "loki", "uid": "loki"}, "editorMode": "code", "expr": "avg_over_time({job=\"renew-platform\", service=\"inverters\", event_type=\"inverter_telemetry_received\"} | json battery_soc_pct=\"battery_soc_pct\" | unwrap battery_soc_pct | __error__=\"\" [$__interval])", "queryType": "range", "refId": "A"}],
+      "title": "Battery state of charge",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": ["renew", "logs", "celery", "charging", "inverter"],
+  "templating": {
+    "list": [
+      {
+        "current": {"selected": true, "text": "All", "value": "$__all"},
+        "datasource": {"type": "loki", "uid": "loki"},
+        "definition": "label_values({job=\"renew-platform\"}, level)",
+        "includeAll": true,
+        "label": "Log level",
+        "multi": true,
+        "name": "level",
+        "options": [],
+        "query": {"label": "level", "refId": "LokiVariableQueryEditor-VariableQuery", "stream": "{job=\"renew-platform\"}", "type": 1},
+        "refresh": 2,
+        "regex": "",
+        "sort": 1,
+        "type": "query"
+      },
+      {
+        "current": {"text": ".*", "value": ".*"},
+        "description": "Regular expression for the station ID in logger names such as renew.station.17. Use .* for all stations.",
+        "label": "Station ID (regex)",
+        "name": "station_id",
+        "options": [],
+        "query": ".*",
+        "type": "textbox"
+      },
+      {
+        "current": {"selected": true, "text": "All", "value": "$__all"},
+        "datasource": {"type": "loki", "uid": "loki"},
+        "definition": "label_values({job=\"renew-platform\"}, service)",
+        "includeAll": true,
+        "label": "Service",
+        "multi": true,
+        "name": "service",
+        "options": [],
+        "query": {"label": "service", "refId": "LokiVariableQueryEditor-VariableQuery", "stream": "{job=\"renew-platform\"}", "type": 1},
+        "refresh": 2,
+        "regex": "",
+        "sort": 1,
+        "type": "query"
+      },
+      {
+        "current": {"selected": true, "text": "All", "value": "$__all"},
+        "datasource": {"type": "loki", "uid": "loki"},
+        "definition": "label_values({job=\"renew-platform\", service=\"celery-worker\"}, task_name)",
+        "includeAll": true,
+        "label": "Celery task",
+        "multi": true,
+        "name": "task_name",
+        "options": [],
+        "query": {"label": "task_name", "refId": "LokiVariableQueryEditor-VariableQuery", "stream": "{job=\"renew-platform\", service=\"celery-worker\"}", "type": 1},
+        "refresh": 2,
+        "regex": "",
+        "sort": 1,
+        "type": "query"
+      }
+    ]
+  },
+  "time": {"from": "now-6h", "to": "now"},
+  "timepicker": {"refresh_intervals": ["10s", "30s", "1m", "5m", "15m", "1h"]},
+  "timezone": "browser",
+  "title": "RENEW — System Logs & Celery",
+  "uid": "renew-system-logs",
+  "version": 2
+}

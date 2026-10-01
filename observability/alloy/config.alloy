@@ -1,0 +1,45 @@
+local.file_match "renew_platform_logs" {
+  path_targets = [
+    { __path__ = "/var/log/renew/web.jsonl*", job = "renew-platform", service = "web" },
+    { __path__ = "/var/log/renew/celery-worker.jsonl*", job = "renew-platform", service = "celery-worker" },
+    { __path__ = "/var/log/renew/celery-beat.jsonl*", job = "renew-platform", service = "celery-beat" },
+    { __path__ = "/var/log/renew/flower.jsonl*", job = "renew-platform", service = "flower" },
+    { __path__ = "/var/log/renew/charging-stations.jsonl*", job = "renew-platform", service = "charging-stations" },
+    { __path__ = "/var/log/renew/inverters.jsonl*", job = "renew-platform", service = "inverters" },
+  ]
+  sync_period = "5s"
+}
+
+loki.source.file "renew_platform_logs" {
+  targets    = local.file_match.renew_platform_logs.targets
+  forward_to = [loki.process.renew_platform_logs.receiver]
+}
+
+loki.process "renew_platform_logs" {
+  stage.json {
+    expressions = {
+      level       = "levelname",
+      logger      = "name",
+      event_type  = "event_type",
+      task_name   = "task_name",
+      task_state  = "task_state",
+    }
+  }
+
+  stage.labels {
+    values = {
+      level      = "level",
+      event_type = "event_type",
+      task_name  = "task_name",
+      task_state = "task_state",
+    }
+  }
+
+  forward_to = [loki.write.local.receiver]
+}
+
+loki.write "local" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}

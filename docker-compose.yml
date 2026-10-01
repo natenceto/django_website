@@ -70,6 +70,7 @@ services:
       start_period: 15s
     environment:
       <<: *django-common-env
+      LOG_FILE: /app/logs/web.jsonl
       DEBUG: 1
       RUN_DB_MIGRATIONS: 1
       RUN_COLLECTSTATIC: 1
@@ -85,11 +86,12 @@ services:
     build: .
     container_name: renew_celery_worker
     restart: unless-stopped
-    command: celery -A renew_website worker --loglevel=info
+    command: celery -A renew_website worker --loglevel=info --events
     volumes:
       - .:/app
     environment:
       <<: *django-common-env
+      LOG_FILE: /app/logs/celery-worker.jsonl
       DEBUG: 1
       RUN_DB_MIGRATIONS: 0
       RUN_COLLECTSTATIC: 0
@@ -108,6 +110,7 @@ services:
       - .:/app
     environment:
       <<: *django-common-env
+      LOG_FILE: /app/logs/celery-beat.jsonl
       DEBUG: 1
       RUN_DB_MIGRATIONS: 0
       RUN_COLLECTSTATIC: 0
@@ -120,19 +123,73 @@ services:
   flower:
     build: .
     container_name: renew_flower
-    restart: unless-stopped
-    command: celery -A renew_website flower --port=5555
+    command: celery -A renew_website flower --address=0.0.0.0 --port=5555
     volumes:
       - .:/app
     ports:
-      - "127.0.0.1:5555:5555"
+      - "5555:5555"
     environment:
-      <<: *django-common-env
+      - POSTGRES_DB=${POSTGRES_DB:-renew_db}
+      - POSTGRES_USER=${POSTGRES_USER:-renew_user}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-changeme}
+      - POSTGRES_HOST=db
+      - POSTGRES_PORT=5432
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - LOG_FILE=/app/logs/flower.jsonl
     depends_on:
       - redis
       - celery
+
+  # Centralized application log storage and dashboards
+  loki:
+    image: grafana/loki:3.5.0
+    container_name: renew_loki
+    command: -config.file=/etc/loki/loki-config.yml
+    volumes:
+      - ./observability/loki/loki-config.yml:/etc/loki/loki-config.yml:ro
+      - loki_data:/loki
+    restart: unless-stopped
+
+  alloy:
+    image: grafana/alloy:v1.8.3
+    container_name: renew_alloy
+    command:
+      - run
+      - --server.http.listen-addr=0.0.0.0:12345
+      - --storage.path=/var/lib/alloy/data
+      - /etc/alloy/config.alloy
+    volumes:
+      - ./observability/alloy/config.alloy:/etc/alloy/config.alloy:ro
+      - ./logs:/var/log/renew:ro
+      - alloy_data:/var/lib/alloy/data
+    depends_on:
+      - loki
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:11.6.0
+    container_name: renew_grafana
+    ports:
+      - "${GRAFANA_BIND_IP:-127.0.0.1}:${GRAFANA_PORT:-3000}:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./observability/grafana/provisioning/datasources/loki.yml:/etc/grafana/provisioning/datasources/loki.yml:ro
+      - ./observability/grafana/provisioning/dashboards/dashboards.yml:/etc/grafana/provisioning/dashboards/dashboards.yml:ro
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - loki
+    restart: unless-stopped
 
 volumes:
   postgres_data:
   redis_data:
   static_volume:
+  loki_data:
+  grafana_data:
+  alloy_data:

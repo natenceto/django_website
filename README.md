@@ -168,6 +168,13 @@ The development stack behavior is:
 
 - Django app on `http://localhost:8000` (may also be reachable on a local network address if you configure `ALLOWED_HOSTS` accordingly)
 - PostgreSQL and Redis are typically published on localhost for local development; bind addresses and ports are configurable via the Compose file or environment variables.
+- Flower available on port `5555` (Celery task/worker monitoring)
+- Grafana on `http://localhost:3000`; Loki and Alloy run as background Compose services
+- Grafana's RENEW dashboard is provisioned automatically with service/task filters, error counts, Celery/Deye runtime panels, and log views
+
+The Grafana UI is a separate authenticated application, not embedded in Django. The Django navigation opens it in a new tab. Grafana binds to `127.0.0.1` by default. For access from another LAN computer, set a strong unique `GRAFANA_ADMIN_PASSWORD` in `.env` and set `GRAFANA_BIND_IP` to this host's LAN IP; then recreate the Grafana container with `docker compose up -d --force-recreate grafana`. Do not expose Grafana with the development default password. If the Grafana data volume already exists, changing the environment password does not change the existing Grafana admin password; change it in Grafana's UI or reset it explicitly.
+
+The raw JSONL files remain under `logs/` on the host and can be opened in a text editor. Grafana/Loki history is kept in named Docker volumes; `docker compose down` preserves it, while `docker compose down -v` deletes it.
 
 ## Production-Style Docker Workflow
 

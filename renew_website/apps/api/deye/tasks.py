@@ -58,6 +58,18 @@ def fetch_inverter_telemetry():
             data_dict=data
         )
 
+        logger.info(
+            "Deye inverter telemetry received",
+            extra={
+                "event_type": "inverter_telemetry_received",
+                "pv_power_kw": float(inverter_comp.pv_production_kw),
+                "battery_soc_pct": float(battery_comp.soc_percentage),
+                "building_load_kw": float(inverter_comp.building_load_kw),
+                "battery_power_kw": float(battery_comp.power_kw),
+                "grid_voltage_v": float(inverter_comp.grid_voltage),
+            },
+        )
+
         logger.debug(f"Прочетени данни от Deye: PV={inverter_comp.pv_production_kw}kW, SOC={battery_comp.soc_percentage}%")
         
     except DeyeManagerError as e:

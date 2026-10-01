@@ -119,7 +119,10 @@ resolve_compose_cmd() {
 
 run_docker_setup() {
     echo "--> Building and starting Docker services..."
-    (cd "$PROJECT_ROOT" && $COMPOSE_CMD up --build -d)
+    if ! (cd "$PROJECT_ROOT" && $COMPOSE_CMD up --build -d); then
+        echo "Error: Docker Compose could not start the services. Review the error above and run: $COMPOSE_CMD ps -a"
+        return 1
+    fi
 
     echo "--> Waiting for database container to initialize..."
     sleep 5
@@ -160,6 +163,10 @@ run_docker_setup() {
     echo ""
     echo "=== Installation Complete ==="
     echo "Application URL: http://localhost:8000"
+    echo "Celery monitoring (Flower): http://localhost:5555"
+    echo "System logs and dashboards (Grafana): http://localhost:3000"
+    echo "Grafana credentials are configured with GRAFANA_ADMIN_USER/GRAFANA_ADMIN_PASSWORD in .env."
+    echo "For LAN access, set GRAFANA_BIND_IP to this host's LAN IP and use a strong Grafana password."
     echo "Logs: $COMPOSE_CMD logs -f"
     echo "Stop: $COMPOSE_CMD down"
 }
@@ -183,7 +190,9 @@ main() {
     fi
 
     if resolve_compose_cmd; then
-        run_docker_setup
+        if ! run_docker_setup; then
+            finish 1
+        fi
         echo ""
         echo "To activate the same virtual environment in your current terminal later, run:"
         echo "source .venv/bin/activate"

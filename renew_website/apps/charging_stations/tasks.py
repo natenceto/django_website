@@ -127,6 +127,18 @@ def process_meter_values(station_id, connector_id, transaction_id, power_w, ener
             station_id=station_id,
             station_comp=station_comp
         )
+
+        logger.info(
+            "Charging station meter sample processed",
+            extra={
+                "event_type": "charging_meter_value_processed",
+                "station_id": int(str(station_id)),
+                "connector_id": int(connector_id) if connector_id else None,
+                "power_kw": float(power_w or 0) / 1000.0,
+                "energy_wh": float(energy_wh or 0),
+                "soc_percentage": float(soc_percentage) if soc_percentage is not None else None,
+            },
+        )
         
         logger.debug(f"Обработени данни за станция {station_id}: {power_w}W, {energy_wh}Wh")
 
